@@ -43,7 +43,7 @@ dotnet build ProfOMat.slnx                                   # Warnungen sind Fe
 dotnet test --project tests\ProfOMat.Domain.Tests
 dotnet test --project tests\ProfOMat.Application.Tests
 node tests\Signatur\signatur-test.mjs                        # Schlüsselformate (braucht openssl)
-node testsBrowserblauf.mjs http://localhost:5310 <Ordner> # Drittprüfung im Headless-Edge, Instanz muss laufen
+node tests\Browserblauf.mjs http://localhost:5310 <Ordner>  # Drittprüfung im Headless-Edge, Instanz muss laufen
 node tests\Browser\klausur.mjs http://localhost:5310 <Ordner> # Klausurablauf (frische Datenbank)
 ```
 
