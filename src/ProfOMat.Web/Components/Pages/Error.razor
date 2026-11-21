@@ -1,0 +1,21 @@
+@page "/Error"
+@attribute [AllowAnonymous]
+@attribute [ExcludeFromInteractiveRouting]
+@layout LeeresLayout
+@using System.Diagnostics
+
+<PageTitle>Fehler · ProfOMat</PageTitle>
+
+<div class="pm-login">
+    <h1>Es ist ein Fehler aufgetreten</h1>
+    <p>Bitte noch einmal versuchen. Bleibt der Fehler, diese Kennung an die Systemverwaltung geben:</p>
+    <p><code>@RequestId</code></p>
+    <a href="">Zur Startseite</a>
+</div>
+
+@code {
+    [CascadingParameter]
+    private HttpContext? HttpContext { get; set; }
+
+    private string? RequestId => Activity.Current?.Id ?? HttpContext?.TraceIdentifier;
+}

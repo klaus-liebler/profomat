@@ -1,0 +1,152 @@
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
+using ProfOMat.Domain.Betrieb;
+using ProfOMat.Domain.Drittpruefung;
+using ProfOMat.Domain.Katalog;
+using ProfOMat.Domain.Konten;
+
+namespace ProfOMat.Infrastructure.Datenbank;
+
+/// <summary>
+/// EF Core + SQLite. Entwicklungsphase: Schema per EnsureCreated (wie VibeVHS); vor dem ersten Produktivbetrieb werden
+/// EF-Migrationen eingeführt. Zeitpunkte als UTC-Millisekunden (sortier- und vergleichbar in SQLite), Enums als Text.
+/// </summary>
+public sealed class ProfOMatDbContext(DbContextOptions<ProfOMatDbContext> optionen) : DbContext(optionen)
+{
+    /// <summary>Erhöhen, wenn sich das Modell ändert: eine ältere Datei wird dann beim Start abgelehnt (statt still falsch zu laufen).</summary>
+    public const int Schemaversion = 1;
+
+    protected override void ConfigureConventions(ModelConfigurationBuilder konventionen)
+    {
+        ArgumentNullException.ThrowIfNull(konventionen);
+        konventionen.Properties<DateTimeOffset>().HaveConversion<UtcMillisekunden>();
+        konventionen.Properties<Enum>().HaveConversion<string>().HaveMaxLength(40);
+    }
+
+    protected override void OnModelCreating(ModelBuilder m)
+    {
+        ArgumentNullException.ThrowIfNull(m);
+
+        m.Entity<Konto>(e =>
+        {
+            e.ToTable("Konten");
+            e.HasKey(k => k.Id);
+            e.HasIndex(k => k.Kennung).IsUnique();
+            e.Ignore(k => k.Anzeigename);
+            e.Ignore(k => k.Sortiername);
+            e.HasMany(k => k.Rollen).WithOne().HasForeignKey(r => r.KontoId).OnDelete(DeleteBehavior.Cascade);
+            e.Navigation(k => k.Rollen).AutoInclude().UsePropertyAccessMode(PropertyAccessMode.Field);
+            e.HasMany(k => k.Schluessel).WithOne().HasForeignKey(s => s.KontoId).OnDelete(DeleteBehavior.Cascade);
+            e.Navigation(k => k.Schluessel).AutoInclude().UsePropertyAccessMode(PropertyAccessMode.Field);
+        });
+        m.Entity<KontoRolle>(e =>
+        {
+            e.ToTable("KontoRollen");
+            e.HasKey(r => new { r.KontoId, r.Rolle });
+        });
+        m.Entity<HinterlegterSchluessel>(e =>
+        {
+            e.ToTable("Signaturschluessel");
+            e.HasKey(s => s.Id);
+            e.HasIndex(s => s.Fingerabdruck);
+        });
+
+        m.Ignore<Katalogeintrag>();   // keine gemeinsame Tabelle: Studiengänge und Prüfungen sind je eigene Wurzeln
+        m.Entity<Fakultaet>(e =>
+        {
+            e.ToTable("Fakultaeten");
+            e.HasKey(f => f.Id);
+            e.HasIndex(f => f.Kuerzel).IsUnique();
+        });
+        m.Entity<Studiengang>(e =>
+        {
+            e.ToTable("Studiengaenge");
+            e.HasKey(s => s.Id);
+            e.HasIndex(s => s.Schluessel).IsUnique();
+            e.HasIndex(s => s.AltSeit);
+            e.Ignore(s => s.Anzeige);
+            e.Ignore(s => s.IstAlt);
+            e.HasOne<Fakultaet>().WithMany().HasForeignKey(s => s.FakultaetId).OnDelete(DeleteBehavior.Restrict);
+        });
+        m.Entity<Pruefung>(e =>
+        {
+            e.ToTable("Pruefungen");
+            e.HasKey(p => p.Id);
+            e.HasIndex(p => new { p.StudiengangId, p.Schluessel }).IsUnique();
+            e.Ignore(p => p.Anzeige);
+            e.Ignore(p => p.IstAlt);
+            e.HasOne<Studiengang>().WithMany().HasForeignKey(p => p.StudiengangId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        m.Entity<Antrag>(e =>
+        {
+            e.ToTable("Drittpruefungen");
+            e.HasKey(a => a.Id);
+            e.HasIndex(a => a.Nummer).IsUnique();
+            e.HasIndex(a => a.Status);
+            e.HasIndex(a => a.ErstpruefendeKontoId);
+            e.Ignore(a => a.Name);
+            e.Ignore(a => a.GueltigeSignaturen);
+            e.Ignore(a => a.LetzteGueltigeSignatur);
+            e.Ignore(a => a.AktuelleFestlegung);
+            e.HasOne<Studiengang>().WithMany().HasForeignKey(a => a.StudiengangId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne<Pruefung>().WithMany().HasForeignKey(a => a.PruefungId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne<Konto>().WithMany().HasForeignKey(a => a.ErstpruefendeKontoId).OnDelete(DeleteBehavior.Restrict);
+            e.HasMany(a => a.Signaturen).WithOne().HasForeignKey(s => s.AntragId).OnDelete(DeleteBehavior.Restrict);
+            e.Navigation(a => a.Signaturen).AutoInclude().UsePropertyAccessMode(PropertyAccessMode.Field);
+        });
+        m.Entity<Signatur>(e =>
+        {
+            e.ToTable("Signaturen");
+            e.HasKey(s => s.Id);
+            e.Ignore(s => s.SiegelText);
+        });
+
+        m.Entity<Nachricht>(e =>
+        {
+            e.ToTable("Postausgang");
+            e.HasKey(n => n.Id);
+            e.HasIndex(n => n.Versandt);
+            e.Ignore(n => n.Aufgegeben);
+        });
+        m.Entity<Dokument>(e =>
+        {
+            e.ToTable("Dokumente");
+            e.HasKey(d => d.Id);
+            e.HasIndex(d => d.AntragId);
+        });
+        m.Entity<Protokolleintrag>(e =>
+        {
+            e.ToTable("Protokoll");
+            e.HasKey(p => p.Id);
+            e.HasIndex(p => p.Zeitpunkt);
+        });
+        m.Entity<Schemainfo>(e =>
+        {
+            e.ToTable("Schemainfo");
+            e.HasKey(s => s.Id);
+        });
+
+        // Ids vergibt die Anwendung (UUIDv7): neue Einträge in Sammlungen sonst fälschlich als „geändert“ statt „neu“ erkannt.
+        foreach (var typ in m.Model.GetEntityTypes())
+        {
+            if (typ.FindProperty("Id") is { } id && id.ClrType == typeof(Guid))
+            {
+                id.ValueGenerated = Microsoft.EntityFrameworkCore.Metadata.ValueGenerated.Never;
+            }
+        }
+    }
+
+    /// <summary>DateTimeOffset ↔ UTC-Millisekunden seit 1970.</summary>
+    private sealed class UtcMillisekunden() : ValueConverter<DateTimeOffset, long>(
+        v => v.ToUnixTimeMilliseconds(),
+        v => DateTimeOffset.FromUnixTimeMilliseconds(v));
+}
+
+/// <summary>Eine Zeile: Schemaversion der Datei.</summary>
+public sealed class Schemainfo
+{
+    public int Id { get; set; } = 1;
+
+    public int Version { get; set; }
+}

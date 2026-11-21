@@ -1,0 +1,30 @@
+@*
+    „Nächste sinnvolle Schritte“: nach jeder Aktion die naheliegenden Folgeschritte anbieten (wie VibeVHS).
+*@
+@if (Schritte.Count > 0)
+{
+    <section class="pm-next" aria-label="@Titel">
+        <h3>@Titel</h3>
+        <div class="pm-row">
+            @foreach (var s in Schritte)
+            {
+                @if (s.Freigabe is { Erlaubt: false } nein)
+                {
+                    <span class="pm-why" tabindex="0" data-why="@nein.Begruendung"><span class="pm-btn" aria-disabled="true">@s.Titel</span></span>
+                }
+                else
+                {
+                    <a class="@(s.Hauptschritt ? "pm-btn pm-btn-haupt" : "pm-btn")" href="@s.Ziel" title="@s.Hinweis" data-enhance-nav="@(s.Ziel.EndsWith("pdf", StringComparison.Ordinal) ? "false" : null)" target="@(s.Ziel.EndsWith("pdf", StringComparison.Ordinal) ? "_blank" : null)">@s.Titel</a>
+                }
+            }
+        </div>
+    </section>
+}
+
+@code {
+    [Parameter]
+    public string Titel { get; set; } = "Nächste sinnvolle Schritte";
+
+    [Parameter, EditorRequired]
+    public IReadOnlyList<NaechsterSchritt> Schritte { get; set; } = [];
+}

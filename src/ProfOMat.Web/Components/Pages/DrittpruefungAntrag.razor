@@ -1,0 +1,205 @@
+@page "/drittpruefung/antrag"
+@attribute [AllowAnonymous]
+@using ProfOMat.Application.Katalog
+@using ProfOMat.Application.Konten
+@using ProfOMat.Domain.Katalog
+@inject Vorgang Vorgang
+
+<PageTitle>Antrag auf mündliche Drittprüfung · ProfOMat</PageTitle>
+
+<div class="pm-head">
+    <div>
+        <h1>Antrag auf mündliche Prüfung im dritten Versuch</h1>
+        <p>Die zweite Wiederholung einer schriftlichen Prüfung ist auf Antrag als mündliche Prüfung abzulegen (ATPO § 18 Abs. 1 Satz 3).
+            Der Antrag ist bis zum Ende des regulären Prüfungsanmeldezeitraums zu stellen (Satz 4). Die mündliche Prüfung findet mit zwei Prüfenden statt.</p>
+    </div>
+</div>
+
+<div class="pm-schritte" aria-label="Fortschritt">
+    <span class="@(schritt == 1 ? "on" : "fertig")">1 · Angaben</span>
+    <span class="@(schritt == 2 ? "on" : schritt > 2 ? "fertig" : "")">2 · Prüfen und unterschreiben</span>
+    <span class="@(schritt == 3 ? "on" : "")">3 · Mailadresse bestätigen</span>
+</div>
+
+@if (fehler is not null)
+{
+    <div class="pm-alert pm-crit" role="alert">@fehler</div>
+}
+
+@if (schritt == 1)
+{
+    <section class="pm-card">
+        <h2>Ihre Angaben</h2>
+        <div class="pm-fields">
+            <div class="pm-field">
+                <label class="pm-lbl" for="vorname">Vorname</label>
+                <input id="vorname" class="pm-input" @bind="vorname" autocomplete="given-name" />
+            </div>
+            <div class="pm-field">
+                <label class="pm-lbl" for="nachname">Nachname</label>
+                <input id="nachname" class="pm-input" @bind="nachname" autocomplete="family-name" />
+            </div>
+            <div class="pm-field">
+                <label class="pm-lbl" for="matrikel">Matrikelnummer</label>
+                <input id="matrikel" class="pm-input" @bind="matrikel" inputmode="numeric" />
+            </div>
+            <div class="pm-field">
+                <label class="pm-lbl" for="email">Hochschul-Mailadresse</label>
+                <input id="email" class="pm-input" type="email" @bind="email" autocomplete="email" />
+                <span class="pm-hilfe">An diese Adresse geht der Bestätigungslink.</span>
+            </div>
+        </div>
+    </section>
+
+    <section class="pm-card">
+        <h2>Prüfung</h2>
+        <div class="pm-fields">
+            <div class="pm-field">
+                <label class="pm-lbl">Studiengang</label>
+                <RadzenDropDown TValue="Guid?" Data="@studiengaenge" TextProperty="@nameof(Studiengang.Anzeige)" ValueProperty="@nameof(Studiengang.Id)"
+                                Value="@studiengangId" ValueChanged="@((Guid? v) => StudiengangGewaehltAsync(v))" AllowFiltering="true"
+                                FilterCaseSensitivity="FilterCaseSensitivity.CaseInsensitive" Placeholder="Studiengang wählen …" Style="width:100%" />
+                <label class="pm-check pm-small"><input type="checkbox" checked="@alteStudiengaenge" @onchange="AlteStudiengaengeAsync" /> auch ältere Prüfungsordnungen anzeigen</label>
+            </div>
+            <div class="pm-field">
+                <label class="pm-lbl">Prüfung</label>
+                <RadzenDropDown TValue="Guid?" Data="@pruefungen" TextProperty="@nameof(Pruefung.Anzeige)" ValueProperty="@nameof(Pruefung.Id)"
+                                @bind-Value="pruefungId" AllowFiltering="true" FilterCaseSensitivity="FilterCaseSensitivity.CaseInsensitive"
+                                Disabled="@(studiengangId is null)" Placeholder="@(studiengangId is null ? "zuerst Studiengang wählen" : "Prüfung wählen …")" Style="width:100%" />
+                <label class="pm-check pm-small"><input type="checkbox" checked="@altePruefungen" @onchange="AltePruefungenAsync" /> auch alte Prüfungen anzeigen</label>
+            </div>
+            <div class="pm-field pm-field-weit">
+                <label class="pm-lbl">Gewünschte Erstprüferin bzw. gewünschter Erstprüfer</label>
+                <RadzenDropDown TValue="Guid?" Data="@pruefende" TextProperty="@nameof(Konto.Sortiername)" ValueProperty="@nameof(Konto.Id)"
+                                @bind-Value="erstpruefendeId" AllowFiltering="true" FilterCaseSensitivity="FilterCaseSensitivity.CaseInsensitive"
+                                Placeholder="Name eingeben …" Style="width:100%;max-width:520px" />
+                <span class="pm-hilfe">Sie bekommt bzw. er bekommt Ihren Antrag nach der Bestätigung Ihrer Mailadresse per Mail.</span>
+            </div>
+        </div>
+    </section>
+
+    <section class="pm-card">
+        <h2>Wünsche</h2>
+        <div class="pm-fields">
+            <div class="pm-field">
+                <label class="pm-lbl" for="termine">Terminliche Einschränkungen und Wünsche</label>
+                <textarea id="termine" class="pm-textarea" @bind="terminwuensche" maxlength="2000"
+                          placeholder="z. B. nicht montags; ab dem 10. vormittags; Praxissemester in …"></textarea>
+            </div>
+            <div class="pm-field">
+                <label class="pm-lbl" for="zweit">Wunsch für die Zweitprüferin bzw. den Zweitprüfer (optional)</label>
+                <textarea id="zweit" class="pm-textarea" @bind="zweitwunsch" maxlength="2000"></textarea>
+                <span class="pm-hilfe">Dem Vorschlag soll entsprochen werden, soweit keine triftigen Gründe entgegenstehen (ATPO § 24 Abs. 4).</span>
+            </div>
+        </div>
+        <div class="pm-row">
+            <BegruendeterButton Text="Weiter: prüfen und unterschreiben" Haupt="true" Beschaeftigt="@beschaeftigt" Click="WeiterAsync" />
+        </div>
+    </section>
+}
+else if (schritt == 2 && entwurf is not null)
+{
+    <Unterschreiben Text="@entwurf.Text" Titel="Antrag prüfen und unterschreiben" Unterzeichner="@($"{entwurf.Angaben.Vorname} {entwurf.Angaben.Nachname}")"
+                    Knopftext="Unterschreiben und einreichen" Beschaeftigt="@beschaeftigt" Unterschrieben="EinreichenAsync">
+        <button type="button" class="pm-btn" @onclick="() => { schritt = 1; fehler = null; }">Zurück zu den Angaben</button>
+    </Unterschreiben>
+}
+else if (schritt == 3)
+{
+    <section class="pm-card">
+        <h2>Fast geschafft: Bitte Ihre Mailadresse bestätigen</h2>
+        <div class="pm-alert pm-gut">
+            Ihr Antrag <b>@nummer</b> ist unterschrieben eingegangen. Wir haben eine Mail an <b>@email</b> geschickt.
+            Erst wenn Sie den Link darin anklicken, geht der Antrag an die gewählte Erstprüferin bzw. den gewählten Erstprüfer.
+        </div>
+        <p class="pm-muted">Über denselben Link sehen Sie später den Stand, den Termin und das unterschriebene Dokument. Ohne Bestätigung verfällt der Antrag nach einer Woche.</p>
+    </section>
+}
+
+@code {
+    private int schritt = 1;
+    private string? fehler;
+    private bool beschaeftigt;
+    private string vorname = "", nachname = "", matrikel = "", email = "";
+    private string? terminwuensche, zweitwunsch;
+    private Guid? studiengangId, pruefungId, erstpruefendeId;
+    private bool alteStudiengaenge, altePruefungen;
+    private IReadOnlyList<Studiengang> studiengaenge = [];
+    private IReadOnlyList<Pruefung> pruefungen = [];
+    private IReadOnlyList<Konto> pruefende = [];
+    private Antragsentwurf? entwurf;
+    private string? nummer;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Vorgang.AusfuehrenAsync(async d =>
+        {
+            studiengaenge = await d.GetRequiredService<KatalogDienst>().StudiengaengeAsync(alteStudiengaenge);
+            pruefende = await d.GetRequiredService<KontoDienst>().PruefendeAsync();
+        });
+    }
+
+    private async Task AlteStudiengaengeAsync(ChangeEventArgs e)
+    {
+        alteStudiengaenge = e.Value is true;
+        studiengaenge = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<KatalogDienst>().StudiengaengeAsync(alteStudiengaenge));
+    }
+
+    private async Task AltePruefungenAsync(ChangeEventArgs e)
+    {
+        altePruefungen = e.Value is true;
+        await PruefungenLadenAsync();
+    }
+
+    private async Task StudiengangGewaehltAsync(Guid? id)
+    {
+        studiengangId = id;
+        pruefungId = null;
+        await PruefungenLadenAsync();
+    }
+
+    private async Task PruefungenLadenAsync()
+        => pruefungen = studiengangId is { } sg
+            ? await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<KatalogDienst>().PruefungenAsync(sg, altePruefungen))
+            : [];
+
+    private async Task WeiterAsync()
+    {
+        fehler = null;
+        beschaeftigt = true;
+        try
+        {
+            var angaben = new Antragsangaben(vorname, nachname, matrikel, email, studiengangId ?? Guid.Empty, pruefungId ?? Guid.Empty,
+                erstpruefendeId ?? Guid.Empty, terminwuensche, zweitwunsch);
+            entwurf = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<DrittpruefungDienst>().EntwurfAsync(angaben));
+            schritt = 2;
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+        }
+        finally
+        {
+            beschaeftigt = false;
+        }
+    }
+
+    private async Task EinreichenAsync(Unterschrift unterschrift)
+    {
+        fehler = null;
+        beschaeftigt = true;
+        try
+        {
+            nummer = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<DrittpruefungDienst>().EinreichenAsync(entwurf!, unterschrift));
+            schritt = 3;
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+        }
+        finally
+        {
+            beschaeftigt = false;
+        }
+    }
+}

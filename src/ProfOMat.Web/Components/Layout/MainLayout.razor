@@ -1,0 +1,112 @@
+@inherits LayoutComponentBase
+@inject NavigationManager Navigation
+@inject IWebHostEnvironment Umgebung
+
+<RadzenComponents />
+
+<div class="pm-app">
+    <aside class="pm-side">
+        <a class="pm-brand" href="">
+            <span class="pm-brand-zeichen" aria-hidden="true">P</span>
+            <span class="pm-brand-text"><b>ProfOMat</b><span>Hochschule Osnabrück</span></span>
+        </a>
+        <nav class="pm-nav" aria-label="Hauptnavigation">
+            @foreach (var gruppe in Sichtbar.GroupBy(n => n.Gruppe))
+            {
+                <div class="pm-grp">@gruppe.Key</div>
+                @foreach (var punkt in gruppe)
+                {
+                    @if (Gesperrt(punkt) is { } grund)
+                    {
+                        <span class="pm-why pm-nav-off" tabindex="0" data-why="@grund" aria-disabled="true">@punkt.Titel</span>
+                    }
+                    else
+                    {
+                        <NavLink href="@punkt.Ziel" Match="@(punkt.Ziel == "" ? NavLinkMatch.All : NavLinkMatch.Prefix)" ActiveClass="on">@punkt.Titel</NavLink>
+                    }
+                }
+            }
+        </nav>
+        <div class="pm-foot">Iteration 1 · Drittprüfungen<br />Entwicklungsstand</div>
+    </aside>
+    <div class="pm-main">
+        <div class="pm-streifen" aria-hidden="true"></div>
+        <header class="pm-top">
+            @if (benutzer is { Angemeldet: true })
+            {
+                <div class="pm-role">
+                    <span>Angemeldet als <b>@benutzer.Name</b></span>
+                    <span>@string.Join(", ", benutzer.Rollen.Select(r => r.Anzeigename()))</span>
+                    <a href="profil" class="pm-link">Profil</a>
+                    <form method="post" action="abmelden" class="pm-inline" data-enhance="false">
+                        <AntiforgeryToken />
+                        <button type="submit" class="pm-linkbutton">Abmelden</button>
+                    </form>
+                </div>
+            }
+            else
+            {
+                <div class="pm-role"><a href="anmelden" class="pm-link">Anmelden (Beschäftigte)</a></div>
+            }
+            @if (Umgebung.IsDevelopment())
+            {
+                <span class="pm-proto" title="Mails werden nur simuliert (Postausgang), das Hochschulsystem ist ein Mock.">Entwicklung · Mock-Anbindungen</span>
+            }
+        </header>
+        <main class="pm-content">
+            <ErrorBoundary @ref="fehlergrenze">
+                <ChildContent>@Body</ChildContent>
+                <ErrorContent>
+                    <section class="pm-card" role="alert">
+                        <h1>Da ist etwas schiefgelaufen</h1>
+                        <p>Diese Seite konnte die Eingabe nicht verarbeiten. Bitte die Seite neu laden; gespeicherte Daten sind nicht betroffen.</p>
+                        <p><a href="@Navigation.Uri">Seite neu laden</a></p>
+                    </section>
+                </ErrorContent>
+            </ErrorBoundary>
+        </main>
+    </div>
+</div>
+
+<div id="blazor-error-ui" data-nosnippet>
+    Es ist ein unerwarteter Fehler aufgetreten.
+    <a href="." class="reload">Neu laden</a>
+    <span class="dismiss">🗙</span>
+</div>
+
+@code {
+    private ErrorBoundary? fehlergrenze;
+    private Benutzer? benutzer;
+
+    [CascadingParameter]
+    private Task<AuthenticationState>? Anmeldezustand { get; set; }
+
+    private sealed record Navigationspunkt(string Gruppe, string Titel, string Ziel, bool NurAngemeldet = true, Func<Benutzer, Freigabe>? Recht = null, string? Geplant = null);
+
+    private static readonly IReadOnlyList<Navigationspunkt> Punkte =
+    [
+        new("Übersicht", "Start", "", NurAngemeldet: false),
+        new("Drittprüfungen", "Anträge", "antraege"),
+        new("Drittprüfungen", "Antrag stellen (Studierende)", "drittpruefung/antrag", NurAngemeldet: false),
+        new("Studium", "Studiengänge und Prüfungen", "katalog"),
+        new("Weitere Formulare", "Abschlussarbeiten", "", Geplant: "später"),
+        new("Weitere Formulare", "Anrechnungen", "", Geplant: "später"),
+        new("Persönlich", "Profil und Schlüssel", "profil"),
+        new("Verwaltung", "Konten", "konten", Recht: ProfOMat.Application.Betrieb.Rechte.Verwaltung),
+        new("Verwaltung", "Postausgang", "postausgang", Recht: ProfOMat.Application.Betrieb.Rechte.Verwaltung),
+        new("Verwaltung", "Protokoll", "protokoll", Recht: ProfOMat.Application.Betrieb.Rechte.Verwaltung),
+    ];
+
+    private IEnumerable<Navigationspunkt> Sichtbar => Punkte.Where(p => !p.NurAngemeldet || benutzer is { Angemeldet: true });
+
+    protected override void OnParametersSet() => fehlergrenze?.Recover();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        benutzer = Anmeldezustand is null ? null : Anmeldung.AlsBenutzer((await Anmeldezustand).User);
+    }
+
+    private string? Gesperrt(Navigationspunkt p)
+        => p.Geplant is { } stufe ? Freigabe.Geplant(p.Titel, stufe).Begruendung
+            : p.Recht is { } recht && benutzer is not null && recht(benutzer) is { Erlaubt: false } nein ? nein.Begruendung : null;
+}

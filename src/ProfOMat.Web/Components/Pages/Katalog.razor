@@ -1,0 +1,218 @@
+@page "/katalog"
+@attribute [Authorize]
+@using ProfOMat.Application.Betrieb
+@using ProfOMat.Application.Katalog
+@using ProfOMat.Application.Konten
+@using ProfOMat.Domain.Katalog
+@inject Vorgang Vorgang
+@inject Ortszeit Zeit
+@inject NotificationService Hinweise
+
+<PageTitle>Studiengänge und Prüfungen · ProfOMat</PageTitle>
+
+<div class="pm-head">
+    <div>
+        <h1>Studiengänge und Prüfungen</h1>
+        <p>Abgeglichen mit dem Hochschulsystem (nachts und auf Knopfdruck). Nichts wird gelöscht: Was dort nicht mehr vorkommt, wird „alt“ und erscheint in Auswahlen
+            nur auf Wunsch. Fehlendes lässt sich lokal ergänzen.</p>
+    </div>
+    <div class="pm-row">
+        <BegruendeterButton Text="Jetzt abgleichen" Freigabe="@pflege" Beschaeftigt="@beschaeftigt" Click="AbgleichenAsync" />
+    </div>
+</div>
+
+@if (fehler is not null)
+{
+    <div class="pm-alert pm-crit" role="alert">@fehler</div>
+}
+
+<section class="pm-card">
+    <h2>Fakultäten und Studiendekanate</h2>
+    <div class="pm-tbl">
+        <table>
+            <thead><tr><th>Fakultät</th><th>Studiendekan/in</th><th>Postfach Studierendensekretariat</th><th></th></tr></thead>
+            <tbody>
+                @foreach (var f in fakultaeten)
+                {
+                    <tr>
+                        <td><b>@f.Kuerzel</b> · @f.Name</td>
+                        <td>
+                            @if (pflege.Erlaubt)
+                            {
+                                <select class="pm-select" value="@f.StudiendekanatKontoId" @onchange="e => DekanatWaehlenAsync(f, e.Value as string)" aria-label="Studiendekan/in @f.Kuerzel">
+                                    <option value="">– keine Zuordnung –</option>
+                                    @foreach (var k in dekanate)
+                                    {
+                                        <option value="@k.Id" selected="@(k.Id == f.StudiendekanatKontoId)">@k.Sortiername</option>
+                                    }
+                                </select>
+                            }
+                            else
+                            {
+                                @(dekanate.FirstOrDefault(k => k.Id == f.StudiendekanatKontoId)?.Anzeigename ?? "–")
+                            }
+                        </td>
+                        <td>@(f.SekretariatEmail ?? "zentrales Postfach")</td>
+                        <td></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<section class="pm-card">
+    <div class="pm-head">
+        <h2>Studiengänge</h2>
+        <label class="pm-check"><input type="checkbox" checked="@alte" @onchange="AlteUmschaltenAsync" /> auch alte anzeigen</label>
+    </div>
+    <div class="pm-tbl">
+        <table>
+            <thead><tr><th>Studiengang</th><th>Herkunft</th><th>Stand</th><th></th></tr></thead>
+            <tbody>
+                @foreach (var s in studiengaenge)
+                {
+                    <tr class="@(s.IstAlt ? "pm-alt" : "") @(s.Id == gewaehlt?.Id ? "pm-hervor" : "")">
+                        <td><button type="button" class="pm-linkbutton" @onclick="() => WaehlenAsync(s)">@s.Anzeige</button>
+                            <br /><span class="pm-small pm-muted">@s.Kuerzel · @s.Schluessel</span></td>
+                        <td>@(s.Herkunft == Herkunft.Lokal ? "lokal ergänzt" : "Hochschulsystem")</td>
+                        <td>@if (s.IstAlt) { <StatusPille Stil="neutral">alt seit @Zeit.Datum(s.AltSeit!.Value)</StatusPille><br /><span class="pm-small pm-muted">@s.AltGrund</span> }
+                            else { <StatusPille Stil="gut">aktuell</StatusPille> }</td>
+                        <td>
+                            <BegruendeterButton Text="@(s.IstAlt ? "wieder aktuell" : "als alt markieren")" Freigabe="@pflege" Click="() => AltAsync(s.Id, !s.IstAlt)" />
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</section>
+
+@if (gewaehlt is not null)
+{
+    <section class="pm-card">
+        <div class="pm-head">
+            <h2>Prüfungen: @gewaehlt.Anzeige</h2>
+            <label class="pm-check"><input type="checkbox" checked="@altePruefungen" @onchange="AltePruefungenAsync" /> auch alte anzeigen</label>
+        </div>
+        <div class="pm-tbl">
+            <table>
+                <thead><tr><th>Nr.</th><th>Prüfung</th><th>Form</th><th>Stand</th><th></th></tr></thead>
+                <tbody>
+                    @foreach (var p in pruefungen)
+                    {
+                        <tr class="@(p.IstAlt ? "pm-alt" : "")">
+                            <td class="pm-mono">@p.Nummer</td>
+                            <td>@p.Titel @if (p.Herkunft == Herkunft.Lokal) { <StatusPille Stil="info">lokal</StatusPille> }</td>
+                            <td>@p.Pruefungsform</td>
+                            <td>@if (p.IstAlt) { <StatusPille Stil="neutral">alt</StatusPille> } else { <StatusPille Stil="gut">aktuell</StatusPille> }</td>
+                            <td><BegruendeterButton Text="@(p.IstAlt ? "wieder aktuell" : "als alt markieren")" Freigabe="@pflege" Click="() => AltAsync(p.Id, !p.IstAlt)" /></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        @if (pflege.Erlaubt)
+        {
+            <h3>Prüfung lokal ergänzen</h3>
+            <div class="pm-fields">
+                <div class="pm-field"><label class="pm-lbl" for="pnr">Prüfungsnummer (falls bekannt)</label><input id="pnr" class="pm-input" @bind="neueNummer" /></div>
+                <div class="pm-field"><label class="pm-lbl" for="ptitel">Titel</label><input id="ptitel" class="pm-input" @bind="neuerTitel" /></div>
+                <div class="pm-field"><label class="pm-lbl" for="pform">Reguläre Prüfungsform</label><input id="pform" class="pm-input" @bind="neueForm" /></div>
+            </div>
+            <div><BegruendeterButton Text="Ergänzen" Click="PruefungErgaenzenAsync"
+                                     Freigabe="@(string.IsNullOrWhiteSpace(neuerTitel) ? Freigabe.Nein("Bitte einen Titel angeben.") : Freigabe.Ja)" /></div>
+        }
+    </section>
+}
+
+@code {
+    private IReadOnlyList<Fakultaet> fakultaeten = [];
+    private IReadOnlyList<Studiengang> studiengaenge = [];
+    private IReadOnlyList<Pruefung> pruefungen = [];
+    private IReadOnlyList<Konto> dekanate = [];
+    private Studiengang? gewaehlt;
+    private bool alte, altePruefungen, beschaeftigt;
+    private string? fehler, neueNummer, neuerTitel, neueForm;
+    private Freigabe pflege = Freigabe.Nein("Wird geladen …");
+
+    protected override async Task OnInitializedAsync()
+    {
+        pflege = Rechte.KatalogPflegen(await Vorgang.BenutzerAsync());
+        await LadenAsync();
+    }
+
+    private async Task LadenAsync()
+    {
+        await Vorgang.AusfuehrenAsync(async d =>
+        {
+            var k = d.GetRequiredService<KatalogDienst>();
+            fakultaeten = await k.FakultaetenAsync();
+            studiengaenge = await k.StudiengaengeAsync(alte);
+            dekanate = (await d.GetRequiredService<KontoDienst>().AlleAsync()).Where(x => x.Aktiv && x.Hat(Rolle.Studiendekanat)).ToList();
+            if (gewaehlt is not null)
+            {
+                pruefungen = await k.PruefungenAsync(gewaehlt.Id, altePruefungen);
+            }
+        });
+    }
+
+    private async Task AlteUmschaltenAsync(ChangeEventArgs e)
+    {
+        alte = e.Value is true;
+        await LadenAsync();
+    }
+
+    private async Task AltePruefungenAsync(ChangeEventArgs e)
+    {
+        altePruefungen = e.Value is true;
+        await LadenAsync();
+    }
+
+    private async Task WaehlenAsync(Studiengang s)
+    {
+        gewaehlt = s;
+        await LadenAsync();
+    }
+
+    private async Task AusfuehrenAsync(Func<IServiceProvider, Task<string>> arbeit)
+    {
+        fehler = null;
+        beschaeftigt = true;
+        try
+        {
+            var meldung = await Vorgang.AusfuehrenAsync(arbeit);
+            await LadenAsync();
+            Hinweise.Notify(NotificationSeverity.Success, meldung);
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+        }
+        finally
+        {
+            beschaeftigt = false;
+        }
+    }
+
+    private Task AbgleichenAsync() => AusfuehrenAsync(async d => (await d.GetRequiredService<KatalogDienst>().AbgleichenAsync()).ToString());
+
+    private Task AltAsync(Guid id, bool alt) => AusfuehrenAsync(async d =>
+    {
+        await d.GetRequiredService<KatalogDienst>().AltSetzenAsync(id, alt, null);
+        return alt ? "Als alt markiert." : "Wieder aktuell.";
+    });
+
+    private Task DekanatWaehlenAsync(Fakultaet f, string? wert) => AusfuehrenAsync(async d =>
+    {
+        await d.GetRequiredService<KatalogDienst>().FakultaetAendernAsync(f.Id, f.Name, Guid.TryParse(wert, out var id) ? id : null, f.SekretariatEmail);
+        return "Studiendekanat gespeichert.";
+    });
+
+    private Task PruefungErgaenzenAsync() => AusfuehrenAsync(async d =>
+    {
+        await d.GetRequiredService<KatalogDienst>().LokalePruefungAnlegenAsync(gewaehlt!.Id, neueNummer ?? "", neuerTitel!, neueForm);
+        neueNummer = neuerTitel = neueForm = null;
+        return "Prüfung ergänzt.";
+    });
+}

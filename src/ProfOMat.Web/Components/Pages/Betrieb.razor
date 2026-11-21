@@ -1,0 +1,91 @@
+@page "/postausgang"
+@page "/protokoll"
+@attribute [Authorize]
+@using ProfOMat.Application.Betrieb
+@using ProfOMat.Domain.Betrieb
+@inject Vorgang Vorgang
+@inject NavigationManager Navigation
+@inject Ortszeit Zeit
+
+<PageTitle>@(istPost ? "Postausgang" : "Protokoll") · ProfOMat</PageTitle>
+
+<div class="pm-head">
+    <div>
+        <h1>@(istPost ? "Postausgang" : "Protokoll")</h1>
+        <p>@(istPost ? "Alle Mails des Systems. Ohne eingerichteten Mailserver werden sie nur simuliert – Links (z. B. zur Bestätigung) lassen sich dann hier öffnen."
+                     : "Wer hat wann was getan. Studierende erscheinen nur mit Antragsnummer.")</p>
+    </div>
+</div>
+
+@if (fehler is not null)
+{
+    <div class="pm-alert pm-crit" role="alert">@fehler</div>
+}
+else if (istPost)
+{
+    <section class="pm-card">
+        <div class="pm-list">
+            @foreach (var n in nachrichten)
+            {
+                <div>
+                    <details class="pm-grow">
+                        <summary><b>@n.Betreff</b> · an @n.An · @Zeit.Kurz(n.Erstellt)
+                            @if (n.Versandt is null) { <StatusPille Stil="warn">wartet</StatusPille> }
+                            else if (n.Simuliert) { <StatusPille Stil="neutral">simuliert</StatusPille> }
+                            else { <StatusPille Stil="gut">versandt</StatusPille> }
+                            @if (n.AnhangDokumentId is not null) { <StatusPille Stil="info">PDF</StatusPille> }
+                            @if (n.LetzterFehler is { } f) { <StatusPille Stil="krit">@n.Fehlversuche Fehlversuch(e)</StatusPille> }</summary>
+                        <pre class="pm-signiertext">@n.Text</pre>
+                        @if (n.LetzterFehler is { } fehlerText) { <p class="pm-small pm-muted">Letzter Fehler: @fehlerText</p> }
+                    </details>
+                </div>
+            }
+        </div>
+    </section>
+}
+else
+{
+    <section class="pm-card">
+        <div class="pm-tbl">
+            <table>
+                <thead><tr><th>Zeit</th><th>Wer</th><th>Aktion</th><th>Was</th></tr></thead>
+                <tbody>
+                    @foreach (var p in eintraege)
+                    {
+                        <tr><td style="white-space:nowrap">@Zeit.Kurz(p.Zeitpunkt)</td><td>@p.Wer</td><td class="pm-mono">@p.Aktion</td><td>@p.Text</td></tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </section>
+}
+
+@code {
+    private bool istPost;
+    private string? fehler;
+    private IReadOnlyList<Nachricht> nachrichten = [];
+    private IReadOnlyList<Protokolleintrag> eintraege = [];
+
+    protected override async Task OnParametersSetAsync()
+    {
+        istPost = Navigation.ToBaseRelativePath(Navigation.Uri).StartsWith("postausgang", StringComparison.Ordinal);
+        try
+        {
+            await Vorgang.AusfuehrenAsync(async d =>
+            {
+                if (istPost)
+                {
+                    nachrichten = await d.GetRequiredService<Postausgang>().LetzteAsync(await Vorgang.BenutzerAsync(), 200);
+                }
+                else
+                {
+                    eintraege = await d.GetRequiredService<Protokoll>().LetzteAsync(await Vorgang.BenutzerAsync(), 300);
+                }
+            });
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+        }
+    }
+}

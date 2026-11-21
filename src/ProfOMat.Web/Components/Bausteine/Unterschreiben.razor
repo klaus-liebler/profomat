@@ -1,0 +1,251 @@
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+@inject NavigationManager Navigation
+
+@*
+    Unterschreiben: zeigt den Text, der unterschrieben wird, und bietet zwei Wege an –
+    (1) Unterschriftsfeld (Maus, Stift, Finger) oder (2) eigener privater Schlüssel per Drag & Drop, signiert im Browser.
+    Beide Bereiche bleiben im DOM (nur ausgeblendet), damit Zeichnung und geladener Schlüssel beim Umschalten erhalten bleiben.
+*@
+<div class="pm-card">
+    <h2>@Titel</h2>
+    <p class="pm-small pm-muted">Diesen Text unterschreiben Sie – genau so wird er gespeichert und ins PDF übernommen:</p>
+    <pre class="pm-signiertext" tabindex="0">@Text</pre>
+
+    <div class="pm-tabs" role="tablist">
+        <button type="button" role="tab" class="pm-tab @(art == Signaturart.Handschrift ? "on" : "")" aria-selected="@(art == Signaturart.Handschrift)"
+                @onclick="() => art = Signaturart.Handschrift">Im Unterschriftsfeld</button>
+        <button type="button" role="tab" class="pm-tab @(art == Signaturart.Schluessel ? "on" : "")" aria-selected="@(art == Signaturart.Schluessel)"
+                @onclick="() => art = Signaturart.Schluessel">Mit eigenem Schlüssel</button>
+    </div>
+
+    <div hidden="@(art != Signaturart.Handschrift)">
+        <p class="pm-small pm-muted">Mit Maus, Stift oder Finger unterschreiben.</p>
+        <canvas @ref="zeichenfeld" class="pm-zeichenfeld" aria-label="Unterschriftsfeld"></canvas>
+        <div class="pm-zeichenlinie">@Unterzeichner</div>
+        <div class="pm-row"><button type="button" class="pm-linkbutton" @onclick="LeerenAsync">Feld leeren</button></div>
+    </div>
+
+    <div hidden="@(art != Signaturart.Schluessel)">
+        <p class="pm-small pm-muted">
+            Privaten Schlüssel (PEM, DER oder JWK; RSA ab 2048 Bit oder EC P-256/P-384/P-521) hierher ziehen oder anklicken.
+            Der Schlüssel bleibt in Ihrem Browser; übertragen werden nur die Signatur und der öffentliche Schlüssel.
+            @if (Beschaeftigte)
+            {
+                <span> Der Schlüssel muss unter <a href="profil">Profil</a> hinterlegt sein.</span>
+            }
+        </p>
+        <div @ref="ablage" class="pm-ablage" tabindex="0" role="button" aria-label="Schlüsseldatei wählen">
+            <input type="file" hidden accept=".pem,.key,.der,.p8,.json,.jwk" />
+            @if (schluessel is { } s)
+            {
+                <span>Schlüssel geladen: <b>@s.Beschreibung</b> · Fingerabdruck <span class="pm-mono">@s.Fingerabdruck</span></span>
+            }
+            else
+            {
+                <span>Schlüsseldatei hier ablegen oder klicken</span>
+            }
+        </div>
+        <div data-passwort-bereich hidden="@(!passwortNoetig)" class="pm-row" style="margin-top:8px">
+            <label class="pm-lbl" for="@($"pw-{id}")">Passwort des Schlüssels</label>
+            <input id="@($"pw-{id}")" type="password" class="pm-input" style="max-width:260px" autocomplete="off" />
+            <button type="button" class="pm-btn" data-passwort-ok>Entsperren</button>
+            <span class="pm-small pm-muted">Das Passwort wird nur im Browser verwendet.</span>
+        </div>
+        @if (schluesselFehler is not null)
+        {
+            <div class="pm-alert pm-crit" role="alert" style="margin-top:8px">@schluesselFehler</div>
+        }
+    </div>
+
+    <label class="pm-check"><input type="checkbox" @bind="bestaetigt" /> Ich habe den Text geprüft und unterschreibe ihn.</label>
+    @if (fehler is not null)
+    {
+        <div class="pm-alert pm-crit" role="alert">@fehler</div>
+    }
+    <div class="pm-row">
+        <BegruendeterButton Text="@Knopftext" Haupt="true" Freigabe="@Bereit" Beschaeftigt="@(beschaeftigt || Beschaeftigt)" Click="UnterschreibenAsync" />
+        @ChildContent
+    </div>
+</div>
+
+@code {
+    private readonly string id = Guid.NewGuid().ToString("N")[..8];
+    private ElementReference zeichenfeld;
+    private ElementReference ablage;
+    private IJSObjectReference? modul;
+    private DotNetObjectReference<Unterschreiben>? selbst;
+    private Signaturart art = Signaturart.Handschrift;
+    private bool gezeichnet;
+    private bool bestaetigt;
+    private bool passwortNoetig;
+    private bool beschaeftigt;
+    private SchluesselInfo? schluessel;
+    private string? schluesselFehler;
+    private string? fehler;
+
+    [Parameter, EditorRequired]
+    public string Text { get; set; } = string.Empty;
+
+    [Parameter]
+    public string Titel { get; set; } = "Unterschreiben";
+
+    [Parameter]
+    public string Unterzeichner { get; set; } = string.Empty;
+
+    [Parameter]
+    public string Knopftext { get; set; } = "Unterschreiben";
+
+    /// <summary>Beschäftigte: Schlüssel muss im Konto hinterlegt sein (Hinweis).</summary>
+    [Parameter]
+    public bool Beschaeftigte { get; set; }
+
+    [Parameter]
+    public bool Beschaeftigt { get; set; }
+
+    [Parameter, EditorRequired]
+    public EventCallback<Unterschrift> Unterschrieben { get; set; }
+
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+
+    public sealed record SchluesselInfo(string Beschreibung, string Fingerabdruck, string Algorithmus);
+
+    private sealed record SignaturErgebnis(string Algorithmus, string Signatur, string Jwk);
+
+    private Freigabe Bereit => !bestaetigt
+        ? Freigabe.Nein("Bitte zuerst bestätigen, dass Sie den Text geprüft haben.")
+        : art == Signaturart.Handschrift
+            ? gezeichnet ? Freigabe.Ja : Freigabe.Nein("Bitte im Feld unterschreiben.")
+            : schluessel is not null ? Freigabe.Ja : Freigabe.Nein("Bitte zuerst den privaten Schlüssel laden.");
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        try
+        {
+            modul = await JS.InvokeAsync<IJSObjectReference>("import", Navigation.ToAbsoluteUri("signatur.js").ToString());
+            selbst = DotNetObjectReference.Create(this);
+            await modul.InvokeVoidAsync("zeichenfeldEinrichten", zeichenfeld, selbst);
+            await modul.InvokeVoidAsync("ablageEinrichten", ablage, selbst);
+        }
+        catch (JSException ex)
+        {
+            fehler = $"Das Unterschreiben konnte nicht vorbereitet werden: {ex.Message}";
+            StateHasChanged();
+        }
+    }
+
+    [JSInvokable]
+    public Task ZeichnungGeaendert(bool ausreichend)
+    {
+        gezeichnet = ausreichend;
+        fehler = null;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    [JSInvokable]
+    public Task SchluesselGeladen(SchluesselInfo info)
+    {
+        schluessel = info;
+        schluesselFehler = null;
+        passwortNoetig = false;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    [JSInvokable]
+    public Task SchluesselFehler(string meldung)
+    {
+        schluessel = null;
+        schluesselFehler = meldung;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    [JSInvokable]
+    public Task PasswortNoetig()
+    {
+        passwortNoetig = true;
+        schluesselFehler = null;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>Von außen: Fehlermeldung des Servers anzeigen (z. B. Schlüssel nicht hinterlegt).</summary>
+    public void FehlerZeigen(string meldung)
+    {
+        fehler = meldung;
+        StateHasChanged();
+    }
+
+    private async Task LeerenAsync()
+    {
+        try
+        {
+            if (modul is not null)
+            {
+                await modul.InvokeVoidAsync("zeichenfeldLeeren", zeichenfeld);
+            }
+        }
+        catch (JSException ex)
+        {
+            fehler = ex.Message;
+        }
+
+        gezeichnet = false;
+    }
+
+    private async Task UnterschreibenAsync()
+    {
+        if (modul is null || !Bereit.Erlaubt)
+        {
+            return;
+        }
+
+        beschaeftigt = true;
+        fehler = null;
+        try
+        {
+            Unterschrift u;
+            if (art == Signaturart.Handschrift)
+            {
+                var png = await modul.InvokeAsync<string>("zeichenfeldPng", zeichenfeld);
+                u = new Unterschrift(Signaturart.Handschrift, null, null, null, Convert.FromBase64String(png));
+            }
+            else
+            {
+                var s = await modul.InvokeAsync<SignaturErgebnis>("signieren", ablage, Text);
+                u = new Unterschrift(Signaturart.Schluessel, s.Algorithmus, s.Signatur, s.Jwk, null);
+            }
+
+            await Unterschrieben.InvokeAsync(u);
+        }
+        catch (JSException ex)
+        {
+            fehler = ex.Message;
+        }
+        finally
+        {
+            beschaeftigt = false;
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (modul is not null)
+        {
+            try
+            {
+                await modul.InvokeVoidAsync("vergessen", ablage);
+                await modul.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+            }
+        }
+
+        selbst?.Dispose();
+    }
+}

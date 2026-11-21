@@ -1,0 +1,89 @@
+@page "/"
+@attribute [AllowAnonymous]
+@inject Vorgang Vorgang
+
+<PageTitle>ProfOMat</PageTitle>
+
+@if (benutzer is not { Angemeldet: true })
+{
+    <div class="pm-head">
+        <div>
+            <h1>ProfOMat</h1>
+            <p>Formulare und Abläufe rund um Prüfungen an der Hochschule Osnabrück – digital unterschrieben, ohne Papier und ohne Hauspost.</p>
+        </div>
+    </div>
+    <div class="pm-kacheln">
+        <section class="pm-kachel">
+            <h2>Für Studierende</h2>
+            <p>Mündliche Prüfung im dritten Versuch beantragen (ATPO § 18 Abs. 1 Satz 3): Erstprüferin oder Erstprüfer wählen,
+                Terminwünsche angeben, digital unterschreiben.</p>
+            <p class="pm-small pm-muted">Bitte beachten: Der Antrag muss bis zum Ende des regulären Prüfungsanmeldezeitraums gestellt sein (ATPO § 18 Abs. 1 Satz 4).</p>
+            <div><a class="pm-btn pm-btn-haupt" href="drittpruefung/antrag">Antrag auf mündliche Drittprüfung stellen</a></div>
+        </section>
+        <section class="pm-kachel">
+            <h2>Für Lehrende und Verwaltung</h2>
+            <p>Anträge bearbeiten, Termine festlegen, unterschreiben und an das Studierendensekretariat weitergeben.</p>
+            <div><a class="pm-btn" href="anmelden">Anmelden</a></div>
+            <p class="pm-small pm-muted">Später zusätzlich mit der Hochschulkennung (Single Sign-on).</p>
+        </section>
+    </div>
+}
+else
+{
+    <div class="pm-head">
+        <div>
+            <h1>Guten Tag, @benutzer.Name</h1>
+            <p>Was gerade auf Sie wartet.</p>
+        </div>
+    </div>
+
+    <section class="pm-card">
+        <h2>Wartet auf mich</h2>
+        @if (aufgaben is null)
+        {
+            <p class="pm-muted">Wird geladen …</p>
+        }
+        else if (aufgaben.Count == 0)
+        {
+            <p class="pm-muted">Nichts zu tun. Neue Anträge kündigt eine Mail mit direktem Link an.</p>
+        }
+        else
+        {
+            <div class="pm-list">
+                @foreach (var z in aufgaben)
+                {
+                    <div>
+                        <span class="pm-grow">
+                            <a href="antraege/@z.Id"><b>@z.Pruefung</b></a> · @z.Name (@z.Matrikelnummer, @z.Studiengang)
+                            <br /><span class="pm-small pm-muted">@z.Nummer · eingereicht @z.Erstellt.ToLocalTime().ToString("dd.MM.yyyy")</span>
+                        </span>
+                        <StatusPille Stil="@Darstellung.Stil(z.Status)">@z.Status.Anzeigename()</StatusPille>
+                        <a class="pm-btn pm-btn-haupt" href="antraege/@z.Id">Bearbeiten</a>
+                    </div>
+                }
+            </div>
+        }
+    </section>
+
+    <NaechsteSchritte Schritte="@([
+        new NaechsterSchritt("Alle Anträge", "antraege", Hauptschritt: aufgaben is { Count: 0 }),
+        new NaechsterSchritt("Signaturschlüssel hinterlegen", "profil", "Wer mit eigenem Schlüssel unterschreiben will, hinterlegt ihn einmal im Profil."),
+    ])" />
+}
+
+@code {
+    [CascadingParameter]
+    private Task<AuthenticationState>? Anmeldezustand { get; set; }
+
+    private Benutzer? benutzer;
+    private IReadOnlyList<AntragZeile>? aufgaben;
+
+    protected override async Task OnInitializedAsync()
+    {
+        benutzer = Anmeldezustand is null ? null : Anmeldung.AlsBenutzer((await Anmeldezustand).User);
+        if (benutzer is { Angemeldet: true })
+        {
+            aufgaben = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<DrittpruefungDienst>().ListeAsync(AntragFilter.MeineAufgaben));
+        }
+    }
+}

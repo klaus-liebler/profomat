@@ -1,0 +1,39 @@
+@*
+    Schaltfläche, die – wenn sie gesperrt ist – immer erklärt, warum (Tooltip bei Hover und Tastaturfokus, vorgelesen).
+*@
+@if (Freigabe is { Erlaubt: false })
+{
+    <span class="pm-why" tabindex="0" data-why="@Freigabe.Begruendung" aria-label="@($"{Text} – nicht möglich: {Freigabe.Begruendung}")">
+        <button type="button" class="@Klasse" disabled tabindex="-1">@Text</button>
+    </span>
+}
+else
+{
+    <button type="button" class="@Klasse" disabled="@Beschaeftigt" @onclick="Click">@(Beschaeftigt ? (BeschaeftigtText ?? Text + " …") : Text)</button>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public string Text { get; set; } = string.Empty;
+
+    [Parameter]
+    public EventCallback<MouseEventArgs> Click { get; set; }
+
+    /// <summary>Ist die Aktion gerade erlaubt? <c>null</c> = ja.</summary>
+    [Parameter]
+    public Freigabe? Freigabe { get; set; }
+
+    [Parameter]
+    public bool Haupt { get; set; }
+
+    [Parameter]
+    public bool Gefahr { get; set; }
+
+    [Parameter]
+    public bool Beschaeftigt { get; set; }
+
+    [Parameter]
+    public string? BeschaeftigtText { get; set; }
+
+    private string Klasse => "pm-btn" + (Haupt ? " pm-btn-haupt" : "") + (Gefahr ? " pm-btn-gefahr" : "");
+}

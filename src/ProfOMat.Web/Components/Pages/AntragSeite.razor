@@ -1,0 +1,335 @@
+@page "/antraege/{Id:guid}"
+@attribute [Authorize]
+@using ProfOMat.Application.Konten
+@inject Vorgang Vorgang
+@inject Ortszeit Zeit
+@inject NotificationService Hinweise
+
+<PageTitle>@(ansicht?.Antrag.Nummer ?? "Antrag") · ProfOMat</PageTitle>
+
+<a class="pm-zurueck" href="antraege">← Zur Antragsliste</a>
+
+@if (ladefehler is not null)
+{
+    <section class="pm-card" role="alert"><h1>Antrag nicht verfügbar</h1><p>@ladefehler</p></section>
+}
+else if (ansicht is null || aktionen is null)
+{
+    <p class="pm-muted">Wird geladen …</p>
+}
+else
+{
+    var a = ansicht.Antrag;
+    <div class="pm-head">
+        <div>
+            <h1>@ansicht.Pruefung.Anzeige</h1>
+            <p>@a.Nummer · Mündliche Prüfung im dritten Versuch · @ansicht.Studiengang.Anzeige</p>
+        </div>
+        <StatusPille Stil="@Darstellung.Stil(a.Status)">@a.Status.Anzeigename()</StatusPille>
+    </div>
+
+    @if (fehler is not null)
+    {
+        <div class="pm-alert pm-crit" role="alert">@fehler</div>
+    }
+    @if (a.Rueckfrage is { } rueckfrage && a.Status == AntragStatus.BeimErstpruefer)
+    {
+        <div class="pm-alert pm-warn"><b>Rückfrage des Studiendekanats:</b> @rueckfrage</div>
+    }
+    @if (!ansicht.KetteInOrdnung)
+    {
+        <div class="pm-alert pm-crit" role="alert"><b>Achtung:</b> Mindestens eine Unterschrift ist nicht in Ordnung (siehe unten). Bitte die Systemverwaltung informieren.</div>
+    }
+
+    <div class="pm-grid-2">
+        <section class="pm-card">
+            <h2>Antrag</h2>
+            <dl class="pm-dl">
+                <dt>Studierende/r</dt><dd>@a.Name</dd>
+                <dt>Matrikelnummer</dt><dd>@a.Matrikelnummer</dd>
+                <dt>E-Mail</dt><dd><a href="mailto:@a.Email">@a.Email</a></dd>
+                <dt>Studiengang</dt><dd>@ansicht.Studiengang.Anzeige</dd>
+                <dt>Prüfung</dt><dd>@ansicht.Pruefung.Anzeige @(ansicht.Pruefung.Pruefungsform is { } form ? $"(regulär: {form})" : "")</dd>
+                <dt>Erstprüfende/r</dt><dd>@ansicht.Erstpruefende.Anzeigename</dd>
+                <dt>Terminwünsche</dt><dd>@(a.Terminwuensche ?? "–")</dd>
+                <dt>Wunsch Zweitprüfung</dt><dd>@(a.Zweitpruefungswunsch ?? "–")</dd>
+                <dt>Eingereicht</dt><dd>@Zeit.Kurz(a.Erstellt)@(a.EmailBestaetigt is { } bestaetigtAm ? $", bestätigt {Zeit.Kurz(bestaetigtAm)}" : ", Mailadresse noch nicht bestätigt")</dd>
+            </dl>
+        </section>
+        <section class="pm-card">
+            <h2>Festlegung</h2>
+            <dl class="pm-dl">
+                <dt>Termin</dt><dd>@(ansicht.Termin ?? "noch offen")</dd>
+                <dt>Ort</dt><dd>@(a.Ort ?? "noch offen")</dd>
+                <dt>Zweitprüfende/r</dt><dd>@(a.ZweitpruefendeName ?? "noch offen")@(a.ZweitpruefendeEmail is { } zm ? $" <{zm}>" : "")</dd>
+                <dt>Bemerkung</dt><dd>@(a.Bemerkung ?? "–")</dd>
+                @if (ansicht.Studiendekanat is { } dekan)
+                {
+                    <dt>Bestellt durch</dt><dd>@dekan.Anzeigename, @(a.Abgeschlossen is { } z ? Zeit.Kurz(z) : "")</dd>
+                }
+            </dl>
+            @if (a.Status == AntragStatus.Abgeschlossen)
+            {
+                <div><a class="pm-btn pm-btn-haupt" href="antraege/@Id/pdf" target="_blank" data-enhance-nav="false">Dokument (PDF) öffnen</a></div>
+            }
+        </section>
+    </div>
+
+    @* ---------------- Erstprüfende: Termin, Ort, Zweitprüfende ---------------- *@
+    @if (aktionen.Festlegen.Erlaubt && vorlage is null)
+    {
+        <section class="pm-card">
+            <h2>Termin, Ort und Zweitprüfende festlegen</h2>
+            <p class="pm-small pm-muted">Nach Rücksprache mit der/dem Zweitprüfenden. Die letzte Wiederholung findet in Präsenz statt, nicht per Video (ATPO § 6 Abs. 1a Satz 2).
+                Speichern merkt die Angaben vor; verbindlich werden sie mit Ihrer Unterschrift.</p>
+            <div class="pm-fields">
+                <div class="pm-field">
+                    <label class="pm-lbl">Datum und Uhrzeit</label>
+                    <RadzenDatePicker TValue="DateTime?" @bind-Value="termin" ShowTime="true" HourFormat="24" DateFormat="dd.MM.yyyy HH:mm" Min="@DateTime.Today" Style="width:100%" />
+                </div>
+                <div class="pm-field">
+                    <label class="pm-lbl" for="ort">Ort (Raum)</label>
+                    <input id="ort" class="pm-input" @bind="ort" placeholder="z. B. SI 0012, Campus Westerberg" />
+                </div>
+                <div class="pm-field">
+                    <label class="pm-lbl">Zweitprüfende/r</label>
+                    <RadzenDropDown TValue="Guid?" Data="@zweitAuswahl" TextProperty="@nameof(Konto.Sortiername)" ValueProperty="@nameof(Konto.Id)" @bind-Value="zweitId"
+                                    AllowFiltering="true" FilterCaseSensitivity="FilterCaseSensitivity.CaseInsensitive" AllowClear="true"
+                                    Placeholder="aus der Liste wählen …" Style="width:100%" Disabled="@zweitExtern" />
+                    <label class="pm-check pm-small"><input type="checkbox" @bind="zweitExtern" /> Person ohne Konto im ProfOMat</label>
+                </div>
+                @if (zweitExtern)
+                {
+                    <div class="pm-field">
+                        <label class="pm-lbl" for="zweitname">Name der/des Zweitprüfenden</label>
+                        <input id="zweitname" class="pm-input" @bind="zweitName" />
+                    </div>
+                    <div class="pm-field">
+                        <label class="pm-lbl" for="zweitmail">Mailadresse (für die Benachrichtigung)</label>
+                        <input id="zweitmail" type="email" class="pm-input" @bind="zweitMail" />
+                    </div>
+                }
+                <div class="pm-field pm-field-weit">
+                    <label class="pm-lbl" for="bemerkung">Bemerkung (optional, erscheint im Dokument)</label>
+                    <textarea id="bemerkung" class="pm-textarea" @bind="bemerkung" maxlength="2000"></textarea>
+                </div>
+            </div>
+            <div class="pm-row">
+                <BegruendeterButton Text="Festlegung speichern" Click="FestlegungSpeichernAsync" Beschaeftigt="@beschaeftigt" />
+                <BegruendeterButton Text="Unterschreiben und an das Studiendekanat geben" Haupt="true" Freigabe="@aktionen.ErstpruefungUnterschreiben"
+                                    Click="@(() => VorlageLadenAsync(Signaturschritt.Erstpruefung))" />
+            </div>
+        </section>
+    }
+
+    @* ---------------- Studiendekanat ---------------- *@
+    @if (a.Status == AntragStatus.BeimStudiendekanat && vorlage is null)
+    {
+        <section class="pm-card">
+            <h2>Bestellung der Prüfenden (Studiendekanat)</h2>
+            <p class="pm-small pm-muted">Mit Ihrer Unterschrift bestellen Sie die Prüfenden (ATPO § 24 Abs. 2). Danach entsteht das PDF und geht an das Studierendensekretariat.</p>
+            <div class="pm-row">
+                <BegruendeterButton Text="Prüfende bestellen und unterschreiben" Haupt="true" Freigabe="@aktionen.Genehmigen"
+                                    Click="@(() => VorlageLadenAsync(Signaturschritt.Studiendekanat))" />
+            </div>
+            @if (aktionen.Genehmigen.Erlaubt)
+            {
+                <div class="pm-field">
+                    <label class="pm-lbl" for="rueckfrage">Rückfrage an die/den Erstprüfende/n (z. B. anderer Raum)</label>
+                    <textarea id="rueckfrage" class="pm-textarea" @bind="rueckfrageText" maxlength="2000"></textarea>
+                </div>
+                <div><BegruendeterButton Text="Zurückgeben" Click="ZurueckgebenAsync"
+                                         Freigabe="@(string.IsNullOrWhiteSpace(rueckfrageText) ? Freigabe.Nein("Bitte zuerst die Rückfrage eintragen.") : Freigabe.Ja)" /></div>
+            }
+        </section>
+    }
+
+    @if (vorlage is not null)
+    {
+        <Unterschreiben @ref="unterschreiben" Text="@vorlage.Text" Titel="@(vorlage.Schritt == Signaturschritt.Erstpruefung ? "Festlegung unterschreiben" : "Bestellung unterschreiben")"
+                        Unterzeichner="@vorlage.Unterzeichner" Beschaeftigte="true" Beschaeftigt="@beschaeftigt"
+                        Knopftext="@(vorlage.Schritt == Signaturschritt.Erstpruefung ? "Unterschreiben und weitergeben" : "Unterschreiben und abschließen")"
+                        Unterschrieben="UnterschriebenAsync">
+            <button type="button" class="pm-btn" @onclick="() => vorlage = null">Abbrechen</button>
+        </Unterschreiben>
+    }
+
+    @* ---------------- Ablehnen ---------------- *@
+    @if (aktionen.Ablehnen.Erlaubt && vorlage is null)
+    {
+        <details class="pm-card">
+            <summary><b>Antrag ablehnen</b></summary>
+            <p class="pm-small pm-muted">Die Begründung geht per Mail an die/den Studierenden. Sie/er kann dann einen neuen Antrag mit anderer Erstprüferin bzw. anderem Erstprüfer stellen.</p>
+            <textarea class="pm-textarea" @bind="ablehnungsgrund" maxlength="2000" aria-label="Begründung der Ablehnung"></textarea>
+            <div><BegruendeterButton Text="Ablehnen" Gefahr="true" Click="AblehnenAsync"
+                                     Freigabe="@(string.IsNullOrWhiteSpace(ablehnungsgrund) ? Freigabe.Nein("Bitte zuerst begründen.") : Freigabe.Ja)" /></div>
+        </details>
+    }
+
+    @if (schritte.Count > 0)
+    {
+        <NaechsteSchritte Schritte="@schritte" />
+    }
+
+    <section class="pm-card">
+        <h2>Unterschriften</h2>
+        @foreach (var b in ansicht.Signaturen)
+        {
+            var s = b.Signatur;
+            <div class="pm-sig @(s.Ueberholt is null ? "" : "ueberholt")">
+                <div>
+                    @if (s.Art == Signaturart.Handschrift && s.BildPng is { } png)
+                    {
+                        <img src="data:image/png;base64,@Convert.ToBase64String(png)" alt="Unterschrift @s.Unterzeichner" />
+                    }
+                    else
+                    {
+                        <div class="pm-sig-schluessel">Digital signiert<br />@s.Algorithmus<br /><span class="pm-mono">@SignaturPruefung.OeffentlicherSchluessel.Kurz(s.Fingerabdruck ?? new string('0', 16))</span></div>
+                    }
+                </div>
+                <div>
+                    <b>@s.Schritt.Anzeigename()</b> · @s.Unterzeichner · @Zeit.Kurz(s.Zeitpunkt)
+                    @if (s.Ueberholt is not null) { <StatusPille Stil="neutral">überholt</StatusPille> }
+                    else if (b.Gueltig) { <StatusPille Stil="gut">geprüft</StatusPille> }
+                    else { <StatusPille Stil="krit">fehlerhaft</StatusPille> }
+                    <ul class="pm-zeilen pm-small pm-muted">
+                        @foreach (var h in b.Hinweise) { <li>@h</li> }
+                    </ul>
+                    <details class="pm-small"><summary>Unterschriebener Text (SHA-256 <span class="pm-mono">@s.InhaltHash[..16]…</span>)</summary><pre class="pm-signiertext">@s.Inhalt</pre></details>
+                </div>
+            </div>
+        }
+    </section>
+}
+
+@code {
+    [Parameter]
+    public Guid Id { get; set; }
+
+    private AntragAnsicht? ansicht;
+    private AntragAktionen? aktionen;
+    private string? ladefehler;
+    private string? fehler;
+    private bool beschaeftigt;
+    private Signiervorlage? vorlage;
+    private Unterschreiben? unterschreiben;
+    private IReadOnlyList<Konto> zweitAuswahl = [];
+    private IReadOnlyList<NaechsterSchritt> schritte = [];
+
+    private DateTime? termin;
+    private string? ort;
+    private Guid? zweitId;
+    private bool zweitExtern;
+    private string? zweitName, zweitMail, bemerkung;
+    private string? rueckfrageText, ablehnungsgrund;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await LadenAsync();
+        if (ansicht is { } v)
+        {
+            var a = v.Antrag;
+            termin = a.Termin is { } t ? Zeit.Lokal(t) : null;
+            ort = a.Ort;
+            zweitId = a.ZweitpruefendeKontoId;
+            zweitExtern = a.ZweitpruefendeName is not null && a.ZweitpruefendeKontoId is null;
+            zweitName = zweitExtern ? a.ZweitpruefendeName : null;
+            zweitMail = zweitExtern ? a.ZweitpruefendeEmail : null;
+            bemerkung = a.Bemerkung;
+            zweitAuswahl = (await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<KontoDienst>().PruefendeAsync())).Where(k => k.Id != a.ErstpruefendeKontoId).ToList();
+        }
+    }
+
+    private async Task LadenAsync()
+    {
+        try
+        {
+            (ansicht, aktionen) = await Vorgang.AusfuehrenAsync(async d =>
+            {
+                var dienst = d.GetRequiredService<DrittpruefungDienst>();
+                return (await dienst.AnsichtAsync(Id), await dienst.AktionenAsync(Id));
+            });
+        }
+        catch (FachlicherFehler ex)
+        {
+            ladefehler = ex.Message;
+        }
+    }
+
+    private async Task AusfuehrenAsync(Func<IServiceProvider, Task> arbeit, string erfolg, Func<IReadOnlyList<NaechsterSchritt>>? danach = null)
+    {
+        fehler = null;
+        beschaeftigt = true;
+        try
+        {
+            await Vorgang.AusfuehrenAsync(arbeit);
+            await LadenAsync();
+            Hinweise.Notify(NotificationSeverity.Success, erfolg);
+            schritte = danach?.Invoke() ?? [];
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+            unterschreiben?.FehlerZeigen(ex.Message);
+        }
+        finally
+        {
+            beschaeftigt = false;
+        }
+    }
+
+    private Festlegung AktuelleEingabe() => new(
+        termin is { } t ? Zeit.AlsUtc(t) : DateTimeOffset.MinValue,
+        ort ?? "",
+        zweitExtern ? null : zweitId,
+        zweitExtern ? zweitName ?? "" : zweitAuswahl.FirstOrDefault(k => k.Id == zweitId)?.Anzeigename ?? "",
+        zweitExtern ? zweitMail : null,
+        bemerkung);
+
+    private Task FestlegungSpeichernAsync()
+    {
+        if (termin is null)
+        {
+            fehler = "Bitte Datum und Uhrzeit wählen.";
+            return Task.CompletedTask;
+        }
+
+        var f = AktuelleEingabe();
+        return AusfuehrenAsync(d => d.GetRequiredService<DrittpruefungDienst>().FestlegungSpeichernAsync(Id, f), "Festlegung gespeichert.");
+    }
+
+    private async Task VorlageLadenAsync(Signaturschritt schritt)
+    {
+        fehler = null;
+        try
+        {
+            vorlage = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<DrittpruefungDienst>().VorlageAsync(Id, schritt));
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+        }
+    }
+
+    private async Task UnterschriebenAsync(Unterschrift u)
+    {
+        var v = vorlage!;
+        await AusfuehrenAsync(d => v.Schritt == Signaturschritt.Erstpruefung
+                ? d.GetRequiredService<DrittpruefungDienst>().ErstpruefungUnterschreibenAsync(Id, v.Zeitpunkt, v.Text, u)
+                : d.GetRequiredService<DrittpruefungDienst>().GenehmigenAsync(Id, v.Zeitpunkt, v.Text, u),
+            v.Schritt == Signaturschritt.Erstpruefung ? "Unterschrieben und an das Studiendekanat gegeben." : "Bestellt. Das PDF geht an das Studierendensekretariat.",
+            () => v.Schritt == Signaturschritt.Erstpruefung
+                ? [new NaechsterSchritt("Zurück zu meinen Aufgaben", "", Hauptschritt: true), new NaechsterSchritt("Alle Anträge", "antraege")]
+                : [new NaechsterSchritt("PDF öffnen", $"antraege/{Id}/pdf", Hauptschritt: true), new NaechsterSchritt("Zurück zu meinen Aufgaben", "")]);
+        if (fehler is null)
+        {
+            vorlage = null;
+        }
+    }
+
+    private Task ZurueckgebenAsync() => AusfuehrenAsync(d => d.GetRequiredService<DrittpruefungDienst>().ZurueckgebenAsync(Id, rueckfrageText ?? ""),
+        "Zurückgegeben; die/der Erstprüfende ist informiert.");
+
+    private Task AblehnenAsync() => AusfuehrenAsync(d => d.GetRequiredService<DrittpruefungDienst>().AblehnenAsync(Id, ablehnungsgrund ?? ""),
+        "Abgelehnt; die/der Studierende ist informiert.", () => [new NaechsterSchritt("Zurück zu meinen Aufgaben", "", Hauptschritt: true)]);
+}

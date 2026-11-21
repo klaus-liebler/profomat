@@ -1,0 +1,72 @@
+@page "/antraege"
+@attribute [Authorize]
+@inject Vorgang Vorgang
+@inject NavigationManager Navigation
+@inject Ortszeit Zeit
+
+<PageTitle>Anträge · ProfOMat</PageTitle>
+
+<div class="pm-head">
+    <div>
+        <h1>Anträge auf mündliche Drittprüfung</h1>
+        <p>Prüfende sehen die Anträge, in denen sie Erst- oder Zweitprüfende sind; Studiendekanat und Studierendensekretariat sehen alle.</p>
+    </div>
+</div>
+
+<div class="pm-chips" role="tablist" aria-label="Filter">
+    @foreach (var (f, titel) in Filter)
+    {
+        <a class="pm-chip @(f == filter ? "on" : "")" href="antraege?filter=@f">@titel</a>
+    }
+</div>
+
+<section class="pm-card">
+    @if (zeilen is null)
+    {
+        <p class="pm-muted">Wird geladen …</p>
+    }
+    else if (zeilen.Count == 0)
+    {
+        <p class="pm-muted">Keine Anträge in dieser Ansicht.</p>
+    }
+    else
+    {
+        <div class="pm-tbl">
+            <table>
+                <thead><tr><th>Nummer</th><th>Prüfung</th><th>Studierende/r</th><th>Erstprüfende/r</th><th>Termin</th><th>Stand</th></tr></thead>
+                <tbody>
+                    @foreach (var z in zeilen)
+                    {
+                        <tr class="@(z.WartetAufMich ? "pm-hervor" : "")">
+                            <td><a href="antraege/@z.Id">@z.Nummer</a></td>
+                            <td>@z.Pruefung<br /><span class="pm-small pm-muted">@z.Studiengang</span></td>
+                            <td>@z.Name<br /><span class="pm-small pm-muted">@z.Matrikelnummer</span></td>
+                            <td>@z.Erstpruefende</td>
+                            <td>@(z.Termin is { } t ? Zeit.Kurz(t) : "–")</td>
+                            <td><StatusPille Stil="@Darstellung.Stil(z.Status)">@z.Status.Anzeigename()</StatusPille>
+                                @if (z.WartetAufMich) { <br /><span class="pm-small"><b>wartet auf Sie</b></span> }</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</section>
+
+@code {
+    private static readonly (AntragFilter, string)[] Filter =
+        [(AntragFilter.MeineAufgaben, "Wartet auf mich"), (AntragFilter.Offen, "Offen"), (AntragFilter.Alle, "Alle")];
+
+    [SupplyParameterFromQuery(Name = "filter")]
+    private string? FilterText { get; set; }
+
+    private AntragFilter filter = AntragFilter.Offen;
+    private IReadOnlyList<AntragZeile>? zeilen;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        filter = Enum.TryParse<AntragFilter>(FilterText, out var f) ? f : AntragFilter.Offen;
+        zeilen = null;
+        zeilen = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<DrittpruefungDienst>().ListeAsync(filter));
+    }
+}

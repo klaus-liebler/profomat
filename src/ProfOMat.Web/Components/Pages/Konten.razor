@@ -1,0 +1,160 @@
+@page "/konten"
+@attribute [Authorize]
+@using ProfOMat.Application.Konten
+@inject Vorgang Vorgang
+@inject NotificationService Hinweise
+
+<PageTitle>Konten · ProfOMat</PageTitle>
+
+<div class="pm-head">
+    <div>
+        <h1>Konten</h1>
+        <p>Lokale Konten mit Kennung und Passwort. Später kommen Konten zusätzlich über die Hochschulkennung (Single Sign-on) hinzu.</p>
+    </div>
+</div>
+
+@if (fehler is not null)
+{
+    <div class="pm-alert pm-crit" role="alert">@fehler</div>
+}
+
+<section class="pm-card">
+    <div class="pm-tbl">
+        <table>
+            <thead><tr><th>Name</th><th>Kennung</th><th>Mail</th><th>Rollen</th><th>Schlüssel</th><th></th></tr></thead>
+            <tbody>
+                @foreach (var k in konten)
+                {
+                    <tr class="@(k.Aktiv ? "" : "pm-alt") @(k.Id == bearbeitet?.Id ? "pm-hervor" : "")">
+                        <td>@k.Anzeigename @if (!k.Aktiv) { <StatusPille Stil="neutral">gesperrt</StatusPille> }</td>
+                        <td class="pm-mono">@k.Kennung</td>
+                        <td>@k.Email</td>
+                        <td>@string.Join(", ", k.Rollen.Select(r => r.Rolle.Anzeigename()))</td>
+                        <td>@k.Schluessel.Count(s => s.WiderrufenAm is null)</td>
+                        <td><button type="button" class="pm-linkbutton" @onclick="() => Bearbeiten(k)">bearbeiten</button></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    <div><button type="button" class="pm-btn" @onclick="Neu">Neues Konto</button></div>
+</section>
+
+@if (formular)
+{
+    <section class="pm-card">
+        <h2>@(bearbeitet is null ? "Neues Konto" : $"Konto {bearbeitet.Kennung}")</h2>
+        <div class="pm-fields">
+            @if (bearbeitet is null)
+            {
+                <div class="pm-field"><label class="pm-lbl" for="kennung">Kennung</label><input id="kennung" class="pm-input" @bind="kennung" autocomplete="off" /></div>
+            }
+            <div class="pm-field"><label class="pm-lbl" for="titel">Titel</label><input id="titel" class="pm-input" @bind="titel" placeholder="Prof. Dr." /></div>
+            <div class="pm-field"><label class="pm-lbl" for="vorname">Vorname</label><input id="vorname" class="pm-input" @bind="vorname" /></div>
+            <div class="pm-field"><label class="pm-lbl" for="nachname">Nachname</label><input id="nachname" class="pm-input" @bind="nachname" /></div>
+            <div class="pm-field"><label class="pm-lbl" for="mail">Mail</label><input id="mail" type="email" class="pm-input" @bind="email" /></div>
+            <div class="pm-field">
+                <span class="pm-lbl">Rollen</span>
+                @foreach (var r in Enum.GetValues<Rolle>())
+                {
+                    <label class="pm-check"><input type="checkbox" checked="@rollen.Contains(r)" @onchange="e => Umschalten(r, e.Value is true)" /> @r.Anzeigename()</label>
+                }
+            </div>
+            <div class="pm-field">
+                <label class="pm-lbl" for="pw">@(bearbeitet is null ? "Passwort (mind. 12 Zeichen)" : "Neues Passwort (leer = unverändert)")</label>
+                <input id="pw" type="password" class="pm-input" @bind="passwort" autocomplete="new-password" />
+            </div>
+            @if (bearbeitet is not null)
+            {
+                <div class="pm-field"><span class="pm-lbl">Zugang</span><label class="pm-check"><input type="checkbox" @bind="aktiv" /> aktiv</label></div>
+            }
+        </div>
+        <div class="pm-row">
+            <BegruendeterButton Text="Speichern" Haupt="true" Click="SpeichernAsync" />
+            <button type="button" class="pm-btn" @onclick="() => formular = false">Abbrechen</button>
+        </div>
+    </section>
+}
+
+@code {
+    private IReadOnlyList<Konto> konten = [];
+    private Konto? bearbeitet;
+    private bool formular, aktiv = true;
+    private string? fehler, kennung, titel, vorname, nachname, email, passwort;
+    private HashSet<Rolle> rollen = [];
+
+    protected override Task OnInitializedAsync() => LadenAsync();
+
+    private async Task LadenAsync()
+    {
+        try
+        {
+            ProfOMat.Application.Betrieb.Rechte.Verwaltung(await Vorgang.BenutzerAsync()).Sicherstellen();
+            konten = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<KontoDienst>().AlleAsync());
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+        }
+    }
+
+    private void Neu()
+    {
+        bearbeitet = null;
+        kennung = titel = vorname = nachname = email = passwort = null;
+        rollen = [Rolle.Pruefende];
+        aktiv = true;
+        formular = true;
+    }
+
+    private void Bearbeiten(Konto k)
+    {
+        bearbeitet = k;
+        (titel, vorname, nachname, email, passwort, aktiv) = (k.Titel, k.Vorname, k.Nachname, k.Email, null, k.Aktiv);
+        rollen = k.Rollen.Select(r => r.Rolle).ToHashSet();
+        formular = true;
+    }
+
+    private void Umschalten(Rolle r, bool an)
+    {
+        if (an)
+        {
+            rollen.Add(r);
+        }
+        else
+        {
+            rollen.Remove(r);
+        }
+    }
+
+    private async Task SpeichernAsync()
+    {
+        fehler = null;
+        try
+        {
+            await Vorgang.AusfuehrenAsync(async d =>
+            {
+                var dienst = d.GetRequiredService<KontoDienst>();
+                if (bearbeitet is null)
+                {
+                    await dienst.AnlegenAsync(kennung ?? "", titel, vorname ?? "", nachname ?? "", email ?? "", rollen, passwort);
+                }
+                else
+                {
+                    await dienst.AendernAsync(bearbeitet.Id, titel, vorname ?? "", nachname ?? "", email ?? "", rollen, aktiv);
+                    if (!string.IsNullOrEmpty(passwort))
+                    {
+                        await dienst.PasswortSetzenAsync(bearbeitet.Id, null, passwort);
+                    }
+                }
+            });
+            formular = false;
+            Hinweise.Notify(NotificationSeverity.Success, "Konto gespeichert.");
+            await LadenAsync();
+        }
+        catch (Exception ex) when (ex is FachlicherFehler or ArgumentException)
+        {
+            fehler = ex.Message;
+        }
+    }
+}

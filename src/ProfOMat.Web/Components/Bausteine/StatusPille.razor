@@ -1,0 +1,10 @@
+<span class="pm-pill pm-p-@Stil">@ChildContent</span>
+
+@code {
+    /// <summary>„gut“, „warn“, „krit“, „info“ oder „neutral“.</summary>
+    [Parameter]
+    public string Stil { get; set; } = "neutral";
+
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+}

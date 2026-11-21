@@ -1,0 +1,21 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/ProfOMat.Domain/ProfOMat.Domain.csproj" />
+    <Project Path="src/ProfOMat.Application/ProfOMat.Application.csproj" />
+    <Project Path="src/ProfOMat.Infrastructure/ProfOMat.Infrastructure.csproj" />
+    <Project Path="src/ProfOMat.Adapters.Mocks/ProfOMat.Adapters.Mocks.csproj" />
+    <Project Path="src/ProfOMat.Web/ProfOMat.Web.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/ProfOMat.Domain.Tests/ProfOMat.Domain.Tests.csproj" />
+    <Project Path="tests/ProfOMat.Application.Tests/ProfOMat.Application.Tests.csproj" />
+  </Folder>
+  <Folder Name="/Solution Items/">
+    <File Path=".editorconfig" />
+    <File Path="Directory.Build.props" />
+    <File Path="Directory.Packages.props" />
+    <File Path="global.json" />
+    <File Path="README.md" />
+    <File Path="CLAUDE.md" />
+  </Folder>
+</Solution>

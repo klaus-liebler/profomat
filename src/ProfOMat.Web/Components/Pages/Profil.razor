@@ -1,0 +1,141 @@
+@page "/profil"
+@attribute [Authorize]
+@using ProfOMat.Application.Konten
+@inject Vorgang Vorgang
+@inject Ortszeit Zeit
+@inject TimeProvider Uhr
+@inject NotificationService Hinweise
+
+<PageTitle>Profil · ProfOMat</PageTitle>
+
+<div class="pm-head">
+    <div>
+        <h1>Profil und Signaturschlüssel</h1>
+        <p>Wer mit eigenem Schlüssel unterschreiben möchte, hinterlegt hier einmal den öffentlichen Teil. Der private Schlüssel bleibt bei Ihnen:
+            Der Browser signiert damit einen Nachweistext; übertragen wird nur der öffentliche Schlüssel.</p>
+    </div>
+</div>
+
+@if (fehler is not null)
+{
+    <div class="pm-alert pm-crit" role="alert">@fehler</div>
+}
+
+@if (konto is not null)
+{
+    <div class="pm-grid-2">
+        <section class="pm-card">
+            <h2>Hinterlegte Schlüssel</h2>
+            @if (konto.Schluessel.Count == 0)
+            {
+                <p class="pm-muted">Noch keiner. Ohne Schlüssel unterschreiben Sie im Unterschriftsfeld.</p>
+            }
+            <div class="pm-list">
+                @foreach (var s in konto.Schluessel.OrderByDescending(s => s.Hinterlegt))
+                {
+                    <div>
+                        <span class="pm-grow"><b>@s.Bezeichnung</b> · @s.Algorithmus<br />
+                            <span class="pm-mono">@SignaturPruefung.OeffentlicherSchluessel.Kurz(s.Fingerabdruck)</span>
+                            <span class="pm-small pm-muted">· hinterlegt @Zeit.Kurz(s.Hinterlegt)</span></span>
+                        @if (s.WiderrufenAm is { } w)
+                        {
+                            <StatusPille Stil="neutral">widerrufen @Zeit.Datum(w)</StatusPille>
+                        }
+                        else
+                        {
+                            <button type="button" class="pm-btn pm-btn-gefahr" @onclick="() => WiderrufenAsync(s.Id)">Widerrufen</button>
+                        }
+                    </div>
+                }
+            </div>
+            <div class="pm-field">
+                <label class="pm-lbl" for="bez">Bezeichnung für den neuen Schlüssel</label>
+                <input id="bez" class="pm-input" @bind="bezeichnung" placeholder="z. B. Dienstlaptop 2026" />
+            </div>
+            @if (nachweis is null)
+            {
+                <div><button type="button" class="pm-btn pm-btn-haupt" @onclick="NachweisStarten">Neuen Schlüssel hinterlegen</button></div>
+            }
+        </section>
+        <section class="pm-card">
+            <h2>Passwort ändern</h2>
+            @if (konto.PasswortHash is not null)
+            {
+                <div class="pm-field"><label class="pm-lbl" for="alt">Bisheriges Passwort</label><input id="alt" type="password" class="pm-input" @bind="altesPasswort" autocomplete="current-password" /></div>
+            }
+            <div class="pm-field"><label class="pm-lbl" for="neu">Neues Passwort (mind. @KontoDienst.MinPasswortLaenge Zeichen)</label><input id="neu" type="password" class="pm-input" @bind="neuesPasswort" autocomplete="new-password" /></div>
+            <div><BegruendeterButton Text="Passwort ändern" Click="PasswortAsync" /></div>
+        </section>
+    </div>
+
+    @if (nachweis is { } n)
+    {
+        <Unterschreiben @ref="unterschreiben" Text="@n.Text" Titel="Besitz des Schlüssels nachweisen" Unterzeichner="@konto.Anzeigename"
+                        Knopftext="Schlüssel hinterlegen" Unterschrieben="HinterlegenAsync">
+            <button type="button" class="pm-btn" @onclick="() => nachweis = null">Abbrechen</button>
+        </Unterschreiben>
+        <p class="pm-small pm-muted">Hier bitte „Mit eigenem Schlüssel“ wählen. Tipp zum Erzeugen eines passwortgeschützten Schlüssels:
+            <span class="pm-mono">openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -aes-256-cbc -out profomat-schluessel.pem</span></p>
+    }
+}
+
+@code {
+    private Konto? konto;
+    private string? fehler, altesPasswort, neuesPasswort, bezeichnung;
+    private (string Text, DateTimeOffset Zeit)? nachweis;
+    private Unterschreiben? unterschreiben;
+
+    protected override Task OnInitializedAsync() => LadenAsync();
+
+    private async Task LadenAsync() => konto = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<KontoDienst>().EigenesKontoAsync());
+
+    private void NachweisStarten()
+    {
+        var zeit = Signaturinhalt.Kappen(Uhr.GetUtcNow());
+        nachweis = (KontoDienst.Besitznachweis(konto!.Id, zeit), zeit);
+    }
+
+    private async Task HinterlegenAsync(Unterschrift u)
+    {
+        if (u.Art != Signaturart.Schluessel)
+        {
+            unterschreiben?.FehlerZeigen("Zum Hinterlegen bitte „Mit eigenem Schlüssel“ wählen.");
+            return;
+        }
+
+        try
+        {
+            var zeit = nachweis!.Value.Zeit;
+            await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<KontoDienst>().SchluesselHinterlegenAsync(zeit, u, bezeichnung ?? "Schlüssel"));
+            nachweis = null;
+            bezeichnung = null;
+            Hinweise.Notify(NotificationSeverity.Success, "Schlüssel hinterlegt.");
+            await LadenAsync();
+        }
+        catch (FachlicherFehler ex)
+        {
+            unterschreiben?.FehlerZeigen(ex.Message);
+        }
+    }
+
+    private async Task WiderrufenAsync(Guid id)
+    {
+        await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<KontoDienst>().SchluesselWiderrufenAsync(id));
+        await LadenAsync();
+    }
+
+    private async Task PasswortAsync()
+    {
+        fehler = null;
+        try
+        {
+            await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<KontoDienst>().PasswortSetzenAsync(konto!.Id, altesPasswort, neuesPasswort ?? ""));
+            altesPasswort = neuesPasswort = null;
+            Hinweise.Notify(NotificationSeverity.Success, "Passwort geändert.");
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+        }
+    }
+}
