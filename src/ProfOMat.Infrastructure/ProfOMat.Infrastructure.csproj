@@ -6,6 +6,7 @@
     <PackageReference Include="Quartz.Extensions.Hosting" />
     <PackageReference Include="PDFsharp-MigraDoc" />
     <PackageReference Include="QRCoder" />
+    <PackageReference Include="ClosedXML" />
   </ItemGroup>
 
   <ItemGroup>

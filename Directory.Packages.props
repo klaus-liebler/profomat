@@ -3,7 +3,7 @@
     <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
   </PropertyGroup>
   <!-- Zentrale Paketversionen, gleiche Auswahl wie VibeVHS. Nicht verwenden: QuestPDF, MediatR, AutoMapper, FluentAssertions.
-       Neue Pakete nur nach Rückfrage. -->
+       Neue Pakete nur nach Rückfrage (ClosedXML freigegeben 11/2026). -->
   <ItemGroup>
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="11.0.0" />
     <PackageVersion Include="Microsoft.Extensions.TimeProvider.Testing" Version="11.0.0" />
@@ -13,6 +13,7 @@
     <PackageVersion Include="Quartz.Extensions.Hosting" Version="4.7.3" />
     <PackageVersion Include="PDFsharp-MigraDoc" Version="6.2.4" />
     <PackageVersion Include="QRCoder" Version="1.6.0" />
+    <PackageVersion Include="ClosedXML" Version="0.105.1" />
     <!-- transitiv von PDFsharp: auf die sichere Version heben -->
     <PackageVersion Include="System.Security.Cryptography.Pkcs" Version="11.0.0" />
     <PackageVersion Include="xunit.v3" Version="4.0.3" />

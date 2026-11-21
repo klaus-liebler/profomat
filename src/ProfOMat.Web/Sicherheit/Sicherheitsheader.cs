@@ -44,7 +44,7 @@ internal static class Sicherheitsheader
     public static readonly string[] OeffentlichePfade = ["/anmelden", "/drittpruefung"];
 
     /// <summary>Seiten mit Personendaten, Abwesenheiten oder Protokoll: nie im Browser- oder Proxy-Cache ablegen.</summary>
-    private static readonly string[] OhneCache = ["/antraege", "/drittpruefung", "/konten", "/protokoll", "/postausgang", "/profil"];
+    private static readonly string[] OhneCache = ["/antraege", "/drittpruefung", "/konten", "/protokoll", "/postausgang", "/profil", "/klausuren"];
 
     public static IApplicationBuilder UseSicherheitsheader(this IApplicationBuilder app)
         => app.Use(async (kontext, weiter) =>

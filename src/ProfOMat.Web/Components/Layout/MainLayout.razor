@@ -27,7 +27,7 @@
                 }
             }
         </nav>
-        <div class="pm-foot">Iteration 1 · Drittprüfungen<br />Entwicklungsstand</div>
+        <div class="pm-foot">Iteration 2 · Klausuren<br />Entwicklungsstand</div>
     </aside>
     <div class="pm-main">
         <div class="pm-streifen" aria-hidden="true"></div>
@@ -88,6 +88,8 @@
         new("Übersicht", "Start", "", NurAngemeldet: false),
         new("Drittprüfungen", "Anträge", "antraege"),
         new("Drittprüfungen", "Antrag stellen (Studierende)", "drittpruefung/antrag", NurAngemeldet: false),
+        new("Klausuren", "Klausuren", "klausuren", Recht: ProfOMat.Application.Klausuren.KlausurDienst.KlausurenAnlegen),
+        new("Klausuren", "Räume", "raeume", Recht: ProfOMat.Application.Klausuren.KlausurDienst.KlausurenAnlegen),
         new("Studium", "Studiengänge und Prüfungen", "katalog"),
         new("Weitere Formulare", "Abschlussarbeiten", "", Geplant: "später"),
         new("Weitere Formulare", "Anrechnungen", "", Geplant: "später"),

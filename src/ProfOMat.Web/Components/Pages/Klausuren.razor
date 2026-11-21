@@ -1,0 +1,139 @@
+@page "/klausuren"
+@attribute [Authorize]
+@using ProfOMat.Application.Klausuren
+@using ProfOMat.Domain.Klausuren
+@inject Vorgang Vorgang
+@inject Ortszeit Zeit
+@inject NavigationManager Navigation
+
+<PageTitle>Klausuren · ProfOMat</PageTitle>
+
+<div class="pm-head">
+    <div>
+        <h1>Klausuren</h1>
+        <p>Prüfungsliste aus dem Hochschulsystem (CSV) hochladen, Räume und Plätze verteilen, Serienbrief-Daten erzeugen, Punkte eintragen, Ergebnis veröffentlichen.</p>
+    </div>
+</div>
+
+@if (fehler is not null)
+{
+    <div class="pm-alert pm-crit" role="alert">@fehler</div>
+}
+
+<section class="pm-card">
+    <h2>Neue Klausur aus Prüfungsliste</h2>
+    <div class="pm-fields">
+        <div class="pm-field pm-field-weit">
+            <label class="pm-lbl" for="liste">Prüfungsliste (CSV-Export aus dem Hochschulsystem)</label>
+            <InputFile id="liste" OnChange="DateiGewaehltAsync" accept=".csv,text/csv" class="pm-input" />
+            @if (vorschau is not null)
+            {
+                <span class="pm-hilfe">@vorschau.Zeilen.Count Teilnehmende · @(vorschau.Pruefungsname ?? "ohne Prüfungsname") · @(vorschau.Pruefungsnummer ?? "")
+                    @foreach (var h in vorschau.Hinweise) { <br />@h }</span>
+            }
+        </div>
+        <div class="pm-field">
+            <label class="pm-lbl" for="titel">Titel</label>
+            <input id="titel" class="pm-input" @bind="titel" placeholder="aus der Liste" />
+        </div>
+        <div class="pm-field">
+            <label class="pm-lbl" for="kuerzel">Kürzel für die Klausur-IDs</label>
+            <input id="kuerzel" class="pm-input" @bind="kuerzel" maxlength="6" placeholder="z. B. RT" />
+            <span class="pm-hilfe">2–6 Zeichen, erscheint vorn in jeder ID (z. B. RT-7KQ3X).</span>
+        </div>
+        <div class="pm-field">
+            <label class="pm-lbl">Termin</label>
+            <RadzenDatePicker TValue="DateTime?" @bind-Value="termin" ShowTime="true" HourFormat="24" DateFormat="dd.MM.yyyy HH:mm" Style="width:100%" />
+        </div>
+    </div>
+    <div>
+        <BegruendeterButton Text="Klausur anlegen" Haupt="true" Click="AnlegenAsync" Beschaeftigt="@beschaeftigt"
+                            Freigabe="@(datei is null ? Freigabe.Nein("Bitte zuerst die CSV-Datei wählen.") : string.IsNullOrWhiteSpace(kuerzel) ? Freigabe.Nein("Bitte ein Kürzel angeben.") : Freigabe.Ja)" />
+    </div>
+</section>
+
+<section class="pm-card">
+    <h2>Meine Klausuren</h2>
+    @if (liste.Count == 0)
+    {
+        <p class="pm-muted">Noch keine.</p>
+    }
+    else
+    {
+        <div class="pm-tbl">
+            <table>
+                <thead><tr><th>Klausur</th><th>Termin</th><th>Teilnehmende</th><th>Stand</th></tr></thead>
+                <tbody>
+                    @foreach (var k in liste)
+                    {
+                        <tr>
+                            <td><a href="klausuren/@k.Id">@k.Titel</a><br /><span class="pm-small pm-muted">@k.Kuerzel · @k.Pruefungsnummer</span></td>
+                            <td>@(k.Termin is { } t ? Zeit.Kurz(t) : "–")</td>
+                            <td>@k.Angemeldete.Count()</td>
+                            <td>@Stand(k)</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</section>
+
+@code {
+    private IReadOnlyList<Klausur> liste = [];
+    private byte[]? datei;
+    private Pruefungsliste? vorschau;
+    private string? titel, kuerzel, fehler;
+    private DateTime? termin;
+    private bool beschaeftigt;
+
+    protected override async Task OnInitializedAsync() => liste = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<KlausurDienst>().ListeAsync());
+
+    private static string Stand(Klausur k)
+    {
+        var mitPunkten = k.Angemeldete.Count(t => t.Anwesend is not null);
+        return mitPunkten > 0 ? $"Bewertung: {mitPunkten}/{k.Angemeldete.Count()} erfasst"
+            : k.Verteilt is not null ? "Plätze verteilt"
+            : "importiert";
+    }
+
+    private async Task DateiGewaehltAsync(InputFileChangeEventArgs e)
+    {
+        fehler = null;
+        vorschau = null;
+        datei = null;
+        try
+        {
+            using var puffer = new MemoryStream();
+            await e.File.OpenReadStream(PruefungslisteLeser.MaxBytes).CopyToAsync(puffer);
+            datei = puffer.ToArray();
+            vorschau = PruefungslisteLeser.Lesen(datei);
+            titel ??= vorschau.Pruefungsname;
+        }
+        catch (Exception ex) when (ex is FachlicherFehler or IOException)
+        {
+            fehler = ex.Message;
+            datei = null;
+        }
+    }
+
+    private async Task AnlegenAsync()
+    {
+        fehler = null;
+        beschaeftigt = true;
+        try
+        {
+            var t = termin is { } x ? Zeit.AlsUtc(x) : (DateTimeOffset?)null;
+            var (k, _, _) = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<KlausurDienst>().AusListeAnlegenAsync(datei!, titel, kuerzel ?? "", t));
+            Navigation.NavigateTo($"klausuren/{k.Id}");
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+        }
+        finally
+        {
+            beschaeftigt = false;
+        }
+    }
+}

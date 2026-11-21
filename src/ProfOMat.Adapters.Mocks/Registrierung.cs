@@ -66,6 +66,13 @@ public sealed class Demodaten(IDaten daten, KatalogDienst katalog)
         daten.Hinzufuegen(new Pruefung(et2017.Id, "pnr:1110", "1110", "Grundlagen der Elektrotechnik 1", "Klausur 2 h", Herkunft.Hochschulsystem));
         await daten.SpeichernAsync(abbruch);
         await katalog.AbgleichenAsync(alsAutomatik: true, abbruch);
+
+        // Klausurräume (erfundene Platzzahlen)
+        daten.Hinzufuegen(new ProfOMat.Domain.Klausuren.Raum("AA 0101", "Hörsaal, Campus Westerberg", 96));
+        daten.Hinzufuegen(new ProfOMat.Domain.Klausuren.Raum("SI 0012", "Seminarraum", 40));
+        daten.Hinzufuegen(new ProfOMat.Domain.Klausuren.Raum("SI 0110", "Seminarraum", 32));
+        daten.Hinzufuegen(new ProfOMat.Domain.Klausuren.Raum("CN 0010", "Hörsaal, Caprivistraße", 60));
+        await daten.SpeichernAsync(abbruch);
         return true;
     }
 }

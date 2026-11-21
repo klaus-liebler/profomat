@@ -169,6 +169,35 @@ app.MapGet("/drittpruefung/status/{id:guid}/{token}/pdf", async (Guid id, string
     return Results.File(dok.Inhalt, dok.Inhaltstyp, dok.Dateiname);
 }).AllowAnonymous();
 
+// Klausur-Ausgaben (Rechte prüft der Dienst)
+app.MapGet("/klausuren/{id:guid}/{datei}", async (Guid id, string datei, ProfOMat.Application.Klausuren.KlausurDienst dienst, HttpContext http) =>
+{
+    try
+    {
+        var ergebnis = datei switch
+        {
+            "serienbrief.csv" => await dienst.SerienbriefAsync(id),
+            "noten.csv" => await dienst.NotenCsvAsync(id),
+            "sitzlisten.pdf" => await dienst.SitzlistenAsync(id),
+            "aushang.pdf" => await dienst.AushangAsync(id),
+            "ergebnis.pdf" => await dienst.ErgebnisPdfAsync(id),
+            "ergebnis.xlsx" => await dienst.ErgebnisXlsxAsync(id),
+            _ => null,
+        };
+        if (ergebnis is null)
+        {
+            return Results.NotFound();
+        }
+
+        http.Response.Headers.CacheControl = "no-store";
+        return Results.File(ergebnis.Inhalt, ergebnis.Typ, ergebnis.Name);
+    }
+    catch (FachlicherFehler ex)
+    {
+        return Results.Text(ex.Message, "text/plain; charset=utf-8", statusCode: StatusCodes.Status409Conflict);
+    }
+}).RequireAuthorization();
+
 app.MapRazorComponents<App>().AddInteractiveServerRenderMode();
 
 await app.RunAsync();

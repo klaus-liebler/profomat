@@ -1,0 +1,83 @@
+@page "/raeume"
+@attribute [Authorize]
+@using ProfOMat.Application.Klausuren
+@using ProfOMat.Domain.Klausuren
+@inject Vorgang Vorgang
+@inject NotificationService Hinweise
+
+<PageTitle>Räume · ProfOMat</PageTitle>
+
+<div class="pm-head">
+    <div>
+        <h1>Räume für Klausuren</h1>
+        <p>Platzzahl = Plätze bei Klausurbestuhlung (z. B. jeder zweite Platz). Die Plätze werden 1 bis n nummeriert.</p>
+    </div>
+</div>
+
+@if (fehler is not null)
+{
+    <div class="pm-alert pm-crit" role="alert">@fehler</div>
+}
+
+<section class="pm-card">
+    <div class="pm-tbl">
+        <table>
+            <thead><tr><th>Raum</th><th>Bezeichnung</th><th>Plätze</th><th>Aktiv</th><th></th></tr></thead>
+            <tbody>
+                @foreach (var r in raeume)
+                {
+                    <tr class="@(r.Aktiv ? "" : "pm-alt")">
+                        <td><b>@r.Kuerzel</b></td><td>@r.Bezeichnung</td><td>@r.Plaetze</td><td>@(r.Aktiv ? "ja" : "nein")</td>
+                        <td><button type="button" class="pm-linkbutton" @onclick="() => Bearbeiten(r)">bearbeiten</button></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<section class="pm-card">
+    <h2>@(id is null ? "Neuer Raum" : $"Raum {kuerzel} bearbeiten")</h2>
+    <div class="pm-fields">
+        <div class="pm-field"><label class="pm-lbl" for="rk">Kürzel</label><input id="rk" class="pm-input" @bind="kuerzel" placeholder="SI 0012" /></div>
+        <div class="pm-field"><label class="pm-lbl" for="rb">Bezeichnung</label><input id="rb" class="pm-input" @bind="bezeichnung" placeholder="Hörsaal, Campus Westerberg" /></div>
+        <div class="pm-field"><label class="pm-lbl" for="rp">Klausurplätze</label><input id="rp" type="number" min="1" class="pm-input" @bind="plaetze" /></div>
+        <div class="pm-field"><span class="pm-lbl">Status</span><label class="pm-check"><input type="checkbox" @bind="aktiv" /> aktiv (in Auswahlen)</label></div>
+    </div>
+    <div class="pm-row">
+        <BegruendeterButton Text="Speichern" Haupt="true" Click="SpeichernAsync" />
+        @if (id is not null) { <button type="button" class="pm-btn" @onclick="Neu">Neuer Raum</button> }
+    </div>
+</section>
+
+@code {
+    private IReadOnlyList<Raum> raeume = [];
+    private Guid? id;
+    private string? kuerzel, bezeichnung, fehler;
+    private int plaetze = 30;
+    private bool aktiv = true;
+
+    protected override Task OnInitializedAsync() => LadenAsync();
+
+    private async Task LadenAsync() => raeume = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<KlausurDienst>().RaeumeAsync(true));
+
+    private void Bearbeiten(Raum r) => (id, kuerzel, bezeichnung, plaetze, aktiv) = (r.Id, r.Kuerzel, r.Bezeichnung, r.Plaetze, r.Aktiv);
+
+    private void Neu() => (id, kuerzel, bezeichnung, plaetze, aktiv) = (null, null, null, 30, true);
+
+    private async Task SpeichernAsync()
+    {
+        fehler = null;
+        try
+        {
+            await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<KlausurDienst>().RaumSpeichernAsync(id, kuerzel ?? "", bezeichnung, plaetze, aktiv));
+            Hinweise.Notify(NotificationSeverity.Success, "Raum gespeichert.");
+            Neu();
+            await LadenAsync();
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+        }
+    }
+}

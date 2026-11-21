@@ -14,7 +14,7 @@
                 }
                 else
                 {
-                    <a class="@(s.Hauptschritt ? "pm-btn pm-btn-haupt" : "pm-btn")" href="@s.Ziel" title="@s.Hinweis" data-enhance-nav="@(s.Ziel.EndsWith("pdf", StringComparison.Ordinal) ? "false" : null)" target="@(s.Ziel.EndsWith("pdf", StringComparison.Ordinal) ? "_blank" : null)">@s.Titel</a>
+                    <a class="@(s.Hauptschritt ? "pm-btn pm-btn-haupt" : "pm-btn")" href="@s.Ziel" title="@s.Hinweis" data-enhance-nav="@(IstDatei(s.Ziel) ? "false" : null)" target="@(IstDatei(s.Ziel) ? "_blank" : null)">@s.Titel</a>
                 }
             }
         </div>
@@ -27,4 +27,8 @@
 
     [Parameter, EditorRequired]
     public IReadOnlyList<NaechsterSchritt> Schritte { get; set; } = [];
+
+    /// <summary>Downloads (PDF, CSV, XLSX) brauchen einen echten Seitenaufruf statt der Blazor-Navigation.</summary>
+    private static bool IstDatei(string ziel) => ziel.EndsWith("pdf", StringComparison.Ordinal) || ziel.EndsWith(".csv", StringComparison.Ordinal)
+                                                 || ziel.EndsWith(".xlsx", StringComparison.Ordinal);
 }

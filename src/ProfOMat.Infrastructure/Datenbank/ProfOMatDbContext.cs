@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using ProfOMat.Domain.Betrieb;
 using ProfOMat.Domain.Drittpruefung;
 using ProfOMat.Domain.Katalog;
+using ProfOMat.Domain.Klausuren;
 using ProfOMat.Domain.Konten;
 
 namespace ProfOMat.Infrastructure.Datenbank;
@@ -14,7 +15,7 @@ namespace ProfOMat.Infrastructure.Datenbank;
 public sealed class ProfOMatDbContext(DbContextOptions<ProfOMatDbContext> optionen) : DbContext(optionen)
 {
     /// <summary>Erhöhen, wenn sich das Modell ändert: eine ältere Datei wird dann beim Start abgelehnt (statt still falsch zu laufen).</summary>
-    public const int Schemaversion = 1;
+    public const int Schemaversion = 2;
 
     protected override void ConfigureConventions(ModelConfigurationBuilder konventionen)
     {
@@ -100,6 +101,64 @@ public sealed class ProfOMatDbContext(DbContextOptions<ProfOMatDbContext> option
             e.ToTable("Signaturen");
             e.HasKey(s => s.Id);
             e.Ignore(s => s.SiegelText);
+        });
+
+        m.Entity<Raum>(e =>
+        {
+            e.ToTable("Raeume");
+            e.HasKey(r => r.Id);
+            e.HasIndex(r => r.Kuerzel).IsUnique();
+            e.Ignore(r => r.Anzeige);
+        });
+        m.Entity<Klausur>(e =>
+        {
+            e.ToTable("Klausuren");
+            e.HasKey(k => k.Id);
+            e.HasIndex(k => k.VerantwortlichKontoId);
+            e.Ignore(k => k.Notenstufen);
+            e.Ignore(k => k.Angemeldete);
+            e.Ignore(k => k.AufgabenSortiert);
+            e.Ignore(k => k.Hoechstpunktzahl);
+            e.HasOne<Konto>().WithMany().HasForeignKey(k => k.VerantwortlichKontoId).OnDelete(DeleteBehavior.Restrict);
+            e.HasMany(k => k.Teilnahmen).WithOne().HasForeignKey(t => t.KlausurId).OnDelete(DeleteBehavior.Cascade);
+            e.HasMany(k => k.Aufgaben).WithOne().HasForeignKey(a => a.KlausurId).OnDelete(DeleteBehavior.Cascade);
+            e.HasMany(k => k.Raeume).WithOne().HasForeignKey(r => r.KlausurId).OnDelete(DeleteBehavior.Cascade);
+            e.HasMany<KlausurNotenstufe>("notenstufen").WithOne().HasForeignKey(s => s.KlausurId).OnDelete(DeleteBehavior.Cascade);
+            e.Navigation(k => k.Teilnahmen).AutoInclude().UsePropertyAccessMode(PropertyAccessMode.Field);
+            e.Navigation(k => k.Aufgaben).AutoInclude().UsePropertyAccessMode(PropertyAccessMode.Field);
+            e.Navigation(k => k.Raeume).AutoInclude().UsePropertyAccessMode(PropertyAccessMode.Field);
+            e.Navigation("notenstufen").AutoInclude();
+        });
+        m.Entity<Teilnahme>(e =>
+        {
+            e.ToTable("Teilnahmen");
+            e.HasKey(t => t.Id);
+            e.HasIndex(t => new { t.KlausurId, t.Matrikelnummer }).IsUnique();
+            e.HasIndex(t => new { t.KlausurId, t.Code }).IsUnique();
+            e.Ignore(t => t.Name);
+            e.Ignore(t => t.Summe);
+            e.HasMany(t => t.Bewertungen).WithOne().HasForeignKey(b => b.TeilnahmeId).OnDelete(DeleteBehavior.Cascade);
+            e.Navigation(t => t.Bewertungen).AutoInclude().UsePropertyAccessMode(PropertyAccessMode.Field);
+        });
+        m.Entity<Aufgabe>(e =>
+        {
+            e.ToTable("Aufgaben");
+            e.HasKey(a => a.Id);
+        });
+        m.Entity<Bewertung>(e =>
+        {
+            e.ToTable("Bewertungen");
+            e.HasKey(b => new { b.TeilnahmeId, b.AufgabeId });
+        });
+        m.Entity<KlausurRaum>(e =>
+        {
+            e.ToTable("KlausurRaeume");
+            e.HasKey(r => r.Id);
+        });
+        m.Entity<KlausurNotenstufe>(e =>
+        {
+            e.ToTable("Notenstufen");
+            e.HasKey(s => s.Id);
         });
 
         m.Entity<Nachricht>(e =>

@@ -19,6 +19,7 @@ public static class Registrierung
         dienste.AddScoped<KontoDienst>();
         dienste.AddScoped<KatalogDienst>();
         dienste.AddScoped<DrittpruefungDienst>();
+        dienste.AddScoped<Klausuren.KlausurDienst>();
         return dienste;
     }
 }

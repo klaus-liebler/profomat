@@ -1,0 +1,491 @@
+@page "/klausuren/{Id:guid}"
+@attribute [Authorize]
+@using System.Globalization
+@using ProfOMat.Application.Klausuren
+@using ProfOMat.Domain.Klausuren
+@inject Vorgang Vorgang
+@inject Ortszeit Zeit
+@inject NotificationService Hinweise
+
+<PageTitle>@(ansicht?.Klausur.Titel ?? "Klausur") · ProfOMat</PageTitle>
+
+<a class="pm-zurueck" href="klausuren">← Zu den Klausuren</a>
+
+@if (ladefehler is not null)
+{
+    <section class="pm-card" role="alert"><h1>Klausur nicht verfügbar</h1><p>@ladefehler</p></section>
+}
+else if (ansicht is null)
+{
+    <p class="pm-muted">Wird geladen …</p>
+}
+else
+{
+    var k = ansicht.Klausur;
+    var w = ansicht.Auswertung;
+    <div class="pm-head">
+        <div>
+            <h1>@k.Titel</h1>
+            <p>@(ansicht.TerminText ?? "Termin offen") · @k.Pruefungsnummer · @k.Angemeldete.Count() Teilnehmende@(k.Teilnahmen.Count > k.Angemeldete.Count() ? $" ({k.Teilnahmen.Count - k.Angemeldete.Count()} abgemeldet)" : "")</p>
+        </div>
+    </div>
+
+    <div class="pm-chips" role="tablist">
+        @foreach (var (b, t) in Bereiche)
+        {
+            <a class="pm-chip @(bereich == b ? "on" : "")" href="klausuren/@Id?bereich=@b">@t</a>
+        }
+    </div>
+
+    @if (fehler is not null)
+    {
+        <div class="pm-alert pm-crit" role="alert">@fehler</div>
+    }
+
+    @switch (bereich)
+    {
+        case "bewertung":
+            <section class="pm-card">
+                <h2>Aufgaben</h2>
+                <p class="pm-small pm-muted">Sonderpunkte zählen zur Summe, aber nicht zur Höchstpunktzahl. Höchstpunktzahl derzeit: <b>@Zahl(aufgabenEntwurf.Where(a => !a.Sonder).Sum(a => a.Max))</b></p>
+                <div class="pm-tbl">
+                    <table>
+                        <thead><tr><th>Nr.</th><th>Titel</th><th>Max. Punkte</th><th>Sonderpunkte</th><th></th></tr></thead>
+                        <tbody>
+                            @foreach (var a in aufgabenEntwurf)
+                            {
+                                var zeile = a;
+                                <tr>
+                                    <td>@(aufgabenEntwurf.IndexOf(zeile) + 1)</td>
+                                    <td><input class="pm-input" @bind="zeile.Titel" aria-label="Titel" /></td>
+                                    <td><input class="pm-input" style="max-width:110px" inputmode="decimal" value="@Zahl(zeile.Max)" @onchange="e => zeile.Max = Dezimal(e.Value) ?? zeile.Max" aria-label="Höchstpunkte" /></td>
+                                    <td><input type="checkbox" @bind="zeile.Sonder" aria-label="Sonderpunkte" /></td>
+                                    <td><button type="button" class="pm-linkbutton" @onclick="() => aufgabenEntwurf.Remove(zeile)">entfernen</button></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+                <div class="pm-row">
+                    <button type="button" class="pm-btn" @onclick="AufgabeHinzufuegen">Aufgabe hinzufügen</button>
+                    <button type="button" class="pm-btn" @onclick="SonderpunkteHinzufuegen">Sonderpunkte hinzufügen</button>
+                    <BegruendeterButton Text="Aufgaben speichern" Haupt="true" Click="AufgabenSpeichernAsync" />
+                </div>
+            </section>
+
+            <section class="pm-card">
+                <h2>Notenschlüssel</h2>
+                <p class="pm-small pm-muted">Ab der angegebenen Punktzahl gibt es die Note. Standard bezogen auf 100 Punkte; mit „Umrechnen“ auf die Höchstpunktzahl dieser Klausur übertragen (auf halbe Punkte gerundet).</p>
+                <div class="pm-tbl" style="max-width:420px">
+                    <table>
+                        <thead><tr><th>Mindestpunkte</th><th>Note</th><th></th></tr></thead>
+                        <tbody>
+                            @foreach (var s in notenEntwurf.OrderBy(x => x.Punkte).ToList())
+                            {
+                                var stufe = s;
+                                <tr>
+                                    <td><input class="pm-input" style="max-width:110px" inputmode="decimal" value="@Zahl(stufe.Punkte)" @onchange="e => stufe.Punkte = Dezimal(e.Value) ?? stufe.Punkte" aria-label="Mindestpunkte" /></td>
+                                    <td>
+                                        <select class="pm-select" @onchange="e => stufe.Note = Dezimal(e.Value) ?? stufe.Note" aria-label="Note">
+                                            @foreach (var n in Notenschluessel.ErlaubteNoten)
+                                            {
+                                                <option value="@n.ToString("0.0", Deutsch)" selected="@(n == stufe.Note)">@n.ToString("0.0", Deutsch)</option>
+                                            }
+                                        </select>
+                                    </td>
+                                    <td><button type="button" class="pm-linkbutton" @onclick="() => notenEntwurf.Remove(stufe)">entfernen</button></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+                <div class="pm-row">
+                    <button type="button" class="pm-btn" @onclick="() => notenEntwurf.Add(new StufeEntwurf { Punkte = notenEntwurf.Max(x => x.Punkte) + 5, Note = 1.0m })">Stufe hinzufügen</button>
+                    <button type="button" class="pm-btn" @onclick="StandardUebernehmen">Standard (100 Punkte)</button>
+                    <BegruendeterButton Text="@($"Standard auf {Zahl(k.Hoechstpunktzahl)} Punkte umrechnen")" Click="Umrechnen"
+                                        Freigabe="@(k.Hoechstpunktzahl > 0 ? Freigabe.Ja : Freigabe.Nein("Bitte zuerst Aufgaben speichern."))" />
+                    <BegruendeterButton Text="Notenschlüssel speichern" Haupt="true" Click="NotenSpeichernAsync" />
+                </div>
+            </section>
+
+            <section class="pm-card">
+                <h2>Statistik</h2>
+                <div class="pm-field" style="max-width:320px">
+                    <label class="pm-lbl" for="schwelle">„Aktiv teilnehmend“ ab mehr als … Punkten</label>
+                    <input id="schwelle" class="pm-input" inputmode="decimal" value="@Zahl(k.AktivSchwelle)" @onchange="SchwelleAsync" />
+                    <span class="pm-hilfe">Durchfallquote, Durchschnitt und Notenanzahlen beziehen sich auf diese Gruppe.</span>
+                </div>
+            </section>
+            break;
+
+        case "punkte":
+            @if (!k.Aufgaben.Any())
+            {
+                <div class="pm-alert pm-warn">Bitte zuerst unter <a href="klausuren/@Id?bereich=bewertung">Bewertung</a> die Aufgaben festlegen.</div>
+            }
+            else
+            {
+                <section class="pm-card">
+                    <div class="pm-head">
+                        <div class="pm-field" style="max-width:320px">
+                            <label class="pm-lbl" for="suche">Klausur-ID oder Name</label>
+                            <input id="suche" class="pm-input" @bind="suche" @bind:event="oninput" placeholder="z. B. 7KQ3X" autocomplete="off" />
+                        </div>
+                        <div class="pm-row">
+                            <span class="pm-small pm-muted">@k.Angemeldete.Count(t => t.Anwesend is not null) von @k.Angemeldete.Count() erfasst</span>
+                            <BegruendeterButton Text="Rest als nicht erschienen" Click="RestNichtErschienenAsync"
+                                                Freigabe="@(k.Angemeldete.Any(t => t.Anwesend is null) ? Freigabe.Ja : Freigabe.Nein("Alle sind erfasst."))" />
+                        </div>
+                    </div>
+                    <p class="pm-small pm-muted">Punkte mit Komma oder Punkt eingeben, Tab springt weiter; jede Eingabe wird sofort gespeichert. Ein Eintrag setzt „anwesend“.</p>
+                    <div class="pm-tbl">
+                        <table>
+                            <thead>
+                                <tr><th>Klausur-ID</th><th>Name</th><th>Anw.</th>
+                                    @foreach (var a in k.AufgabenSortiert) { <th title="@a.Titel">@(a.Sonderpunkte ? "Sonder" : $"A{a.Nr}")<br /><span class="pm-small">max @Zahl(a.MaxPunkte)</span></th> }
+                                    <th>Summe</th><th>Note</th></tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var t in Gefiltert(k))
+                                {
+                                    var teilnahme = t;
+                                    var note = k.NoteVon(t);
+                                    <tr @key="t.Id">
+                                        <td class="pm-mono">@t.Code</td>
+                                        <td>@t.Name</td>
+                                        <td><select class="pm-select" @onchange="e => AnwesendAsync(teilnahme, e.Value as string)" aria-label="Anwesend @t.Code">
+                                                <option value="" selected="@(t.Anwesend is null)">–</option>
+                                                <option value="j" selected="@(t.Anwesend == true)">ja</option>
+                                                <option value="n" selected="@(t.Anwesend == false)">nein</option>
+                                            </select></td>
+                                        @foreach (var a in k.AufgabenSortiert)
+                                        {
+                                            var aufgabe = a;
+                                            <td><input class="pm-input" style="width:64px;padding:5px 6px" inputmode="decimal" value="@(t.PunkteIn(a.Id) is { } p ? Zahl(p) : "")"
+                                                       @onchange="e => PunkteAsync(teilnahme, aufgabe, e.Value as string)" aria-label="@($"{t.Code} {a.Titel}")" /></td>
+                                        }
+                                        <td>@(t.Anwesend == true ? Zahl(t.Summe) : "")</td>
+                                        <td>@if (note is { } n) { <StatusPille Stil="@(n >= 5 ? "krit" : "gut")">@n.ToString("0.0", Deutsch)</StatusPille> }
+                                            else if (t.Anwesend == false) { <span class="pm-small pm-muted">NE</span> }</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+            }
+            break;
+
+        case "ergebnis":
+            @if (!w.Vollstaendig)
+            {
+                <div class="pm-alert pm-warn">Noch nicht vollständig: Für einzelne Personen fehlen Anwesenheit oder Punkte. Die Statistik zeigt den aktuellen Stand.</div>
+            }
+            <div class="pm-grid-2">
+                <section class="pm-card">
+                    <h2>Kennzahlen</h2>
+                    <dl class="pm-dl">
+                        <dt>Anwesende Teilnehmende</dt><dd>@w.Anwesend von @w.Angemeldet</dd>
+                        <dt>Aktiv Teilnehmende (&gt;@Zahl(k.AktivSchwelle) Punkte)</dt><dd>@w.Aktiv</dd>
+                        <dt>Durchfallquote*</dt><dd>@(w.Durchfallquote?.ToString("P1", Deutsch) ?? "–")</dd>
+                        <dt>Durchschnittsnote*</dt><dd>@(w.Durchschnittsnote?.ToString("0.00", Deutsch) ?? "–")</dd>
+                        <dt>Maximalpunktzahl*</dt><dd>@(w.Maximalpunktzahl is { } mx ? Zahl(mx) : "–") von @Zahl(k.Hoechstpunktzahl)</dd>
+                        <dt>Minimalpunktzahl</dt><dd>@(w.Minimalpunktzahl is { } mn ? Zahl(mn) : "–")</dd>
+                    </dl>
+                    <p class="pm-small pm-muted">* bezogen auf aktiv Teilnehmende</p>
+                </section>
+                <section class="pm-card">
+                    <h2>Notenverteilung*</h2>
+                    @{ var hoechste = Math.Max(1, w.AnzahlGanzeNote.Values.Max()); }
+                    <div class="pm-saeulen" role="img" aria-label="Notenverteilung">
+                        @for (var n = 1; n <= 5; n++)
+                        {
+                            <div class="pm-saeule"><span>@w.AnzahlGanzeNote[n]</span><i style="height:@((int)(w.AnzahlGanzeNote[n] * 140.0 / hoechste))px"></i><b>@n</b></div>
+                        }
+                    </div>
+                    <p class="pm-small pm-muted">@string.Join(" · ", w.AnzahlNote.Where(x => x.Value > 0).Select(x => $"{x.Key.ToString("0.0", Deutsch)}: {x.Value}"))</p>
+                </section>
+            </div>
+            <NaechsteSchritte Titel="Veröffentlichen und melden" Schritte="@([
+                new NaechsterSchritt("Veröffentlichung (PDF)", $"klausuren/{Id}/ergebnis.pdf", "Aushang bzw. Lernplattform: nur Klausur-IDs, keine Namen", Hauptschritt: true),
+                new NaechsterSchritt("Veröffentlichung (XLSX)", $"klausuren/{Id}/ergebnis.xlsx"),
+                new NaechsterSchritt("Notenliste für das Hochschulsystem (CSV)", $"klausuren/{Id}/noten.csv", "Matrikelnummer, Name, Note – vertraulich"),
+            ])" />
+            break;
+
+        default:
+            <div class="pm-grid-2">
+                <section class="pm-card">
+                    <h2>Angaben</h2>
+                    <div class="pm-fields">
+                        <div class="pm-field"><label class="pm-lbl" for="kt">Titel</label><input id="kt" class="pm-input" @bind="titel" /></div>
+                        <div class="pm-field"><label class="pm-lbl" for="kk">Kürzel</label><input id="kk" class="pm-input" @bind="kuerzel" disabled="@(k.Teilnahmen.Count > 0)" title="steckt in den Klausur-IDs" /></div>
+                        <div class="pm-field"><label class="pm-lbl" for="kn">Prüfungsnummer</label><input id="kn" class="pm-input" @bind="nummer" /></div>
+                        <div class="pm-field"><label class="pm-lbl">Termin</label>
+                            <RadzenDatePicker TValue="DateTime?" @bind-Value="termin" ShowTime="true" HourFormat="24" DateFormat="dd.MM.yyyy HH:mm" Style="width:100%" /></div>
+                    </div>
+                    <div><BegruendeterButton Text="Speichern" Click="AngabenSpeichernAsync" /></div>
+                    <h3>Prüfungsliste aktualisieren</h3>
+                    <p class="pm-small pm-muted">Neue Liste aus dem Hochschulsystem hochladen: Nachmeldungen kommen dazu, Abgemeldete bleiben sichtbar, IDs bleiben gleich.</p>
+                    <InputFile OnChange="ListeAbgleichenAsync" accept=".csv,text/csv" class="pm-input" />
+                </section>
+                <section class="pm-card">
+                    <h2>Räume</h2>
+                    @{ var plaetze = raumAuswahl.Where(x => x.Value).Sum(x => alleRaeume.First(r => r.Id == x.Key).Plaetze); }
+                    <div class="pm-list">
+                        @foreach (var r in alleRaeume.Where(r => r.Aktiv || raumAuswahl.GetValueOrDefault(r.Id)))
+                        {
+                            var raum = r;
+                            <div><label class="pm-check pm-grow"><input type="checkbox" checked="@raumAuswahl.GetValueOrDefault(r.Id)" @onchange="e => raumAuswahl[raum.Id] = e.Value is true" />
+                                <b>@r.Kuerzel</b> @r.Bezeichnung</label><span>@r.Plaetze Plätze</span></div>
+                        }
+                    </div>
+                    <p>
+                        <StatusPille Stil="@(plaetze >= k.Angemeldete.Count() ? "gut" : "krit")">@plaetze Plätze für @k.Angemeldete.Count() Teilnehmende</StatusPille>
+                        <a href="raeume" class="pm-small">Räume verwalten</a>
+                    </p>
+                    <label class="pm-check"><input type="checkbox" @bind="zufaellig" /> zufällig verteilen (sonst alphabetisch, Raumaushang nach Namensbereichen)</label>
+                    <div class="pm-row">
+                        <BegruendeterButton Text="Räume übernehmen und Plätze verteilen" Haupt="true" Click="VerteilenAsync"
+                                            Freigabe="@(plaetze >= k.Angemeldete.Count() && plaetze > 0 ? Freigabe.Ja : Freigabe.Nein($"Die Plätze reichen nicht: {k.Angemeldete.Count()} Teilnehmende, {plaetze} Plätze."))" />
+                    </div>
+                    @if (k.Verteilt is { } v)
+                    {
+                        <p class="pm-small pm-muted">Verteilt am @Zeit.Kurz(v) (@(k.ZufaelligVerteilt ? "zufällig" : "alphabetisch")).</p>
+                    }
+                </section>
+            </div>
+
+            <NaechsteSchritte Titel="Klausurdruck vorbereiten" Schritte="@([
+                new NaechsterSchritt("Serienbrief-Daten (CSV)", $"klausuren/{Id}/serienbrief.csv", "Datenquelle für den Word-Serienbrief: Klausur-ID, Name, Matrikelnummer, Raum, Platz …", Hauptschritt: true),
+                new NaechsterSchritt("Sitzlisten je Raum (PDF)", $"klausuren/{Id}/sitzlisten.pdf", Freigabe: k.Verteilt is null ? Freigabe.Nein("Bitte zuerst Plätze verteilen.") : null),
+                new NaechsterSchritt("Aushang Raumaufteilung (PDF)", $"klausuren/{Id}/aushang.pdf", Freigabe: k.Verteilt is null ? Freigabe.Nein("Bitte zuerst Plätze verteilen.") : null),
+                new NaechsterSchritt("Aufgaben und Notenschlüssel", $"klausuren/{Id}?bereich=bewertung"),
+            ])" />
+
+            <section class="pm-card">
+                <h2>Teilnehmende</h2>
+                <div class="pm-tbl">
+                    <table>
+                        <thead><tr><th>Nr.</th><th>Klausur-ID</th><th>Name</th><th>Matrikelnr.</th><th>Mail</th><th>Raum</th><th>Platz</th></tr></thead>
+                        <tbody>
+                            @foreach (var t in k.Teilnahmen.OrderBy(x => !x.Angemeldet).ThenBy(x => x.Zeile))
+                            {
+                                <tr class="@(t.Angemeldet ? "" : "pm-alt")">
+                                    <td>@t.Zeile</td><td class="pm-mono">@t.Code</td>
+                                    <td>@t.Name @if (!t.Angemeldet) { <StatusPille Stil="neutral">abgemeldet</StatusPille> }</td>
+                                    <td>@t.Matrikelnummer</td><td class="pm-small">@t.Email</td><td>@ansicht.RaumVon(t)</td><td>@t.Platz</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+            break;
+    }
+}
+
+@code {
+    private static readonly CultureInfo Deutsch = CultureInfo.GetCultureInfo("de-DE");
+    private static readonly (string, string)[] Bereiche = [("vorbereitung", "1 · Vorbereitung"), ("bewertung", "2 · Aufgaben und Noten"), ("punkte", "3 · Punkte"), ("ergebnis", "4 · Ergebnis")];
+
+    [Parameter]
+    public Guid Id { get; set; }
+
+    [SupplyParameterFromQuery(Name = "bereich")]
+    private string? Bereich { get; set; }
+
+    private string bereich = "vorbereitung";
+    private KlausurAnsicht? ansicht;
+    private IReadOnlyList<Raum> alleRaeume = [];
+    private Dictionary<Guid, bool> raumAuswahl = [];
+    private bool zufaellig;
+    private string? ladefehler, fehler, titel, kuerzel, nummer, suche;
+    private DateTime? termin;
+    private List<AufgabeEntwurf> aufgabenEntwurf = [];
+    private List<StufeEntwurf> notenEntwurf = [];
+
+    private sealed class AufgabeEntwurf
+    {
+        public string Titel { get; set; } = "";
+
+        public decimal Max { get; set; }
+
+        public bool Sonder { get; set; }
+    }
+
+    private sealed class StufeEntwurf
+    {
+        public decimal Punkte { get; set; }
+
+        public decimal Note { get; set; }
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        bereich = Bereich is "bewertung" or "punkte" or "ergebnis" ? Bereich : "vorbereitung";
+        fehler = null;
+        await LadenAsync(formulareNeu: true);
+    }
+
+    private async Task LadenAsync(bool formulareNeu = false)
+    {
+        try
+        {
+            (ansicht, alleRaeume) = await Vorgang.AusfuehrenAsync(async d =>
+            {
+                var dienst = d.GetRequiredService<KlausurDienst>();
+                return (await dienst.AnsichtAsync(Id), await dienst.RaeumeAsync(true));
+            });
+        }
+        catch (FachlicherFehler ex)
+        {
+            ladefehler = ex.Message;
+            return;
+        }
+
+        if (formulareNeu)
+        {
+            var k = ansicht.Klausur;
+            (titel, kuerzel, nummer, termin) = (k.Titel, k.Kuerzel, k.Pruefungsnummer, k.Termin is { } t ? Zeit.Lokal(t) : null);
+            raumAuswahl = alleRaeume.ToDictionary(r => r.Id, r => k.Raeume.Any(x => x.RaumId == r.Id));
+            zufaellig = k.ZufaelligVerteilt;
+            aufgabenEntwurf = k.AufgabenSortiert.Select(a => new AufgabeEntwurf { Titel = a.Titel, Max = a.MaxPunkte, Sonder = a.Sonderpunkte }).ToList();
+            if (aufgabenEntwurf.Count == 0)
+            {
+                aufgabenEntwurf = Enumerable.Range(1, 4).Select(i => new AufgabeEntwurf { Titel = $"Aufgabe {i}", Max = 25 }).ToList();
+            }
+
+            notenEntwurf = k.Notenstufen.Select(s => new StufeEntwurf { Punkte = s.Mindestpunkte, Note = s.Note }).ToList();
+        }
+    }
+
+    private async Task AusfuehrenAsync(Func<IServiceProvider, Task> arbeit, string? erfolg, bool formulareNeu = false)
+    {
+        fehler = null;
+        try
+        {
+            await Vorgang.AusfuehrenAsync(arbeit);
+            await LadenAsync(formulareNeu);
+            if (erfolg is not null)
+            {
+                Hinweise.Notify(NotificationSeverity.Success, erfolg);
+            }
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+            await LadenAsync();
+        }
+    }
+
+    private static string Zahl(decimal d) => d.ToString("0.##", Deutsch);
+
+    private static decimal? Dezimal(object? wert)
+    {
+        var s = (wert as string ?? wert?.ToString() ?? "").Trim().Replace(',', '.');
+        return decimal.TryParse(s, NumberStyles.Number, CultureInfo.InvariantCulture, out var d) ? d : null;
+    }
+
+    private IEnumerable<Teilnahme> Gefiltert(Klausur k)
+    {
+        var alle = k.Angemeldete.OrderBy(t => t.Code, StringComparer.Ordinal);
+        if (string.IsNullOrWhiteSpace(suche))
+        {
+            return alle;
+        }
+
+        if (k.NachCode(suche) is { } treffer)
+        {
+            return [treffer];
+        }
+
+        return alle.Where(t => t.Code.Contains(suche.Trim(), StringComparison.OrdinalIgnoreCase) || t.Name.Contains(suche.Trim(), StringComparison.CurrentCultureIgnoreCase));
+    }
+
+    private Task AngabenSpeichernAsync() => AusfuehrenAsync(d => d.GetRequiredService<KlausurDienst>()
+        .AendernAsync(Id, titel ?? "", kuerzel ?? "", nummer, termin is { } t ? Zeit.AlsUtc(t) : null, ansicht!.Klausur.AktivSchwelle), "Gespeichert.", true);
+
+    private Task SchwelleAsync(ChangeEventArgs e)
+    {
+        var k = ansicht!.Klausur;
+        return Dezimal(e.Value) is { } s
+            ? AusfuehrenAsync(d => d.GetRequiredService<KlausurDienst>().AendernAsync(Id, k.Titel, k.Kuerzel, k.Pruefungsnummer, k.Termin, s), "Schwelle gespeichert.")
+            : Task.CompletedTask;
+    }
+
+    private async Task ListeAbgleichenAsync(InputFileChangeEventArgs e)
+    {
+        try
+        {
+            using var puffer = new MemoryStream();
+            await e.File.OpenReadStream(PruefungslisteLeser.MaxBytes).CopyToAsync(puffer);
+            var inhalt = puffer.ToArray();
+            ImportErgebnis? ergebnis = null;
+            await AusfuehrenAsync(async d => ergebnis = (await d.GetRequiredService<KlausurDienst>().ListeAbgleichenAsync(Id, inhalt)).Ergebnis, null, true);
+            if (ergebnis is not null)
+            {
+                Hinweise.Notify(NotificationSeverity.Success, $"Liste abgeglichen: {ergebnis}");
+            }
+        }
+        catch (IOException ex)
+        {
+            fehler = ex.Message;
+        }
+    }
+
+    private Task VerteilenAsync()
+    {
+        var ids = alleRaeume.Where(r => raumAuswahl.GetValueOrDefault(r.Id)).Select(r => r.Id).ToList();
+        var z = zufaellig;
+        return AusfuehrenAsync(async d =>
+        {
+            var dienst = d.GetRequiredService<KlausurDienst>();
+            await dienst.RaeumeWaehlenAsync(Id, ids);
+            await dienst.VerteilenAsync(Id, z);
+        }, "Plätze verteilt.", true);
+    }
+
+    private Task AufgabenSpeichernAsync()
+    {
+        var liste = aufgabenEntwurf.Select(a => (a.Titel, a.Max, a.Sonder)).ToList();
+        return AusfuehrenAsync(d => d.GetRequiredService<KlausurDienst>().AufgabenSetzenAsync(Id, liste), "Aufgaben gespeichert.", true);
+    }
+
+    private void AufgabeHinzufuegen() => aufgabenEntwurf.Add(new AufgabeEntwurf { Titel = $"Aufgabe {aufgabenEntwurf.Count(x => !x.Sonder) + 1}", Max = 10 });
+
+    private void SonderpunkteHinzufuegen() => aufgabenEntwurf.Add(new AufgabeEntwurf { Titel = "Sonderpunkte", Max = 5, Sonder = true });
+
+    private void StandardUebernehmen() => notenEntwurf = Notenschluessel.Standard.Select(s => new StufeEntwurf { Punkte = s.Mindestpunkte, Note = s.Note }).ToList();
+
+    private void Umrechnen() => notenEntwurf = Notenschluessel.Umrechnen(Notenschluessel.Standard, Notenschluessel.StandardBezug, ansicht!.Klausur.Hoechstpunktzahl)
+        .Select(s => new StufeEntwurf { Punkte = s.Mindestpunkte, Note = s.Note }).ToList();
+
+    private Task NotenSpeichernAsync()
+    {
+        var stufen = notenEntwurf.Select(s => new Notenstufe(s.Punkte, s.Note)).ToList();
+        return AusfuehrenAsync(d => d.GetRequiredService<KlausurDienst>().NotenschluesselSetzenAsync(Id, stufen), "Notenschlüssel gespeichert.", true);
+    }
+
+    private Task PunkteAsync(Teilnahme t, Aufgabe a, string? eingabe)
+    {
+        decimal? punkte = null;
+        if (!string.IsNullOrWhiteSpace(eingabe))
+        {
+            punkte = Dezimal(eingabe);
+            if (punkte is null)
+            {
+                fehler = $"{t.Code}, {a.Titel}: „{eingabe}“ ist keine Zahl.";
+                return Task.CompletedTask;
+            }
+        }
+
+        return AusfuehrenAsync(d => d.GetRequiredService<KlausurDienst>().PunkteSetzenAsync(Id, t.Id, a.Id, punkte), null);
+    }
+
+    private Task AnwesendAsync(Teilnahme t, string? wert)
+        => AusfuehrenAsync(d => d.GetRequiredService<KlausurDienst>().AnwesendSetzenAsync(Id, t.Id, wert switch { "j" => true, "n" => false, _ => null }), null);
+
+    private Task RestNichtErschienenAsync()
+        => AusfuehrenAsync(d => d.GetRequiredService<KlausurDienst>().RestNichtErschienenAsync(Id), "Übrige als nicht erschienen markiert.");
+}
