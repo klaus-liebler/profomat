@@ -116,6 +116,17 @@ public sealed class KlausurTests
         serienbrief.ShouldStartWith("﻿KlausurID;Nachname;Vorname;Matrikelnummer;EMail;Raum;");
         serienbrief.ShouldContain(";SI 0012;Seminarraum;1;");
         (await u.InBereichAsync(d => d.GetRequiredService<KlausurDienst>().SitzlistenAsync(id))).Inhalt.Length.ShouldBeGreaterThan(1000);
+
+        // SI 0012 hat einen Grundriss (40 Tische, Schlangenlinie): 32 Personen gestreut, Serienbrief in Austeilreihenfolge
+        var plaetzeKlein = a.Klausur.Angemeldete.Where(t => t.RaumId == klein.Id).Select(t => t.Platz!.Value).Order().ToList();
+        plaetzeKlein.ShouldBe(Raum.Streuen(klein.Sitzplaetze(), 32).Select(p => p.Nummer).ToList());
+        plaetzeKlein.Max().ShouldBeLessThanOrEqualTo(40);
+        plaetzeKlein.Count.ShouldBeLessThan(plaetzeKlein.Max());   // Lücken
+        var zeilen = serienbrief.TrimStart('\uFEFF').Split("\r\n", StringSplitOptions.RemoveEmptyEntries).Skip(1).Select(z => z.Split(';')).ToList();
+        zeilen.Take(32).ShouldAllBe(z => z[5] == "SI 0012");
+        zeilen.Take(32).Select(z => int.Parse(z[7], System.Globalization.CultureInfo.InvariantCulture)).ShouldBeInOrder();
+        zeilen.Skip(32).ShouldAllBe(z => z[5] == "SI 0110");
+        zeilen[0][8].ShouldBe("1");   // Reihe 1
         (await u.InBereichAsync(d => d.GetRequiredService<KlausurDienst>().AushangAsync(id))).Inhalt.Length.ShouldBeGreaterThan(1000);
     }
 

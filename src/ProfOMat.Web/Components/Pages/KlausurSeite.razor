@@ -263,6 +263,22 @@ else
                 new NaechsterSchritt("Aufgaben und Notenschlüssel", $"klausuren/{Id}?bereich=bewertung"),
             ])" />
 
+            @if (k.Verteilt is not null)
+            {
+                @foreach (var raum in ansicht.GewaehlteRaeume.Where(r => r.HatGrundriss))
+                {
+                    var belegung = k.Angemeldete.Where(t => t.RaumId == raum.Id && t.Platz is not null)
+                        .ToDictionary(t => t.Platz!.Value, t => $"{t.Code} – {t.Name}");
+                    <section class="pm-card">
+                        <h2>Sitzplan @raum.Kuerzel</h2>
+                        <p class="pm-small pm-muted">@belegung.Count von @raum.Plaetze Tischen belegt (dunkel); Nummern laufen ab @raum.Startecke.Anzeigename()@(raum.Schlange ? " in Schlangenlinie" : "").
+                            Der Serienbrief ist in dieser Reihenfolge sortiert.</p>
+                        <Grundriss Spalten="@raum.RasterSpalten" Zeilen="@raum.RasterZeilen" Elemente="@raum.Elemente.Where(e => e.Art != Raumelementart.Tisch).ToList()"
+                                   Sitze="@raum.Sitzplaetze()" Belegung="@belegung" Massstab="0.8" />
+                    </section>
+                }
+            }
+
             <section class="pm-card">
                 <h2>Teilnehmende</h2>
                 <div class="pm-tbl">

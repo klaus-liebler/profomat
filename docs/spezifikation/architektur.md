@@ -102,7 +102,11 @@ Für die echte Quelle kommt infrage (mit dem IT-Service zu klären, welches Camp
   mehr angemeldet, bleibt sichtbar). Achtung: In der Datei ist `first_name1` der Nachname.
 - **Klausur-ID:** zufällig, kurz, mit Prüfzeichen (Crockford-Base32), nicht aus der Matrikelnummer ableitbar. Die Veröffentlichung
   enthält nur sie; die letzten vier Stellen der Matrikelnummer sind weder eindeutig noch ausreichend pseudonym.
-- **Räume:** Stammdaten mit Platzzahl und optionalem Sitzschema; Verteilung deterministisch (reproduzierbar).
+- **Räume:** Stammdaten mit Platzzahl oder Grundriss (Raster in Zellen, eine Zelle ≈ ein Tisch; Elemente als Rechtecke, Tische 1 × 1).
+  Die Nummerierung wird nicht gespeichert, sondern aus Muster und Tischpositionen berechnet (`Raum.Nummerieren`). Eine Reihe sind
+  alle Tische derselben Rasterzeile (bzw. -spalte). Wird der Grundriss nach dem Verteilen geändert, die Plätze neu verteilen.
+- **Verteilung:** deterministisch (alphabetisch oder zufällig über Hash), Räume anteilig nach Kapazität; innerhalb des Raums
+  `Raum.Streuen`: Person i bekommt den Platz an Position ⌊(i + ½) · Plätze / Personen⌋ der Nummernfolge.
 - **Word-Serienbrief:** Der ProfOMat liefert die Datenquelle (XLSX über ClosedXML bzw. CSV), die Word-Vorlage bleibt bei den Lehrenden.
   Optional später ein fertiges Deckblatt-PDF je Klausur mit QR-Code (Klausur-ID) für das schnelle Punkte-Eintragen.
 - **Bewertung:** Aufgaben mit Höchstpunkten, Notenschlüssel als Tabelle (Untergrenzen), Berechnung im Fachmodell, Statistik wie in der

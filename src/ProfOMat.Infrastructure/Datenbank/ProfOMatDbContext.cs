@@ -15,7 +15,7 @@ namespace ProfOMat.Infrastructure.Datenbank;
 public sealed class ProfOMatDbContext(DbContextOptions<ProfOMatDbContext> optionen) : DbContext(optionen)
 {
     /// <summary>Erhöhen, wenn sich das Modell ändert: eine ältere Datei wird dann beim Start abgelehnt (statt still falsch zu laufen).</summary>
-    public const int Schemaversion = 2;
+    public const int Schemaversion = 3;
 
     protected override void ConfigureConventions(ModelConfigurationBuilder konventionen)
     {
@@ -109,6 +109,14 @@ public sealed class ProfOMatDbContext(DbContextOptions<ProfOMatDbContext> option
             e.HasKey(r => r.Id);
             e.HasIndex(r => r.Kuerzel).IsUnique();
             e.Ignore(r => r.Anzeige);
+            e.Ignore(r => r.HatGrundriss);
+            e.HasMany(r => r.Elemente).WithOne().HasForeignKey(x => x.RaumId).OnDelete(DeleteBehavior.Cascade);
+            e.Navigation(r => r.Elemente).AutoInclude().UsePropertyAccessMode(PropertyAccessMode.Field);
+        });
+        m.Entity<Raumelement>(e =>
+        {
+            e.ToTable("Raumelemente");
+            e.HasKey(x => x.Id);
         });
         m.Entity<Klausur>(e =>
         {

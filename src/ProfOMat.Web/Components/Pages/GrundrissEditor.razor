@@ -1,0 +1,300 @@
+@page "/raeume/{Id:guid}/grundriss"
+@attribute [Authorize]
+@using ProfOMat.Application.Klausuren
+@using ProfOMat.Domain.Klausuren
+@inject Vorgang Vorgang
+@inject NotificationService Hinweise
+
+<PageTitle>Grundriss @raum?.Kuerzel · ProfOMat</PageTitle>
+
+<a class="pm-zurueck" href="raeume">← Zu den Räumen</a>
+
+@if (raum is null)
+{
+    <p class="pm-muted">@(fehler ?? "Wird geladen …")</p>
+}
+else
+{
+    <div class="pm-head">
+        <div>
+            <h1>Grundriss @raum.Kuerzel</h1>
+            <p>Grob skizzieren: Raster wählen, Tafel, Projektion, Türen und Fenster setzen, Tische als Matrix anlegen und einzelne wieder entfernen.
+                Die Tische werden nach dem gewählten Muster nummeriert; danach richten sich Sitzplatzvergabe und Serienbrief.</p>
+        </div>
+        <div class="pm-row">
+            <StatusPille Stil="info">@sitze.Count Tische</StatusPille>
+            <BegruendeterButton Text="Speichern" Haupt="true" Click="SpeichernAsync" Freigabe="@(geaendert ? Freigabe.Ja : Freigabe.Nein("Keine Änderungen."))" />
+        </div>
+    </div>
+
+    @if (fehler is not null)
+    {
+        <div class="pm-alert pm-crit" role="alert">@fehler</div>
+    }
+
+    <div class="pm-editor">
+        <section class="pm-card pm-editor-zeichnung">
+            <div class="pm-chips" role="toolbar" aria-label="Werkzeug">
+                @foreach (var (w, titel) in Werkzeuge)
+                {
+                    <button type="button" class="pm-chip @(werkzeug == w ? "on" : "")" @onclick="() => werkzeug = w">@titel</button>
+                }
+            </div>
+            @if (werkzeug is not (Werkzeug.Tisch or Werkzeug.Radierer))
+            {
+                <div class="pm-row pm-small">
+                    <label>Länge <input type="number" min="1" max="20" class="pm-input" style="width:70px" @bind="laenge" /> Zellen</label>
+                    <label class="pm-check"><input type="checkbox" @bind="senkrecht" /> senkrecht (für linke/rechte Wand)</label>
+                </div>
+            }
+            <p class="pm-small pm-muted">@Hinweis</p>
+            <Grundriss Spalten="@spalten" Zeilen="@zeilen" Elemente="@Wandelemente" Sitze="@sitze" ZelleGeklickt="Geklickt" />
+            <div class="pm-gr-legende pm-small">
+                <span><i class="pm-gr-tafel"></i>Tafel</span><span><i class="pm-gr-projektion"></i>Projektion</span><span><i class="pm-gr-tuer"></i>Tür</span>
+                <span><i class="pm-gr-fenster"></i>Fenster</span><span><i class="pm-gr-pult"></i>Pult</span><span><i class="pm-gr-tisch"></i>Tisch mit Nummer</span>
+            </div>
+        </section>
+
+        <div class="pm-editor-seite">
+            <section class="pm-card">
+                <h2>Raster</h2>
+                <div class="pm-fields">
+                    <div class="pm-field"><label class="pm-lbl" for="sp">Spalten</label><input id="sp" type="number" min="4" max="@Raum.MaxRaster" class="pm-input" value="@spalten" @onchange="e => RasterAendern(e, true)" /></div>
+                    <div class="pm-field"><label class="pm-lbl" for="ze">Zeilen</label><input id="ze" type="number" min="4" max="@Raum.MaxRaster" class="pm-input" value="@zeilen" @onchange="e => RasterAendern(e, false)" /></div>
+                </div>
+                <p class="pm-small pm-muted">Eine Zelle ≈ ein Tisch. Oben in der Zeichnung = vorn, wenn dort die Tafel hängt.</p>
+            </section>
+
+            <section class="pm-card">
+                <h2>Tischmatrix anlegen</h2>
+                <div class="pm-fields">
+                    <div class="pm-field"><label class="pm-lbl" for="mr">Reihen</label><input id="mr" type="number" min="1" class="pm-input" @bind="mReihen" /></div>
+                    <div class="pm-field"><label class="pm-lbl" for="mt">Tische je Reihe</label><input id="mt" type="number" min="1" class="pm-input" @bind="mJeReihe" /></div>
+                    <div class="pm-field"><label class="pm-lbl" for="mx">Lücke zwischen Tischen</label><input id="mx" type="number" min="0" class="pm-input" @bind="mAbstandX" /></div>
+                    <div class="pm-field"><label class="pm-lbl" for="my">Lücke zwischen Reihen</label><input id="my" type="number" min="0" class="pm-input" @bind="mAbstandY" /></div>
+                    <div class="pm-field"><label class="pm-lbl" for="msx">Beginn Spalte</label><input id="msx" type="number" min="1" class="pm-input" @bind="mStartX" /></div>
+                    <div class="pm-field"><label class="pm-lbl" for="msy">Beginn Zeile</label><input id="msy" type="number" min="1" class="pm-input" @bind="mStartY" /></div>
+                </div>
+                <div class="pm-row">
+                    <button type="button" class="pm-btn" @onclick="MatrixAnlegen">Matrix hinzufügen</button>
+                    <BegruendeterButton Text="Alle Tische entfernen" Gefahr="true" Click="AlleTischeEntfernen"
+                                        Freigabe="@(sitze.Count > 0 ? Freigabe.Ja : Freigabe.Nein("Es gibt keine Tische."))" />
+                </div>
+                <p class="pm-small pm-muted">Besetzte Zellen werden übersprungen. Einzelne Tische mit dem Werkzeug „Tisch“ an- und abschalten.</p>
+            </section>
+
+            <section class="pm-card">
+                <h2>Nummerierung</h2>
+                <div class="pm-fields">
+                    <div class="pm-field">
+                        <label class="pm-lbl" for="ecke">Beginn</label>
+                        <select id="ecke" class="pm-select" @bind="ecke" @bind:after="Geaendert">
+                            @foreach (var e in Enum.GetValues<Startecke>()) { <option value="@e">@e.Anzeigename()</option> }
+                        </select>
+                    </div>
+                    <div class="pm-field">
+                        <label class="pm-lbl" for="richtung">Laufrichtung</label>
+                        <select id="richtung" class="pm-select" @bind="richtung" @bind:after="Geaendert">
+                            <option value="@Laufrichtung.Reihen">reihenweise (waagerecht)</option>
+                            <option value="@Laufrichtung.Spalten">spaltenweise (senkrecht)</option>
+                        </select>
+                    </div>
+                </div>
+                <label class="pm-check"><input type="checkbox" @bind="schlange" @bind:after="Geaendert" /> Schlangenlinie (jede zweite Reihe zurück – kurzer Weg beim Austeilen)</label>
+            </section>
+        </div>
+    </div>
+}
+
+@code {
+    private enum Werkzeug { Tisch, Tafel, Projektion, Tuer, Fenster, Pult, Radierer }
+
+    private static readonly (Werkzeug, string)[] Werkzeuge =
+    [
+        (Werkzeug.Tisch, "Tisch an/aus"), (Werkzeug.Tafel, "Tafel"), (Werkzeug.Projektion, "Projektion"), (Werkzeug.Tuer, "Tür"),
+        (Werkzeug.Fenster, "Fenster"), (Werkzeug.Pult, "Pult"), (Werkzeug.Radierer, "Radierer"),
+    ];
+
+    [Parameter]
+    public Guid Id { get; set; }
+
+    private Raum? raum;
+    private string? fehler;
+    private bool geaendert;
+    private int spalten, zeilen;
+    private List<(Raumelementart Art, int X, int Y, int Breite, int Hoehe)> elemente = [];
+    private Startecke ecke;
+    private Laufrichtung richtung;
+    private bool schlange;
+    private Werkzeug werkzeug = Werkzeug.Tisch;
+    private int laenge = 4;
+    private bool senkrecht;
+    private int mReihen = 5, mJeReihe = 8, mAbstandX = 1, mAbstandY = 1, mStartX = 2, mStartY = 4;
+    private IReadOnlyList<Sitzplatz> sitze = [];
+
+    private IReadOnlyList<Raumelement> Wandelemente => elemente.Where(e => e.Art != Raumelementart.Tisch)
+        .Select(e => new Raumelement(e.Art, e.X, e.Y, e.Breite, e.Hoehe)).ToList();
+
+    private string Hinweis => werkzeug switch
+    {
+        Werkzeug.Tisch => "Klick auf eine Zelle setzt einen Tisch oder entfernt ihn.",
+        Werkzeug.Radierer => "Klick entfernt das Element unter dem Mauszeiger.",
+        _ => $"Klick setzt {Art(werkzeug).Anzeigename()} (linke obere Ecke).",
+    };
+
+    protected override async Task OnParametersSetAsync()
+    {
+        try
+        {
+            raum = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<KlausurDienst>().RaumAsync(Id));
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+            return;
+        }
+
+        (spalten, zeilen, ecke, richtung, schlange) = (raum.RasterSpalten, raum.RasterZeilen, raum.Startecke, raum.Richtung, raum.Schlange);
+        elemente = raum.Elemente.Select(e => (e.Art, e.X, e.Y, e.Breite, e.Hoehe)).ToList();
+        geaendert = false;
+        Neu();
+    }
+
+    private void Neu() => sitze = Raum.Nummerieren(elemente.Where(e => e.Art == Raumelementart.Tisch).Select(e => (e.X, e.Y)).ToList(), ecke, richtung, schlange);
+
+    private void Geaendert()
+    {
+        geaendert = true;
+        fehler = null;
+        Neu();
+    }
+
+    private static Raumelementart Art(Werkzeug w) => w switch
+    {
+        Werkzeug.Tafel => Raumelementart.Tafel,
+        Werkzeug.Projektion => Raumelementart.Projektion,
+        Werkzeug.Tuer => Raumelementart.Tuer,
+        Werkzeug.Fenster => Raumelementart.Fenster,
+        Werkzeug.Pult => Raumelementart.Pult,
+        _ => Raumelementart.Tisch,
+    };
+
+    private bool MoebelAuf(int x, int y, int b = 1, int h = 1) => elemente.Any(e => e.Art is Raumelementart.Tisch or Raumelementart.Pult
+        && x < e.X + e.Breite && e.X < x + b && y < e.Y + e.Hoehe && e.Y < y + h);
+
+    private void Geklickt((int X, int Y) zelle)
+    {
+        var (x, y) = zelle;
+        fehler = null;
+        var getroffen = elemente.Where(e => x >= e.X && x < e.X + e.Breite && y >= e.Y && y < e.Y + e.Hoehe).ToList();
+        switch (werkzeug)
+        {
+            case Werkzeug.Radierer:
+                if (getroffen.Count == 0)
+                {
+                    return;
+                }
+
+                elemente.Remove(getroffen.OrderBy(e => e.Art == Raumelementart.Tisch ? 0 : 1).First());
+                break;
+            case Werkzeug.Tisch:
+                var tisch = getroffen.FirstOrDefault(e => e.Art == Raumelementart.Tisch);
+                if (tisch != default)
+                {
+                    elemente.Remove(tisch);
+                }
+                else if (MoebelAuf(x, y))
+                {
+                    fehler = "Hier steht schon ein Pult.";
+                    return;
+                }
+                else
+                {
+                    elemente.Add((Raumelementart.Tisch, x, y, 1, 1));
+                }
+
+                break;
+            default:
+                var l = Math.Clamp(laenge, 1, 20);
+                var (b, h) = senkrecht ? (1, Math.Min(l, zeilen - y)) : (Math.Min(l, spalten - x), 1);
+                var art = Art(werkzeug);
+                if (art == Raumelementart.Pult && MoebelAuf(x, y, b, h))
+                {
+                    fehler = "Das Pult würde auf Tischen stehen.";
+                    return;
+                }
+
+                elemente.Add((art, x, y, b, h));
+                break;
+        }
+
+        Geaendert();
+    }
+
+    private void RasterAendern(ChangeEventArgs e, bool istSpalten)
+    {
+        if (!int.TryParse(e.Value as string, out var n) || n < 4 || n > Raum.MaxRaster)
+        {
+            fehler = $"Das Raster hat 4 bis {Raum.MaxRaster} Spalten und Zeilen.";
+            return;
+        }
+
+        var (neuS, neuZ) = istSpalten ? (n, zeilen) : (spalten, n);
+        var weg = elemente.Count(el => el.X + el.Breite > neuS || el.Y + el.Hoehe > neuZ);
+        elemente.RemoveAll(el => el.X + el.Breite > neuS || el.Y + el.Hoehe > neuZ);
+        (spalten, zeilen) = (neuS, neuZ);
+        Geaendert();
+        if (weg > 0)
+        {
+            fehler = $"{weg} Element(e) lagen außerhalb und wurden entfernt.";
+        }
+    }
+
+    private void MatrixAnlegen()
+    {
+        var neu = 0;
+        var aussen = 0;
+        foreach (var (x, y) in Raum.Tischmatrix(mStartX - 1, mStartY - 1, Math.Max(1, mReihen), Math.Max(1, mJeReihe), Math.Max(0, mAbstandX), Math.Max(0, mAbstandY)))
+        {
+            if (x >= spalten || y >= zeilen || x < 0 || y < 0)
+            {
+                aussen++;
+                continue;
+            }
+
+            if (!MoebelAuf(x, y))
+            {
+                elemente.Add((Raumelementart.Tisch, x, y, 1, 1));
+                neu++;
+            }
+        }
+
+        Geaendert();
+        if (aussen > 0)
+        {
+            fehler = $"{aussen} Tische passten nicht mehr ins Raster ({neu} angelegt).";
+        }
+    }
+
+    private void AlleTischeEntfernen()
+    {
+        elemente.RemoveAll(e => e.Art == Raumelementart.Tisch);
+        Geaendert();
+    }
+
+    private async Task SpeichernAsync()
+    {
+        fehler = null;
+        var plan = new Raumplan(spalten, zeilen, elemente.ToList(), ecke, richtung, schlange);
+        try
+        {
+            await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<KlausurDienst>().GrundrissSpeichernAsync(Id, plan));
+            geaendert = false;
+            Hinweise.Notify(NotificationSeverity.Success, $"Grundriss gespeichert: {sitze.Count} Plätze.");
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+        }
+    }
+}

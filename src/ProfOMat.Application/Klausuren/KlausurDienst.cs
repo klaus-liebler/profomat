@@ -136,6 +136,22 @@ public sealed class KlausurDienst(IDaten daten, IAktuellerBenutzer aktuell, IKla
         await daten.SpeichernAsync(abbruch);
     }
 
+    public async Task<Raum> RaumAsync(Guid raumId, CancellationToken abbruch = default)
+        => await daten.FindenAsync<Raum>(raumId, abbruch) ?? throw new FachlicherFehler("Raum nicht gefunden.");
+
+    /// <summary>Grundriss aus dem Editor speichern; die Platzzahl ergibt sich aus den Tischen.</summary>
+    public async Task GrundrissSpeichernAsync(Guid raumId, Raumplan plan, CancellationToken abbruch = default)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        var wer = await aktuell.ErmittelnAsync(abbruch);
+        KlausurenAnlegen(wer).Sicherstellen();
+        var raum = await RaumAsync(raumId, abbruch);
+        raum.GrundrissSetzen(plan);
+        protokoll.Eintragen(wer, "Raum.Grundriss", $"Grundriss {raum.Kuerzel}: {raum.Plaetze} Tische, Nummerierung ab {plan.Startecke.Anzeigename()}"
+            + $"{(plan.Richtung == Laufrichtung.Spalten ? " spaltenweise" : " reihenweise")}{(plan.Schlange ? " in Schlangenlinie" : "")}", raum.Id);
+        await daten.SpeichernAsync(abbruch);
+    }
+
     public async Task RaeumeWaehlenAsync(Guid id, IReadOnlyList<Guid> raumIds, CancellationToken abbruch = default)
     {
         ArgumentNullException.ThrowIfNull(raumIds);
@@ -203,25 +219,36 @@ public sealed class KlausurDienst(IDaten daten, IAktuellerBenutzer aktuell, IKla
     }
 
     // ---------------------------------------------------------------- Ausgaben
-    /// <summary>Datenquelle für den Word-Serienbrief (Feldnamen ohne Umlaute und Leerzeichen).</summary>
+    /// <summary>
+    /// Datenquelle für den Word-Serienbrief (Feldnamen ohne Umlaute und Leerzeichen). Sortiert zum Austeilen: Raum für Raum in der
+    /// gewählten Reihenfolge, darin nach Tischnummer (= Laufweg des Nummerierungsmusters); noch nicht Verteilte am Ende.
+    /// </summary>
     public async Task<Datei> SerienbriefAsync(Guid id, CancellationToken abbruch = default)
     {
         var a = await AnsichtMitProtokollAsync(id, "Serienbrief", abbruch);
         var k = a.Klausur;
         var datum = k.Termin is { } t ? ortszeit.Lokal(t).ToString("dd.MM.yyyy", Deutsch) : "";
         var zeit = k.Termin is { } t2 ? ortszeit.Lokal(t2).ToString("HH:mm", Deutsch) : "";
-        var zeilen = k.Angemeldete.OrderBy(x => x.Zeile).Select(x =>
-        {
-            var raum = x.RaumId is { } r && a.AlleRaeume.TryGetValue(r, out var rr) ? rr : null;
-            return new string?[]
+        var raumfolge = a.GewaehlteRaeume.Select((r, i) => (r.Id, i)).ToDictionary(x => x.Id, x => x.i);
+        var plaetze = a.GewaehlteRaeume.ToDictionary(r => r.Id, r => r.Sitzplaetze().ToDictionary(p => p.Nummer));
+        var zeilen = k.Angemeldete
+            .OrderBy(x => x.RaumId is { } r && raumfolge.TryGetValue(r, out var i) ? i : int.MaxValue)
+            .ThenBy(x => x.Platz ?? int.MaxValue)
+            .ThenBy(x => x.Zeile)
+            .Select(x =>
             {
-                x.Code, x.Nachname, x.Vorname, x.Matrikelnummer, x.Email, raum?.Kuerzel, raum?.Bezeichnung, x.Platz?.ToString(Deutsch),
-                k.Titel, k.Pruefungsnummer, datum, zeit, k.Pruefer ?? a.Verantwortlich, x.Zeile.ToString(Deutsch),
-            };
-        });
+                var raum = x.RaumId is { } r && a.AlleRaeume.TryGetValue(r, out var rr) ? rr : null;
+                var sitz = raum is not null && x.Platz is { } nr && plaetze.TryGetValue(raum.Id, out var ps) && ps.TryGetValue(nr, out var sp) ? sp : null;
+                return new string?[]
+                {
+                    x.Code, x.Nachname, x.Vorname, x.Matrikelnummer, x.Email, raum?.Kuerzel, raum?.Bezeichnung, x.Platz?.ToString(Deutsch),
+                    sitz is { Reihe: > 0 } ? sitz.Reihe.ToString(Deutsch) : "", sitz is { Spalte: > 0 } ? sitz.Spalte.ToString(Deutsch) : "",
+                    k.Titel, k.Pruefungsnummer, datum, zeit, k.Pruefer ?? a.Verantwortlich, x.Zeile.ToString(Deutsch),
+                };
+            });
         var csv = CsvSchreiber.Schreiben(
-            ["KlausurID", "Nachname", "Vorname", "Matrikelnummer", "EMail", "Raum", "Raumbezeichnung", "Platz", "Klausur", "Pruefungsnummer", "Datum",
-                "Uhrzeit", "Pruefer", "Listennummer"], zeilen);
+            ["KlausurID", "Nachname", "Vorname", "Matrikelnummer", "EMail", "Raum", "Raumbezeichnung", "Platz", "Reihe", "PlatzInReihe", "Klausur",
+                "Pruefungsnummer", "Datum", "Uhrzeit", "Pruefer", "Listennummer"], zeilen);
         return new Datei(csv, $"Serienbrief-{k.Kuerzel}.csv", "text/csv; charset=utf-8");
     }
 

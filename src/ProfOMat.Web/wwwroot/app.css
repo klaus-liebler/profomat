@@ -144,6 +144,32 @@ p { margin: 0; }
 .pm-saeule b { font-size: 13px; }
 .pm-saeule span { font-size: 12px; color: var(--pm-muted); }
 
+/* Grundriss */
+.pm-editor { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; align-items: start; }
+.pm-editor-seite { display: flex; flex-direction: column; gap: 16px; }
+.pm-grundriss { width: 100%; height: auto; display: block; user-select: none; }
+.pm-gr-raum { fill: #FFFFFF; stroke: var(--pm-fg); stroke-width: 3; }
+.pm-gr-zelle { fill: transparent; stroke: #E6EBF0; stroke-width: 1; cursor: pointer; }
+.pm-gr-zelle:hover { fill: var(--pm-accent-weak); }
+.pm-gr-tisch, .pm-gr-tafel, .pm-gr-projektion, .pm-gr-tuer, .pm-gr-fenster, .pm-gr-pult, .pm-gr-text { pointer-events: none; }
+.pm-gr-tisch { fill: #D7E6F3; stroke: var(--pm-blau); stroke-width: 1.5; }
+.pm-gr-frei { fill: #F4F6F8; stroke: #AAB6C2; stroke-dasharray: 3 2; }
+.pm-gr-belegt { fill: var(--pm-blau); }
+.pm-gr-tafel { fill: #2E5E44; }
+.pm-gr-projektion { fill: #FFFFFF; stroke: #6B7785; stroke-width: 2; stroke-dasharray: 5 3; }
+.pm-gr-tuer { fill: #9C6B3F; }
+.pm-gr-fenster { fill: #A9D6F2; stroke: #5A9BC4; }
+.pm-gr-pult { fill: #D9C7A7; stroke: #8C7651; }
+.pm-gr-text { font: 600 11px var(--pm-font); text-anchor: middle; fill: var(--pm-fg); }
+.pm-gr-text-tafel, .pm-gr-text-tuer { fill: #FFFFFF; }
+.pm-gr-nr { font-size: 10px; }
+.pm-gr-nr-belegt { fill: #FFFFFF; }
+.pm-gr-legende { display: flex; gap: 14px; flex-wrap: wrap; color: var(--pm-muted); }
+.pm-gr-legende i { display: inline-block; width: 14px; height: 10px; margin-right: 5px; border-radius: 2px; vertical-align: middle; border: 1px solid #8894A0; }
+.pm-gr-legende i.pm-gr-tisch { background: #D7E6F3; } .pm-gr-legende i.pm-gr-tafel { background: #2E5E44; } .pm-gr-legende i.pm-gr-projektion { background: #FFF; border-style: dashed; }
+.pm-gr-legende i.pm-gr-tuer { background: #9C6B3F; } .pm-gr-legende i.pm-gr-fenster { background: #A9D6F2; } .pm-gr-legende i.pm-gr-pult { background: #D9C7A7; }
+@media (max-width: 1100px) { .pm-editor { grid-template-columns: minmax(0, 1fr); } }
+
 #blazor-error-ui { display: none; position: fixed; bottom: 0; left: 0; width: 100%; padding: 10px 20px; background: #FFF6D6; box-shadow: 0 -1px 2px rgba(0,0,0,.2); z-index: 1000; }
 #blazor-error-ui .dismiss { cursor: pointer; position: absolute; right: 12px; top: 8px; }
 

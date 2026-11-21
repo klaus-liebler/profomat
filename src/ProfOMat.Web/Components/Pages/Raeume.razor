@@ -10,7 +10,7 @@
 <div class="pm-head">
     <div>
         <h1>Räume für Klausuren</h1>
-        <p>Platzzahl = Plätze bei Klausurbestuhlung (z. B. jeder zweite Platz). Die Plätze werden 1 bis n nummeriert.</p>
+        <p>Platzzahl = Plätze bei Klausurbestuhlung. Mit Grundriss ergeben sich die Plätze aus den Tischen und ihrer Nummerierung, sonst werden sie 1 bis n gezählt.</p>
     </div>
 </div>
 
@@ -27,8 +27,8 @@
                 @foreach (var r in raeume)
                 {
                     <tr class="@(r.Aktiv ? "" : "pm-alt")">
-                        <td><b>@r.Kuerzel</b></td><td>@r.Bezeichnung</td><td>@r.Plaetze</td><td>@(r.Aktiv ? "ja" : "nein")</td>
-                        <td><button type="button" class="pm-linkbutton" @onclick="() => Bearbeiten(r)">bearbeiten</button></td>
+                        <td><b>@r.Kuerzel</b></td><td>@r.Bezeichnung</td><td>@r.Plaetze @if (r.HatGrundriss) { <StatusPille Stil="info">aus Grundriss</StatusPille> }</td><td>@(r.Aktiv ? "ja" : "nein")</td>
+                        <td><button type="button" class="pm-linkbutton" @onclick="() => Bearbeiten(r)">bearbeiten</button> · <a href="raeume/@r.Id/grundriss">Grundriss</a></td>
                     </tr>
                 }
             </tbody>
@@ -41,7 +41,8 @@
     <div class="pm-fields">
         <div class="pm-field"><label class="pm-lbl" for="rk">Kürzel</label><input id="rk" class="pm-input" @bind="kuerzel" placeholder="SI 0012" /></div>
         <div class="pm-field"><label class="pm-lbl" for="rb">Bezeichnung</label><input id="rb" class="pm-input" @bind="bezeichnung" placeholder="Hörsaal, Campus Westerberg" /></div>
-        <div class="pm-field"><label class="pm-lbl" for="rp">Klausurplätze</label><input id="rp" type="number" min="1" class="pm-input" @bind="plaetze" /></div>
+        <div class="pm-field"><label class="pm-lbl" for="rp">Klausurplätze</label><input id="rp" type="number" min="1" class="pm-input" @bind="plaetze" disabled="@mitGrundriss" />
+            @if (mitGrundriss) { <span class="pm-hilfe">Ergibt sich aus den Tischen im Grundriss.</span> }</div>
         <div class="pm-field"><span class="pm-lbl">Status</span><label class="pm-check"><input type="checkbox" @bind="aktiv" /> aktiv (in Auswahlen)</label></div>
     </div>
     <div class="pm-row">
@@ -56,14 +57,15 @@
     private string? kuerzel, bezeichnung, fehler;
     private int plaetze = 30;
     private bool aktiv = true;
+    private bool mitGrundriss;
 
     protected override Task OnInitializedAsync() => LadenAsync();
 
     private async Task LadenAsync() => raeume = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<KlausurDienst>().RaeumeAsync(true));
 
-    private void Bearbeiten(Raum r) => (id, kuerzel, bezeichnung, plaetze, aktiv) = (r.Id, r.Kuerzel, r.Bezeichnung, r.Plaetze, r.Aktiv);
+    private void Bearbeiten(Raum r) => (id, kuerzel, bezeichnung, plaetze, aktiv, mitGrundriss) = (r.Id, r.Kuerzel, r.Bezeichnung, r.Plaetze, r.Aktiv, r.HatGrundriss);
 
-    private void Neu() => (id, kuerzel, bezeichnung, plaetze, aktiv) = (null, null, null, 30, true);
+    private void Neu() => (id, kuerzel, bezeichnung, plaetze, aktiv, mitGrundriss) = (null, null, null, 30, true, false);
 
     private async Task SpeichernAsync()
     {

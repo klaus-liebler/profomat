@@ -3,52 +3,6 @@ using ProfOMat.Domain.Gemeinsam;
 
 namespace ProfOMat.Domain.Klausuren;
 
-/// <summary>Raum mit Zahl der Klausurplätze (Plätze werden 1 … n nummeriert).</summary>
-public sealed class Raum
-{
-    private Raum()
-    {
-    }
-
-    public Raum(string kuerzel, string? bezeichnung, int plaetze)
-    {
-        Id = Ids.Neu();
-        Aendern(kuerzel, bezeichnung, plaetze, true);
-    }
-
-    public Guid Id { get; private set; }
-
-    /// <summary>z. B. „SI 0012“.</summary>
-    public string Kuerzel { get; private set; } = string.Empty;
-
-    /// <summary>z. B. „Hörsaal, Campus Westerberg“.</summary>
-    public string? Bezeichnung { get; private set; }
-
-    public int Plaetze { get; private set; }
-
-    public bool Aktiv { get; private set; }
-
-    public string Anzeige => Bezeichnung is null ? $"{Kuerzel} ({Plaetze} Plätze)" : $"{Kuerzel} – {Bezeichnung} ({Plaetze} Plätze)";
-
-    public void Aendern(string kuerzel, string? bezeichnung, int plaetze, bool aktiv)
-    {
-        if (string.IsNullOrWhiteSpace(kuerzel))
-        {
-            throw new FachlicherFehler("Bitte das Raumkürzel angeben.");
-        }
-
-        if (plaetze is < 1 or > 2000)
-        {
-            throw new FachlicherFehler("Die Platzzahl liegt zwischen 1 und 2000.");
-        }
-
-        Kuerzel = kuerzel.Trim();
-        Bezeichnung = string.IsNullOrWhiteSpace(bezeichnung) ? null : bezeichnung.Trim();
-        Plaetze = plaetze;
-        Aktiv = aktiv;
-    }
-}
-
 /// <summary>Eine Stufe des Notenschlüssels: ab <see cref="Mindestpunkte"/> gibt es <see cref="Note"/>.</summary>
 public sealed record Notenstufe(decimal Mindestpunkte, decimal Note);
 
@@ -495,7 +449,8 @@ public sealed class Klausur
 
     /// <summary>
     /// Verteilt die Angemeldeten der Reihe nach auf die gewählten Räume (alphabetisch nach Name oder zufällig, aber reproduzierbar).
-    /// Räume werden gleichmäßig nach Kapazität ausgelastet.
+    /// Räume werden gleichmäßig nach Kapazität ausgelastet; innerhalb eines Raums folgen die Plätze der Tischnummerierung und
+    /// werden gestreut, wenn der Raum nicht voll ist.
     /// </summary>
     public void Verteilen(IReadOnlyList<Raum> gewaehlteRaeume, bool zufaellig, DateTimeOffset jetzt)
     {
@@ -520,9 +475,10 @@ public sealed class Klausur
         var p = 0;
         for (var r = 0; r < gewaehlteRaeume.Count; r++)
         {
-            for (var platz = 1; platz <= anteile[r]; platz++)
+            // Plätze gestreut nach der Tischnummerierung des Raums: freie Plätze verteilen sich gleichmäßig.
+            foreach (var platz in Raum.Streuen(gewaehlteRaeume[r].Sitzplaetze(), anteile[r]))
             {
-                personen[p++].Setzen(gewaehlteRaeume[r].Id, platz);
+                personen[p++].Setzen(gewaehlteRaeume[r].Id, platz.Nummer);
             }
         }
 

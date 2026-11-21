@@ -1,0 +1,80 @@
+@using ProfOMat.Domain.Klausuren
+@*
+    Grundriss als SVG: Raster, Wandelemente, Tische mit Nummer. Im Editor sind die Zellen anklickbar; im Sitzplan zeigt
+    <see cref="Belegung"/> je Tischnummer eine Beschriftung (z. B. Klausur-ID).
+*@
+<svg class="pm-grundriss" viewBox="@($"-2 -2 {Spalten * Z + 4} {Zeilen * Z + 4}")" role="img" aria-label="@Beschreibung"
+     style="max-width:@(Spalten * Z * Massstab)px">
+    <rect x="0" y="0" width="@(Spalten * Z)" height="@(Zeilen * Z)" class="pm-gr-raum" />
+    @for (var y = 0; y < Zeilen; y++)
+    {
+        @for (var x = 0; x < Spalten; x++)
+        {
+            var (cx, cy) = (x, y);
+            @if (ZelleGeklickt.HasDelegate)
+            {
+                <rect x="@(x * Z)" y="@(y * Z)" width="@Z" height="@Z" class="pm-gr-zelle" @onclick="() => ZelleGeklickt.InvokeAsync((cx, cy))">
+                    <title>Spalte @(x + 1), Zeile @(y + 1)</title>
+                </rect>
+            }
+        }
+    }
+    @foreach (var e in Elemente.Where(e => e.Art != Raumelementart.Tisch))
+    {
+        <rect x="@(e.X * Z + 2)" y="@(e.Y * Z + 2)" width="@(e.Breite * Z - 4)" height="@(e.Hoehe * Z - 4)" class="pm-gr-@e.Art.ToString().ToLowerInvariant()" rx="3" />
+        @Beschriftung(e.X * Z + e.Breite * Z / 2.0, e.Y * Z + e.Hoehe * Z / 2.0 + 4, $"pm-gr-text pm-gr-text-{e.Art.ToString().ToLowerInvariant()}", Kurz(e))
+    }
+    @foreach (var p in Sitze)
+    {
+        var belegt = Belegung?.TryGetValue(p.Nummer, out var text) == true ? text : null;
+        <rect x="@(p.X * Z + 3)" y="@(p.Y * Z + 3)" width="@(Z - 6)" height="@(Z - 6)" rx="3"
+              class="@(Belegung is null ? "pm-gr-tisch" : belegt is null ? "pm-gr-tisch pm-gr-frei" : "pm-gr-tisch pm-gr-belegt")">
+            <title>Tisch @p.Nummer (Reihe @p.Reihe, Platz @p.Spalte)@(belegt is null ? "" : $": {belegt}")</title>
+        </rect>
+        @Beschriftung(p.X * Z + Z / 2.0, p.Y * Z + Z / 2.0 + 4, belegt is null ? "pm-gr-text pm-gr-nr" : "pm-gr-text pm-gr-nr pm-gr-nr-belegt", p.Nummer.ToString(System.Globalization.CultureInfo.InvariantCulture))
+    }
+</svg>
+
+@code {
+    private const int Z = 30;
+
+    [Parameter, EditorRequired]
+    public int Spalten { get; set; }
+
+    [Parameter, EditorRequired]
+    public int Zeilen { get; set; }
+
+    /// <summary>Wand- und Möbelelemente (Tische werden über <see cref="Sitze"/> gezeichnet).</summary>
+    [Parameter, EditorRequired]
+    public IReadOnlyList<Raumelement> Elemente { get; set; } = [];
+
+    [Parameter, EditorRequired]
+    public IReadOnlyList<Sitzplatz> Sitze { get; set; } = [];
+
+    /// <summary>Tischnummer → Beschriftung (Sitzplan); <c>null</c> = Editoransicht.</summary>
+    [Parameter]
+    public IReadOnlyDictionary<int, string>? Belegung { get; set; }
+
+    [Parameter]
+    public EventCallback<(int X, int Y)> ZelleGeklickt { get; set; }
+
+    /// <summary>Darstellungsgröße (1 = 30 px je Zelle).</summary>
+    [Parameter]
+    public double Massstab { get; set; } = 1;
+
+    /// <summary>SVG-&lt;text&gt; (in Razor reserviert) als kodiertes Markup.</summary>
+    private static MarkupString Beschriftung(double x, double y, string klasse, string inhalt)
+        => new(string.Create(System.Globalization.CultureInfo.InvariantCulture,
+            $"<text x=\"{x:0.#}\" y=\"{y:0.#}\" class=\"{klasse}\">{System.Net.WebUtility.HtmlEncode(inhalt)}</text>"));
+
+    private string Beschreibung => $"Grundriss mit {Sitze.Count} Tischen";
+
+    private static string Kurz(Raumelement e) => e.Art switch
+    {
+        Raumelementart.Tafel => e.Breite >= 3 || e.Hoehe >= 3 ? "Tafel" : "T",
+        Raumelementart.Projektion => e.Breite >= 3 || e.Hoehe >= 3 ? "Beamer" : "B",
+        Raumelementart.Tuer => "Tür",
+        Raumelementart.Pult => "Pult",
+        _ => "",
+    };
+}
