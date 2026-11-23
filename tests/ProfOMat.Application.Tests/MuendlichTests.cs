@@ -71,4 +71,74 @@ public sealed class MuendlichTests
         (await Mit(u, d => d.ListeAsync())).ShouldBeEmpty();
         (await u.InBereichAsync(d => d.GetRequiredService<IDaten>().AnzahlAsync(d.GetRequiredService<IDaten>().Menge<GestellteFrage>()))).ShouldBe(0);
     }
+
+    [Fact]
+    public async Task Protokoll_mit_Pruefenden_Studiengang_Bemerkung_und_Note()
+    {
+        await using var u = await TestUmgebung.StartenAsync();
+        await u.AlsAsync("liebler");
+        var liebler = await u.KontoAsync("liebler");
+        var niemeyer = await u.KontoAsync("niemeyer");
+        liebler.Anzeigename.ShouldBe("Prof. Dr. Klaus Liebler");
+        niemeyer.Anzeigename.ShouldBe("Prof. Dr. Philip Niemeyer");
+
+        var p = await Mit(u, d => d.AnlegenAsync("Regelungstechnik"));
+        var (_, f1) = await Mit(u, d => d.FrageHinzufuegenAsync(p.Id, "4", 10m));
+        await Mit(u, d => d.FrageBewertenAsync(p.Id, f1, 7.5m, false));
+        await Mit(u, d => d.FrageBemerkenAsync(p.Id, f1, "Bode-Diagramm sicher"));
+
+        var pruefende = await Mit(u, d => d.PruefendeAsync());
+        pruefende.Select(k => k.KontoId).ShouldContain(niemeyer.Id);
+        pruefende.ShouldNotContain(k => k.Name.Contains("Sekretariat"));
+        (await Mit(u, d => d.StudiengaengeAsync())).ShouldNotBeEmpty();
+
+        // PDF erst nach dem Festlegen
+        await Should.ThrowAsync<FachlicherFehler>(() => Mit(u, d => d.ProtokollPdfAsync(p.Id)));
+
+        var angaben = new ProtokollAngaben("Mia Muster", "1234567", "Elektrotechnik (B.Sc., PO 2023)", niemeyer.Id, liebler.Id, 2.0m, "souverän");
+        var fest = await Mit(u, d => d.ProtokollErstellenAsync(p.Id, angaben));
+        (fest.Endnote, fest.Notenvorschlag, fest.WeichtAb, fest.ErstpruefendeId).ShouldBe((2.0m, 2.3m, true, niemeyer.Id));
+
+        var (inhalt, name) = await Mit(u, d => d.ProtokollPdfAsync(p.Id));
+        System.Text.Encoding.ASCII.GetString(inhalt, 0, 5).ShouldBe("%PDF-");
+        name.ShouldEndWith(".pdf");
+        name.ShouldNotContain("Muster");   // Dateiname ohne Personendaten
+
+        var geladen = await Mit(u, d => d.LadenAsync(p.Id));
+        (geladen.Pruefling, geladen.Studiengang, geladen.Fragen.Single().Bemerkung).ShouldBe(("Mia Muster", "Elektrotechnik (B.Sc., PO 2023)", "Bode-Diagramm sicher"));
+
+        var eintraege = await u.InBereichAsync(d => d.GetRequiredService<IDaten>().ListeAsync(d.GetRequiredService<IDaten>().Menge<Protokolleintrag>()
+            .Where(e => e.Aktion == "Muendlich.Note")));
+        eintraege.Single().Text.ShouldNotContain("Muster");
+    }
+
+    [Fact]
+    public async Task Protokoll_Rechte_und_nur_Pruefende_als_Pruefer()
+    {
+        await using var u = await TestUmgebung.StartenAsync();
+        await u.AlsAsync("liebler");
+        var liebler = await u.KontoAsync("liebler");
+        var sekretariat = await u.KontoAsync("sekretariat");
+        var p = await Mit(u, d => d.AnlegenAsync("Prüfung C"));
+
+        // ohne Fragen keine Note
+        await Should.ThrowAsync<FachlicherFehler>(() => Mit(u, d => d.ProtokollErstellenAsync(p.Id, new ProtokollAngaben(null, null, null, liebler.Id, null, 1.0m, null))));
+        var (_, f) = await Mit(u, d => d.FrageHinzufuegenAsync(p.Id, "1", 5m));
+        await Mit(u, d => d.FrageBewertenAsync(p.Id, f, 5m, false));
+
+        // Sekretariat ist kein Prüfende-Konto
+        (await Should.ThrowAsync<FachlicherFehler>(() => Mit(u, d => d.ProtokollErstellenAsync(p.Id,
+            new ProtokollAngaben(null, null, null, liebler.Id, sekretariat.Id, 1.0m, null))))).Message.ShouldContain("Prüfende");
+        (await Mit(u, d => d.LadenAsync(p.Id))).Endnote.ShouldBeNull();
+
+        await Mit(u, d => d.ProtokollErstellenAsync(p.Id, new ProtokollAngaben(null, null, null, liebler.Id, null, 1.0m, null)));
+
+        await u.AlsAsync("niemeyer");
+        await Should.ThrowAsync<FachlicherFehler>(() => Mit(u, d => d.ProtokollPdfAsync(p.Id)));
+        await Should.ThrowAsync<FachlicherFehler>(() => Mit(u, d => d.FrageBemerkenAsync(p.Id, f, "x")));
+        await Should.ThrowAsync<FachlicherFehler>(() => Mit(u, d => d.ProtokollErstellenAsync(p.Id, new ProtokollAngaben(null, null, null, liebler.Id, null, 5.0m, null))));
+
+        u.Benutzer.Aktuell = Benutzer.Niemand;
+        await Should.ThrowAsync<FachlicherFehler>(() => Mit(u, d => d.PruefendeAsync()));
+    }
 }

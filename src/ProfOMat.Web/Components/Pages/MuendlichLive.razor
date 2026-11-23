@@ -72,7 +72,7 @@ else
 
             <div class="pm-tbl">
                 <table class="pm-live-tabelle" @ref="tabelle" data-vorschlag="@Vorschlag">
-                    <thead><tr><th class="pm-live-nr">#</th><th>Frage</th><th>Max.</th><th>Punkte</th><th>Stand</th><th><span class="pm-sr">Entfernen</span></th></tr></thead>
+                    <thead><tr><th class="pm-live-nr">#</th><th>Frage</th><th>Max.</th><th>Punkte</th><th class="pm-live-stand">Stand</th><th>Bemerkung</th><th><span class="pm-sr">Entfernen</span></th></tr></thead>
                     <tbody>
                         @foreach (var z in zeilen)
                         {
@@ -88,12 +88,8 @@ else
                                 <td><input class="pm-input pm-live-ein" data-spalte="punkte" inputmode="decimal" @bind="z.Punkte" @bind:event="oninput"
                                            @onkeydown="e => TasteAsync(e, z)" @onfocusout="() => SpeichernAsync(z)" autocomplete="off"
                                            aria-label="Erreichte Punkte (z = zurückgestellt)" /></td>
-                                <td>
-                                    @if (z.Fehler is not null)
-                                    {
-                                        <span class="pm-live-fehler" role="alert">@z.Fehler</span>
-                                    }
-                                    else if (frage is not null)
+                                <td class="pm-live-stand">
+                                    @if (frage is not null)
                                     {
                                         @switch (frage.Stand)
                                         {
@@ -107,6 +103,15 @@ else
                                                 <StatusPille Stil="info">ohne Punkte</StatusPille>
                                                 break;
                                         }
+                                    }
+                                </td>
+                                <td class="pm-live-bem">
+                                    <input class="pm-input" data-spalte="bemerkung" @bind="z.Bemerkung" @bind:event="oninput"
+                                           @onkeydown="e => TasteAsync(e, z)" @onfocusout="() => SpeichernAsync(z)" maxlength="@GestellteFrage.BemerkungMaxLaenge"
+                                           autocomplete="off" aria-label="@($"Bemerkung zu Frage {z.Nummer}")" />
+                                    @if (z.Fehler is not null)
+                                    {
+                                        <span class="pm-live-fehler" role="alert">@z.Fehler</span>
                                     }
                                 </td>
                                 <td>
@@ -124,14 +129,17 @@ else
                                        placeholder="@Vorschlag" /></td>
                             <td><input class="pm-input pm-live-ein" data-spalte="punkte" inputmode="decimal" autocomplete="off"
                                        aria-label="Erreichte Punkte der nächsten Frage (z = zurückgestellt, leer = später)" placeholder="z = zurück" /></td>
-                            <td colspan="2"></td>
+                            <td class="pm-live-stand"></td>
+                            <td class="pm-live-bem"><input class="pm-input" data-spalte="bemerkung" maxlength="@GestellteFrage.BemerkungMaxLaenge" autocomplete="off"
+                                       aria-label="Bemerkung zur nächsten Frage" placeholder="Bemerkung (Tab)" /></td>
+                            <td></td>
                         </tr>
                     </tbody>
                 </table>
             </div>
 
             <p class="pm-small pm-muted pm-live-tasten">
-                <kbd>Enter</kbd> Frage → Max. → Punkte → nächste Frage ·
+                <kbd>Enter</kbd> Frage → Max. → Punkte → nächste Frage · <kbd>Tab</kbd> nach den Punkten: Bemerkung (dann <kbd>Enter</kbd>) ·
                 <kbd>z</kbd> im Punktefeld: Studierende/r stellt die Frage zurück (leer: Punkte später) ·
                 Nummer einer offenen oder zurückgestellten Frage erneut eingeben springt zu deren Punkten ·
                 <kbd>↑</kbd> <kbd>↓</kbd> Zeile wechseln, dort korrigieren · <kbd>Esc</kbd> Eingabe verwerfen · <kbd>Strg</kbd>+<kbd>Entf</kbd> Zeile löschen.
@@ -140,8 +148,114 @@ else
         </section>
     </div>
 
-    <NaechsteSchritte Schritte="@([
-        new NaechsterSchritt("Nächste Prüfung protokollieren", "muendlich", "Neues Protokoll anlegen", Hauptschritt: true),
+    var vorschlag = pruefung.Notenvorschlag;
+    var gewaehlt = noteWahl ?? vorschlag;
+    <section class="pm-card pm-live-protokoll" id="protokoll">
+        <h2>Protokoll erstellen</h2>
+        <p class="pm-muted">Angaben ergänzen, Note festlegen (Vorschlag übernehmen oder anpassen) und das Protokoll als PDF mit Unterschriftsfeldern erstellen.
+            Leer gelassene Angaben bleiben im PDF zum Ausfüllen frei.</p>
+        <div class="pm-fields">
+            <div class="pm-field">
+                <label class="pm-lbl" for="pruefling">Studierende/r</label>
+                <input id="pruefling" class="pm-input" @bind="pruefling" maxlength="@MuendlichePruefung.NameMaxLaenge" autocomplete="off" placeholder="Vorname Nachname" />
+            </div>
+            <div class="pm-field">
+                <label class="pm-lbl" for="matrikel">Matrikelnummer</label>
+                <input id="matrikel" class="pm-input" @bind="matrikelnummer" maxlength="@MuendlichePruefung.MatrikelnummerMaxLaenge" autocomplete="off" inputmode="numeric" />
+            </div>
+            <div class="pm-field">
+                <label class="pm-lbl" for="studiengang">Studiengang</label>
+                <input id="studiengang" class="pm-input" @bind="studiengang" list="pm-studiengaenge" maxlength="@MuendlichePruefung.NameMaxLaenge" autocomplete="off"
+                       placeholder="aus der Liste wählen oder eintippen" />
+                <datalist id="pm-studiengaenge">
+                    @foreach (var s in studiengaenge)
+                    {
+                        <option value="@s"></option>
+                    }
+                </datalist>
+            </div>
+            <div class="pm-field">
+                <label class="pm-lbl" for="erst">Erstprüfer/in</label>
+                <select id="erst" class="pm-input" @bind="erstId">
+                    <option value="">– bitte wählen –</option>
+                    @foreach (var k in pruefende)
+                    {
+                        <option value="@k.KontoId">@k.Sortiername</option>
+                    }
+                </select>
+            </div>
+            <div class="pm-field">
+                <label class="pm-lbl" for="zweit">Zweitprüfer/in</label>
+                <select id="zweit" class="pm-input" @bind="zweitId">
+                    <option value="">– noch offen (im PDF zum Ausfüllen) –</option>
+                    @foreach (var k in pruefende.Where(k => k.KontoId != erstId))
+                    {
+                        <option value="@k.KontoId">@k.Sortiername</option>
+                    }
+                </select>
+            </div>
+        </div>
+
+        <div class="pm-live-vorschlag">
+            <div>
+                <span class="pm-lbl">Vorschlag (Standard-Notenschlüssel)</span>
+                <b class="@NotenKlasse(vorschlag)">@(vorschlag is { } v ? v.ToString("0.0", Deutsch) : "–")</b>
+                <span class="pm-muted">@(vorschlag is { } v2 ? $"{Notenschluessel.Wort(v2)} · {MuendlichePruefung.Zahl(gesamt.Erreicht)} von {MuendlichePruefung.Zahl(gesamt.Moeglich)} Punkten" : "noch keine Fragen")</span>
+            </div>
+            <div class="pm-field">
+                <label class="pm-lbl" for="note">Festzusetzende Note</label>
+                <select id="note" class="pm-input" value="@gewaehlt?.ToString(System.Globalization.CultureInfo.InvariantCulture)" @onchange="NoteGewaehlt">
+                    @if (gewaehlt is null)
+                    {
+                        <option value="">–</option>
+                    }
+                    @foreach (var stufe in Notenschluessel.ErlaubteNoten)
+                    {
+                        <option value="@stufe.ToString(System.Globalization.CultureInfo.InvariantCulture)">@stufe.ToString("0.0", Deutsch) – @Notenschluessel.Wort(stufe)@(stufe == vorschlag ? " (Vorschlag)" : "")</option>
+                    }
+                </select>
+            </div>
+            @if (gewaehlt != vorschlag)
+            {
+                <button type="button" class="pm-btn" @onclick="() => noteWahl = null">Vorschlag übernehmen</button>
+            }
+        </div>
+        @if (unbewertet.Count > 0)
+        {
+            <div class="pm-alert pm-warn">Noch ohne Punkte: @string.Join(", ", unbewertet.Select(f => f.Nummer)) – zählt im Vorschlag und im Protokoll mit 0 Punkten.</div>
+        }
+        @if (gewaehlt is not null && gewaehlt != vorschlag)
+        {
+            <div class="pm-field pm-field-weit">
+                <label class="pm-lbl" for="begruendung">Begründung der Abweichung (optional, erscheint im Protokoll)</label>
+                <textarea id="begruendung" class="pm-input" rows="2" maxlength="@MuendlichePruefung.BegruendungMaxLaenge" @bind="begruendung"></textarea>
+            </div>
+        }
+        @if (protokollFehler is not null)
+        {
+            <div class="pm-alert pm-crit" role="alert">@protokollFehler</div>
+        }
+        <div class="pm-row">
+            <BegruendeterButton Text="Note festlegen und Protokoll erstellen" Haupt="true" Click="ProtokollErstellenAsync" Beschaeftigt="@protokollLaeuft"
+                                Freigabe="@ProtokollFreigabe(gewaehlt)" />
+            @if (pruefung.Endnote is { } fest)
+            {
+                <a class="pm-btn" href="@($"muendlich/{Id}/protokoll.pdf")" target="_blank" rel="noopener">Protokoll öffnen (PDF)</a>
+                <span class="pm-muted pm-small">Festgelegt: @fest.ToString("0.0", Deutsch)@(pruefung.WeichtAb ? " (abweichend vom Vorschlag)" : "") · @Zeit.Kurz(pruefung.Festgelegt!.Value)</span>
+            }
+            else if (pruefung.Fragen.Count > 0 && festgelegtGewesen)
+            {
+                <span class="pm-muted pm-small">Fragen oder Punkte haben sich geändert – bitte die Note erneut festlegen.</span>
+            }
+        </div>
+    </section>
+
+    <NaechsteSchritte Schritte="@(pruefung.Endnote is null ? [
+        new NaechsterSchritt("Protokoll erstellen", "#protokoll", "Angaben ergänzen und Note festlegen", Hauptschritt: true),
+        new NaechsterSchritt("Nächste Prüfung protokollieren", "muendlich", "Neues Protokoll anlegen"),
+    ] : [
+        new NaechsterSchritt("Protokoll öffnen", $"muendlich/{Id}/protokoll.pdf", "PDF zum Unterschreiben", Hauptschritt: true),
+        new NaechsterSchritt("Nächste Prüfung protokollieren", "muendlich", "Neues Protokoll anlegen"),
     ])" />
 
     <section class="pm-card">
@@ -170,7 +284,12 @@ else
     private MuendlichePruefung? pruefung;
     private readonly List<Zeile> zeilen = [];
     private string? ladefehler, fehler;
-    private bool loeschenBestaetigen, eingerichtet;
+    private bool loeschenBestaetigen, eingerichtet, protokollLaeuft, festgelegtGewesen;
+    private string? pruefling, matrikelnummer, studiengang, begruendung, protokollFehler;
+    private Guid? erstId, zweitId;
+    private decimal? noteWahl;
+    private IReadOnlyList<PruefendeWahl> pruefende = [];
+    private IReadOnlyList<string> studiengaenge = [];
     private ElementReference tabelle;
     private IJSObjectReference? modul;
     private DotNetObjectReference<MuendlichLive>? selbst;
@@ -187,6 +306,8 @@ else
 
         public string Punkte { get; set; } = "";
 
+        public string Bemerkung { get; set; } = "";
+
         public string? Fehler { get; set; }
     }
 
@@ -197,14 +318,25 @@ else
     {
         try
         {
-            pruefung = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<MuendlichDienst>().LadenAsync(Id));
+            (pruefung, pruefende, studiengaenge) = await Vorgang.AusfuehrenAsync(async d =>
+            {
+                var dienst = d.GetRequiredService<MuendlichDienst>();
+                var p = await dienst.LadenAsync(Id);
+                return (p, await dienst.PruefendeAsync(), await dienst.StudiengaengeAsync());
+            });
             zeilen.Clear();
             zeilen.AddRange(pruefung.FragenSortiert.Select(f =>
             {
                 var z = new Zeile(f.Id);
-                Uebernehmen(z, f, (z.Nummer, z.Max, z.Punkte));
+                Uebernehmen(z, f, Stand(z));
                 return z;
             }));
+            (pruefling, matrikelnummer, studiengang) = (pruefung.Pruefling, pruefung.Matrikelnummer, pruefung.Studiengang);
+            erstId = pruefung.ErstpruefendeId ?? (pruefende.Any(k => k.KontoId == pruefung.KontoId) ? pruefung.KontoId : null);
+            zweitId = pruefung.ZweitpruefendeId;
+            noteWahl = pruefung.Endnote is { } e && e != pruefung.Notenvorschlag ? e : null;
+            begruendung = pruefung.Abweichungsbegruendung;
+            festgelegtGewesen = pruefung.Endnote is not null;
         }
         catch (FachlicherFehler ex)
         {
@@ -258,7 +390,7 @@ else
     /// so geht nichts verloren, während schon die nächste Frage getippt wird.
     /// </remarks>
     [JSInvokable]
-    public async Task<string?> Eintragen(string nummer, string max, string punkte)
+    public async Task<string?> Eintragen(string nummer, string max, string punkte, string? bemerkung)
     {
         await sperre.WaitAsync();
         try
@@ -275,6 +407,11 @@ else
             {
                 var dienst = d.GetRequiredService<MuendlichDienst>();
                 var (neu, fid) = await dienst.FrageHinzufuegenAsync(Id, nummer, m.Value);
+                if (!string.IsNullOrWhiteSpace(bemerkung))
+                {
+                    neu = await dienst.FrageBemerkenAsync(Id, fid, bemerkung);
+                }
+
                 if (bewertung.Fehler is null && (bewertung.Punkte is not null || bewertung.Zurueckstellen))
                 {
                     try
@@ -293,7 +430,7 @@ else
             fehler = null;
             var frage = p.Fragen.First(f => f.Id == frageId);
             var z = new Zeile(frageId);
-            Uebernehmen(z, frage, (z.Nummer, z.Max, z.Punkte));
+            Uebernehmen(z, frage, Stand(z));
             if (bewertung.Fehler is not null || Unterschied(z, frage, frage.MaxPunkte, bewertung).Punkte)
             {
                 z.Punkte = punkte;   // stehen lassen, damit man sie korrigieren kann
@@ -327,7 +464,7 @@ else
                 z.Fehler = null;
                 if (pruefung!.Fragen.FirstOrDefault(f => f.Id == z.Id) is { } f)
                 {
-                    Uebernehmen(z, f, (z.Nummer, z.Max, z.Punkte));
+                    Uebernehmen(z, f, Stand(z));
                 }
 
                 break;
@@ -348,7 +485,7 @@ else
                 return;   // inzwischen entfernt
             }
 
-            var stand = (z.Nummer, z.Max, z.Punkte);
+            var stand = Stand(z);
             var max = MuendlichePruefung.ZahlLesen(z.Max);
             var bewertung = PunkteLesen(z.Punkte);
             if (string.IsNullOrWhiteSpace(z.Nummer) || max is null || bewertung.Fehler is not null)
@@ -359,14 +496,15 @@ else
             }
 
             var (kopfGeaendert, punkteGeaendert) = Unterschied(z, frage, max.Value, bewertung);
-            if (!kopfGeaendert && !punkteGeaendert)
+            var bemerkungGeaendert = (z.Bemerkung.Trim() is { Length: > 0 } bt ? bt : null) != frage.Bemerkung;
+            if (!kopfGeaendert && !punkteGeaendert && !bemerkungGeaendert)
             {
                 z.Fehler = null;
                 return;
             }
 
             // Wird das Maximum gesenkt, zuerst die Punkte ändern, sonst zuerst das Maximum (die Punkte dürfen es nie überschreiten).
-            var (nummer, m, id) = (z.Nummer, max.Value, frage.Id);
+            var (nummer, m, id, bem) = (z.Nummer, max.Value, frage.Id, z.Bemerkung);
             var maxZuerst = m >= (frage.Punkte ?? 0m);
             pruefung = await Vorgang.AusfuehrenAsync(async d =>
             {
@@ -385,6 +523,11 @@ else
                 if (kopfGeaendert && !maxZuerst)
                 {
                     r = await dienst.FrageAendernAsync(Id, id, nummer, m);
+                }
+
+                if (bemerkungGeaendert)
+                {
+                    r = await dienst.FrageBemerkenAsync(Id, id, bem);
                 }
 
                 return r!;
@@ -411,9 +554,16 @@ else
         => (z.Nummer.Trim() != f.Nummer || max != f.MaxPunkte,
             b.Zurueckstellen ? f.Stand != FrageStand.Zurueckgestellt : b.Punkte != f.Punkte || (b.Punkte is null && f.Zurueckgestellt));
 
+    private static (string Nummer, string Max, string Punkte, string Bemerkung) Stand(Zeile z) => (z.Nummer, z.Max, z.Punkte, z.Bemerkung);
+
     /// <summary>Gespeicherten Stand anzeigen; Felder, in denen inzwischen weitergetippt wurde, bleiben unangetastet.</summary>
-    private static void Uebernehmen(Zeile z, GestellteFrage f, (string Nummer, string Max, string Punkte) stand)
+    private static void Uebernehmen(Zeile z, GestellteFrage f, (string Nummer, string Max, string Punkte, string Bemerkung) stand)
     {
+        if (z.Bemerkung == stand.Bemerkung)
+        {
+            z.Bemerkung = f.Bemerkung ?? "";
+        }
+
         if (z.Nummer == stand.Nummer)
         {
             z.Nummer = f.Nummer;
@@ -461,6 +611,40 @@ else
         }
     }
 
+    private Freigabe ProtokollFreigabe(decimal? note) => MuendlichDienst.ProtokollErstellen(pruefung!)
+        .Und(() => note is null ? Freigabe.Nein("Bitte eine Note wählen.") : Freigabe.Ja)
+        .Und(() => erstId is null ? Freigabe.Nein("Bitte die Erstprüferin bzw. den Erstprüfer wählen.") : Freigabe.Ja)
+        .Und(() => erstId == zweitId ? Freigabe.Nein("Erst- und Zweitprüfung müssen verschiedene Personen sein.") : Freigabe.Ja);
+
+    private void NoteGewaehlt(ChangeEventArgs e)
+        => noteWahl = decimal.TryParse(e.Value as string, System.Globalization.NumberStyles.AllowDecimalPoint, System.Globalization.CultureInfo.InvariantCulture, out var n)
+                      && n != pruefung?.Notenvorschlag ? n : null;
+
+    private async Task ProtokollErstellenAsync()
+    {
+        if (pruefung?.Notenvorschlag is not { } vorschlag && noteWahl is null)
+        {
+            return;
+        }
+
+        protokollLaeuft = true;
+        try
+        {
+            var angaben = new ProtokollAngaben(pruefling, matrikelnummer, studiengang, erstId, zweitId, noteWahl ?? pruefung!.Notenvorschlag!.Value, begruendung);
+            pruefung = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<MuendlichDienst>().ProtokollErstellenAsync(Id, angaben));
+            protokollFehler = null;
+            festgelegtGewesen = true;
+        }
+        catch (FachlicherFehler ex)
+        {
+            protokollFehler = ex.Message;
+        }
+        finally
+        {
+            protokollLaeuft = false;
+        }
+    }
+
     private async Task UmbenennenAsync(string? bezeichnung)
     {
         try
@@ -503,12 +687,5 @@ else
         _ => "pm-live-gut",
     };
 
-    private static string Wort(decimal note) => KlausurAuswertung.Ganz(note) switch
-    {
-        1 => "sehr gut",
-        2 => "gut",
-        3 => "befriedigend",
-        4 => "ausreichend",
-        _ => "nicht ausreichend",
-    };
+    private static string Wort(decimal note) => Notenschluessel.Wort(note);
 }

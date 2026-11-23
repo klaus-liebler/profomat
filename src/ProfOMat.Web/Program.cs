@@ -181,6 +181,22 @@ app.MapGet("/drittpruefung/status/{id:guid}/{token}/pdf", async (Guid id, string
     return Results.File(dok.Inhalt, dok.Inhaltstyp, dok.Dateiname);
 }).AllowAnonymous();
 
+// Protokoll der mündlichen Prüfung (nur wer es angelegt hat; prüft der Dienst)
+app.MapGet("/muendlich/{id:guid}/protokoll.pdf", async (Guid id, ProfOMat.Application.Muendlich.MuendlichDienst dienst, HttpContext http) =>
+{
+    try
+    {
+        var (inhalt, name) = await dienst.ProtokollPdfAsync(id);
+        http.Response.Headers.CacheControl = "no-store";
+        http.Response.Headers.ContentDisposition = new System.Net.Mime.ContentDisposition { Inline = true, FileName = name }.ToString();
+        return Results.Bytes(inhalt, "application/pdf");
+    }
+    catch (FachlicherFehler ex)
+    {
+        return Results.Text(ex.Message, "text/plain; charset=utf-8", statusCode: StatusCodes.Status409Conflict);
+    }
+}).RequireAuthorization();
+
 // Klausur-Ausgaben (Rechte prüft der Dienst)
 app.MapGet("/klausuren/{id:guid}/{datei}", async (Guid id, string datei, ProfOMat.Application.Klausuren.KlausurDienst dienst, HttpContext http) =>
 {

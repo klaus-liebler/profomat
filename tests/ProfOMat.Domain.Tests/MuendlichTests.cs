@@ -116,3 +116,103 @@ public sealed class MuendlichePruefungTests
     [InlineData("1e3")]
     public void Keine_Zahl(string eingabe) => MuendlichePruefung.ZahlLesen(eingabe).ShouldBeNull();
 }
+
+public sealed class MuendlichProtokollTests
+{
+    private static readonly DateTimeOffset Jetzt = new(2026, 11, 23, 10, 0, 0, TimeSpan.Zero);
+
+    private static (MuendlichePruefung P, GestellteFrage F1, GestellteFrage F2) Pruefung()
+    {
+        var p = new MuendlichePruefung(Guid.NewGuid(), "Regelungstechnik", Jetzt);
+        var f1 = p.FrageHinzufuegen("4", 10m);
+        var f2 = p.FrageHinzufuegen("7", 10m);
+        p.FrageBewerten(f1.Id, 8m, false);
+        p.FrageBewerten(f2.Id, null, true);
+        return (p, f1, f2);
+    }
+
+    [Fact]
+    public void Vorschlag_zaehlt_offene_Fragen_mit_null_Punkten()
+    {
+        var (p, _, _) = Pruefung();
+        p.Aktuell.Note.ShouldBe(2.0m);        // 8 von 10
+        p.Notenvorschlag.ShouldBe(5.0m);      // 8 von 20 = 40 %
+    }
+
+    [Fact]
+    public void Vorschlag_uebernehmen_oder_anpassen()
+    {
+        var (p, _, f2) = Pruefung();
+        p.FrageBewerten(f2.Id, 7m, false);    // 15 von 20 = 75 % → 2,3
+        p.NoteFestlegen(2.3m, "wird ignoriert", Jetzt);
+        (p.Endnote, p.WeichtAb, p.Abweichungsbegruendung).ShouldBe((2.3m, false, null));
+
+        p.NoteFestlegen(2.0m, "  sichere Herleitung der Übertragungsfunktion  ", Jetzt);
+        (p.Endnote, p.WeichtAb, p.Abweichungsbegruendung).ShouldBe((2.0m, true, "sichere Herleitung der Übertragungsfunktion"));
+    }
+
+    [Theory]
+    [InlineData("2.5")]
+    [InlineData("0.7")]
+    [InlineData("4.3")]
+    public void Nur_zulaessige_Noten(string note)
+    {
+        var (p, _, _) = Pruefung();
+        Should.Throw<FachlicherFehler>(() => p.NoteFestlegen(decimal.Parse(note, System.Globalization.CultureInfo.InvariantCulture), null, Jetzt));
+        p.Endnote.ShouldBeNull();
+    }
+
+    [Fact]
+    public void Ohne_Fragen_keine_Note()
+        => Should.Throw<FachlicherFehler>(() => new MuendlichePruefung(Guid.NewGuid(), "leer", Jetzt).NoteFestlegen(1.0m, null, Jetzt));
+
+    [Fact]
+    public void Punktaenderung_hebt_die_Festlegung_auf_Bemerkung_nicht()
+    {
+        var (p, f1, f2) = Pruefung();
+        p.NoteFestlegen(4.0m, null, Jetzt);
+        p.FrageBemerken(f1.Id, "  gut begründet ");
+        f1.Bemerkung.ShouldBe("gut begründet");
+        p.Endnote.ShouldBe(4.0m);
+
+        p.FrageBewerten(f2.Id, null, true);   // unverändert zurückgestellt
+        p.Endnote.ShouldBe(4.0m);
+        p.FrageAendern(f1.Id, "4a", 10m);     // nur Nummer
+        p.Endnote.ShouldBe(4.0m);
+
+        p.FrageBewerten(f2.Id, 6m, false);
+        p.Endnote.ShouldBeNull();
+        p.Festgelegt.ShouldBeNull();
+
+        p.NoteFestlegen(2.7m, null, Jetzt);
+        p.FrageAendern(f1.Id, "4a", 12m);
+        p.Endnote.ShouldBeNull();
+        p.NoteFestlegen(2.7m, null, Jetzt);
+        p.FrageHinzufuegen("9", 5m);
+        p.Endnote.ShouldBeNull();
+        p.NoteFestlegen(2.7m, null, Jetzt);
+        p.FrageEntfernen(f2.Id);
+        p.Endnote.ShouldBeNull();
+    }
+
+    [Fact]
+    public void Bemerkung_leer_wird_entfernt_und_gekuerzt()
+    {
+        var (p, f1, _) = Pruefung();
+        p.FrageBemerken(f1.Id, new string('x', GestellteFrage.BemerkungMaxLaenge + 10));
+        f1.Bemerkung!.Length.ShouldBe(GestellteFrage.BemerkungMaxLaenge);
+        p.FrageBemerken(f1.Id, "   ");
+        f1.Bemerkung.ShouldBeNull();
+    }
+
+    [Fact]
+    public void Angaben_brauchen_Erstpruefung_und_zwei_verschiedene_Personen()
+    {
+        var (p, _, _) = Pruefung();
+        var a = Guid.NewGuid();
+        Should.Throw<FachlicherFehler>(() => p.AngabenSetzen("Mia Muster", "123", "ET", null, a));
+        Should.Throw<FachlicherFehler>(() => p.AngabenSetzen("Mia Muster", "123", "ET", a, a));
+        p.AngabenSetzen("  Mia Muster ", " ", "Elektrotechnik (B.Sc., PO 2023)", a, null);
+        (p.Pruefling, p.Matrikelnummer, p.Studiengang, p.ErstpruefendeId, p.ZweitpruefendeId).ShouldBe(("Mia Muster", null, "Elektrotechnik (B.Sc., PO 2023)", a, null));
+    }
+}

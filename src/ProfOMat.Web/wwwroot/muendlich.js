@@ -1,10 +1,11 @@
 // Mündliche Prüfung live: Tastatursteuerung der Protokolltabelle.
 // Alles, was den Fokus bewegt, geschieht sofort im Browser (ohne Umweg über den Server), damit schnell getippte Zeichen nie im
 // falschen Feld landen. Die Eingabezeile gehört ganz dem Browser: Enter im Punktefeld übergibt Frage, Max. und Punkte in einem
-// Aufruf an den Server, leert die Zeile und springt zurück in „Frage“. Bestehende Zeilen speichert der Server beim Verlassen eines Feldes.
-//   Enter: Frage → Max. → Punkte → nächste Frage; ↑/↓: gleiche Spalte in der Zeile darüber/darunter; Esc: Eingabezeile leeren;
+// Aufruf an den Server (mit Bemerkung, falls per Tab eingetragen), leert die Zeile und springt zurück in „Frage“. Bestehende Zeilen speichert der Server beim Verlassen eines Feldes.
+//   Enter: Frage → Max. → Punkte → nächste Frage (Tab: Bemerkung, Enter dort ebenso); ↑/↓: gleiche Spalte in der Zeile darüber/darunter; Esc: Eingabezeile leeren;
 //   Strg+Entf: Zeile löschen. Eine Fragennummer, die schon offen oder zurückgestellt ist, springt direkt in deren Punktefeld.
 
+const SPALTEN = ['nummer', 'max', 'punkte', 'bemerkung'];
 const feld = (zeile, spalte) => zeile?.querySelector(`input[data-spalte="${spalte}"]`) ?? null;
 
 export function fokus(el) {
@@ -19,16 +20,17 @@ export function einrichten(tabelle, dotnet) {
     const eingabezeile = () => tabelle.querySelector('tbody tr[data-entwurf]');
 
     const eintragen = (zeile) => {
-        const [n, m, p] = ['nummer', 'max', 'punkte'].map((s) => feld(zeile, s));
-        const werte = [n.value.trim(), m.value.trim(), p.value.trim()];
+        const felder = SPALTEN.map((s) => feld(zeile, s));
+        const [n, m] = felder;
+        const werte = felder.map((f) => f.value.trim());
         if (!werte[0]) { fokus(n); return; }
         if (werte[1]) { tabelle.dataset.vorschlag = werte[1]; }
-        n.value = m.value = p.value = '';
+        felder.forEach((f) => { f.value = ''; });
         fokus(n);
         dotnet.invokeMethodAsync('Eintragen', ...werte).then((fehler) => {
             // Nicht übernommen (z. B. Max. keine Zahl): Werte zurückholen, sofern inzwischen nichts Neues getippt wurde.
-            if (fehler && !n.value && !m.value && !p.value) {
-                [n.value, m.value, p.value] = werte;
+            if (fehler && felder.every((f) => !f.value)) {
+                felder.forEach((f, j) => { f.value = werte[j]; });
                 fokus(fehler === 'max' ? m : n);
             }
         });
@@ -74,7 +76,7 @@ export function einrichten(tabelle, dotnet) {
             }
         } else if (e.key === 'Escape' && entwurf) {
             e.preventDefault();
-            ['nummer', 'max', 'punkte'].forEach((s) => { feld(zeile, s).value = ''; });
+            SPALTEN.forEach((s) => { feld(zeile, s).value = ''; });
             fokus(feld(zeile, 'nummer'));
         } else if (e.key === 'Delete' && e.ctrlKey && !entwurf) {
             e.preventDefault();

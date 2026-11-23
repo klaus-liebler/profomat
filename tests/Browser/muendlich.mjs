@@ -1,6 +1,7 @@
-// Browserprüfung „Mündliche Prüfung live“: nur Tastatur, schnelles Tippen, Zurückstellen, Wiederaufnehmen, Note, 390 px.
+// Browserprüfung „Mündliche Prüfung live“: nur Tastatur, schnelles Tippen, Zurückstellen, Wiederaufnehmen, Note, Bemerkung,
+// Protokoll (Prüfende, Studiengang, Note anpassen, PDF), 390 px.
 // Aufruf: node tests/Browser/muendlich.mjs http://localhost:5310 <Ordner>
-import { mkdirSync, mkdtempSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { browserStarten } from './cdp.mjs';
@@ -18,7 +19,7 @@ const fokus = () => seite.eval(`(() => { const a = document.activeElement; const
 
 try {
     await seite.oeffnen(basis + 'anmelden');
-    await seite.eval(`[...document.querySelectorAll('.pm-list > div')].find(d => d.textContent.includes('Erika Mustermann')).querySelector('button').click()`);
+    await seite.eval(`[...document.querySelectorAll('.pm-list > div')].find(d => d.textContent.includes('Klaus Liebler')).querySelector('button').click()`);
     await seite.warteAuf(`!location.pathname.endsWith('/anmelden')`);
 
     console.log('• Protokoll per Tastatur anlegen');
@@ -74,11 +75,52 @@ try {
     pruefe(z.length === 4, `vier Zeilen nach dem Neuladen (${z.length})`);
     await seite.bild(join(bilder, 'm2-nach-neuladen.png'));
 
+    console.log('• Bemerkung per Tab in der Eingabezeile');
+    await seite.eval(`document.querySelector('tr[data-entwurf] input[data-spalte=nummer]').focus()`);
+    await seite.tippen('12⏎4⏎3⇥Bode-Diagramm sicher⏎');
+    await warte(1000);
+    z = await zeilen();
+    pruefe(z.length === 5 && z[4].startsWith('12|4|3|Bode-Diagramm sicher|'), `Bemerkung gespeichert (${z[4]})`);
+    pruefe(await fokus() === 'neu:nummer', 'Fokus wieder in der neuen Zeile');
+
+    console.log('• Protokoll: Angaben, Prüfende, Note anpassen, PDF');
+    const wahl = (id, text) => seite.eval(`(() => { const s = document.getElementById('${id}'); const o = [...s.options].find(o => o.textContent.includes('${text}'));
+        s.value = o.value; s.dispatchEvent(new Event('change', { bubbles: true })); return o.textContent; })()`);
+    pruefe((await seite.eval(`document.getElementById('erst').selectedOptions[0].textContent`)).includes('Liebler'), 'Erstprüfer vorbelegt: Liebler');
+    await seite.eingeben('#pruefling', 'Mia Muster');
+    await seite.eingeben('#matrikel', '1234567');
+    pruefe(await seite.eval(`document.querySelectorAll('#pm-studiengaenge option').length`) > 0, 'Studiengänge aus dem Katalog zur Auswahl');
+    await seite.eingeben('#studiengang', 'Mechatronik (B.Sc., eigene Eingabe)');
+    await wahl('zweit', 'Niemeyer');
+    await warte(300);
+    const vorschlag = await seite.eval(`document.querySelector('.pm-live-vorschlag b').textContent.trim()`);
+    pruefe((await seite.eval(`document.getElementById('note').selectedOptions[0].textContent`)).includes('(Vorschlag)'), `Note steht auf dem Vorschlag ${vorschlag}`);
+    await wahl('note', '1,7');
+    await warte(300);
+    pruefe(await seite.eval(`!!document.getElementById('begruendung')`), 'Abweichung: Feld für die Begründung');
+    await seite.eingeben('#begruendung', 'Sehr sichere Herleitung im Gespräch');
+    await seite.klickText('button', 'Note festlegen und Protokoll erstellen');
+    await warte(800);
+    pruefe((await seite.text()).includes('Festgelegt: 1,7 (abweichend vom Vorschlag)'), 'Note 1,7 festgelegt');
+    const pdf = await seite.eval(`(async () => { const r = await fetch(document.querySelector('a[href$="protokoll.pdf"]').href);
+        const b = new Uint8Array(await r.arrayBuffer()); let s = ''; for (const x of b) { s += String.fromCharCode(x); }
+        return { status: r.status, typ: r.headers.get('content-type'), daten: btoa(s) }; })()`);
+    const bytes = Buffer.from(pdf.daten, 'base64');
+    pruefe(pdf.status === 200 && pdf.typ === 'application/pdf' && bytes.subarray(0, 5).toString() === '%PDF-', `PDF abrufbar (${bytes.length} Bytes)`);
+    writeFileSync(join(bilder, 'protokoll.pdf'), bytes);
+    await seite.bild(join(bilder, 'm4-protokoll.png'));
+
+    console.log('• Punkte geändert: Festlegung aufgehoben');
+    await seite.eval(`document.querySelectorAll('tbody tr[data-zeile]:not([data-entwurf])')[4].querySelector('input[data-spalte=punkte]').select()`);
+    await seite.tippen('4⏎');
+    await warte(900);
+    pruefe((await seite.text()).includes('bitte die Note erneut festlegen'), 'Hinweis: Note erneut festlegen');
+
     console.log('• 390 px');
     const { seite: schmal, beenden: beenden2 } = await browserStarten({ port: 9338, breite: 390, hoehe: 844 });
     try {
         await schmal.oeffnen(basis + 'anmelden');
-        await schmal.eval(`[...document.querySelectorAll('.pm-list > div')].find(d => d.textContent.includes('Erika Mustermann')).querySelector('button').click()`);
+        await schmal.eval(`[...document.querySelectorAll('.pm-list > div')].find(d => d.textContent.includes('Klaus Liebler')).querySelector('button').click()`);
         await schmal.warteAuf(`!location.pathname.endsWith('/anmelden')`);
         await schmal.oeffnen(await seite.eval('location.href'));
         await warte(600);

@@ -43,6 +43,8 @@ public sealed class Demodaten(IDaten daten, KatalogDienst katalog)
 
         K("verwaltung", null, "Vera", "Verwaltung", Rolle.Systemverwaltung);
         K("mustermann", "Prof. Dr.", "Erika", "Mustermann", Rolle.Pruefende);
+        K("liebler", "Prof. Dr.", "Klaus", "Liebler", Rolle.Pruefende);
+        K("niemeyer", "Prof. Dr.", "Philip", "Niemeyer", Rolle.Pruefende);
         var dekan = K("beispiel", "Prof. Dr.-Ing.", "Max", "Beispiel", Rolle.Pruefende, Rolle.Studiendekanat);
         K("probst", "Prof. Dr.", "Lena", "Probst", Rolle.Pruefende);
         K("tester", "Prof. Dr.-Ing.", "Jonas", "Tester", Rolle.Pruefende);

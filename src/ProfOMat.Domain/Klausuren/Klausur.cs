@@ -20,6 +20,16 @@ public static class Notenschluessel
 
     public const decimal StandardBezug = 100m;
 
+    /// <summary>„sehr gut“ … „nicht ausreichend“.</summary>
+    public static string Wort(decimal note) => KlausurAuswertung.Ganz(note) switch
+    {
+        1 => "sehr gut",
+        2 => "gut",
+        3 => "befriedigend",
+        4 => "ausreichend",
+        _ => "nicht ausreichend",
+    };
+
     /// <summary>Prüft und sortiert; liefert die erste Beanstandung oder <c>null</c>.</summary>
     public static string? Beanstandung(IReadOnlyList<Notenstufe> stufen)
     {

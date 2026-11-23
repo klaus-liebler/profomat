@@ -16,7 +16,7 @@ namespace ProfOMat.Infrastructure.Datenbank;
 public sealed class ProfOMatDbContext(DbContextOptions<ProfOMatDbContext> optionen) : DbContext(optionen)
 {
     /// <summary>Erhöhen, wenn sich das Modell ändert: eine ältere Datei wird dann beim Start abgelehnt (statt still falsch zu laufen).</summary>
-    public const int Schemaversion = 4;
+    public const int Schemaversion = 5;
 
     protected override void ConfigureConventions(ModelConfigurationBuilder konventionen)
     {
@@ -181,7 +181,15 @@ public sealed class ProfOMatDbContext(DbContextOptions<ProfOMatDbContext> option
             e.Ignore(p => p.MoeglichGesamt);
             e.Ignore(p => p.Aktuell);
             e.Ignore(p => p.OhneOffene);
+            e.Ignore(p => p.Notenvorschlag);
+            e.Ignore(p => p.WeichtAb);
             e.Property(p => p.Bezeichnung).HasMaxLength(MuendlichePruefung.BezeichnungMaxLaenge);
+            e.Property(p => p.Pruefling).HasMaxLength(MuendlichePruefung.NameMaxLaenge);
+            e.Property(p => p.Matrikelnummer).HasMaxLength(MuendlichePruefung.MatrikelnummerMaxLaenge);
+            e.Property(p => p.Studiengang).HasMaxLength(MuendlichePruefung.NameMaxLaenge);
+            e.HasOne<Konto>().WithMany().HasForeignKey(p => p.ErstpruefendeId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne<Konto>().WithMany().HasForeignKey(p => p.ZweitpruefendeId).OnDelete(DeleteBehavior.Restrict);
+            e.Property(p => p.Abweichungsbegruendung).HasMaxLength(MuendlichePruefung.BegruendungMaxLaenge);
             e.HasOne<Konto>().WithMany().HasForeignKey(p => p.KontoId).OnDelete(DeleteBehavior.Restrict);
             e.HasMany(p => p.Fragen).WithOne().HasForeignKey(f => f.PruefungId).OnDelete(DeleteBehavior.Cascade);
             e.Navigation(p => p.Fragen).AutoInclude().UsePropertyAccessMode(PropertyAccessMode.Field);
@@ -192,6 +200,7 @@ public sealed class ProfOMatDbContext(DbContextOptions<ProfOMatDbContext> option
             e.HasKey(f => f.Id);
             e.Ignore(f => f.Stand);
             e.Property(f => f.Nummer).HasMaxLength(GestellteFrage.NummerMaxLaenge);
+            e.Property(f => f.Bemerkung).HasMaxLength(GestellteFrage.BemerkungMaxLaenge);
         });
 
         m.Entity<Nachricht>(e =>

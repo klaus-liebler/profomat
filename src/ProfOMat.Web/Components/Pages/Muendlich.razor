@@ -58,7 +58,14 @@
                             <td>@Zeit.Kurz(p.Begonnen)</td>
                             <td>@p.Fragen.Count@(offen > 0 ? $" ({offen} offen)" : "")</td>
                             <td>@MuendlichePruefung.Zahl(n.Erreicht) / @MuendlichePruefung.Zahl(n.Moeglich)</td>
-                            <td>@(n.Note?.ToString("0.0", System.Globalization.CultureInfo.GetCultureInfo("de-DE")) ?? "–")</td>
+                            <td>@if (p.Endnote is { } fest)
+                                {
+                                    <b>@fest.ToString("0.0", System.Globalization.CultureInfo.GetCultureInfo("de-DE"))</b> <StatusPille Stil="gut">festgelegt</StatusPille>
+                                }
+                                else
+                                {
+                                    @(n.Note?.ToString("0.0", System.Globalization.CultureInfo.GetCultureInfo("de-DE")) ?? "–")
+                                }</td>
                         </tr>
                     }
                 </tbody>
