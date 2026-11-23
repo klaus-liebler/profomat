@@ -1,7 +1,7 @@
 # Bereitstellung auf dem Webserver
 
 Ziel: **https://liebler.iui.hs-osnabrueck.de/profomat/** auf demselben Server wie VibeVHS, FraktionPerfekt und Podium. Das Kit in
-`deploy/server` folgt dem FraktionPerfekt-Kit (`C:\repos\fraktionperfekt\deploy`): self-contained Linux-Build, Programm in `/opt`,
+`deploy/server` folgt dem FraktionPerfekt-Kit (`C:\repos\fraktionperfekt\deploy`): framework-abhängiger Linux-Build (gemeinsame ASP.NET-Core-Runtime aus VibeVHS-Schritt 09; `deploy.ps1 -MitRuntime` = self-contained), Programm in `/opt`,
 Daten in `/var/lib`, systemd-Dienst nur auf `127.0.0.1`, nginx davor (TLS, ohne Passwort – die App meldet selbst an, wie Podium), jeder root-Schritt als eigenes Skript
 mit Sicherung und Rückweg. Die nginx-Einbindung nutzt das gemeinsame Schema `schritte/liebler-nginx.sh` (identisch in allen Kits).
 

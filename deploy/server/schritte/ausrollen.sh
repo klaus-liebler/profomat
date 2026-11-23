@@ -9,6 +9,7 @@
 #             UND vorige Datenbank zurück.
 # Rückweg von Hand: sudo bash /tmp/profomat-kit/schritte/ausrollen.sh --zurueck
 source "$(dirname "$0")/gemeinsam.sh"
+source "$(dirname "$0")/liebler-dotnet.sh"
 als_root
 BEISEITE="$DATEN/beiseite"
 
@@ -33,6 +34,8 @@ archiv="${1:?Pfad zum Archiv fehlt}"
 neu=$(mktemp -d "$PROGRAMM.neu.XXXX")
 tar -xzf "$archiv" -C "$neu" --strip-components=1
 [[ -f "$neu/ProfOMat.Web" ]] || { rm -rf "$neu"; fehler "Archiv enthält kein ProfOMat.Web"; }
+# Framework-abhängiges Paket: passende gemeinsame Runtime vorhanden? (VibeVHS-Schritt 09) – sonst nichts ändern
+dotnet_pruefen "$neu" "ProfOMat.Web" || { rm -rf "$neu"; fehler "Ausrollen abgebrochen: Runtime fehlt (siehe oben). Nichts geändert."; }
 # Sicherheitsnetz: Daten und Schlüssel gehören nie ins Programm (würden sonst mit ausgerollt)
 verboten=$(find "$neu" \( -name '*.db' -o -name '*.db-wal' -o -name '*.db-shm' -o -name '*.pem' -o -path '*/data/*' -o -path '*/schluessel/*' \) -print -quit)
 if [[ -n "$verboten" ]]; then

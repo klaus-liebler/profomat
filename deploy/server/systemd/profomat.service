@@ -1,6 +1,6 @@
 # ProfOMat (Testsystem) als systemd-Dienst – Vorlage, Schritt 01 füllt @…@ aus konfiguration.env
 # und legt sie als /etc/systemd/system/@DIENST@.service ab.
-# Self-contained Linux-Build in /opt/@DIENST@ (kein .NET auf dem Server nötig), Daten getrennt in /var/lib/@DIENST@.
+# Linux-Build in /opt/@DIENST@ (framework-abhängig: gemeinsame ASP.NET-Core-Runtime aus VibeVHS-Schritt 09; mit deploy.ps1 -MitRuntime self-contained), Daten getrennt in /var/lib/@DIENST@.
 # Geheimnisse und bewusste Schalter (Demodaten, Testanmeldung, Mail) stehen nur in /etc/@DIENST@/@DIENST@.env (root:@DIENST@, 0640).
 [Unit]
 Description=ProfOMat (Testsystem)

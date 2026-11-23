@@ -1,7 +1,7 @@
 ﻿<#
 .SYNOPSIS
-    ProfOMat auf liebler.iui.hs-osnabrueck.de ausrollen (gleiches Muster wie VibeVHS und FraktionPerfekt): self-contained
-    Linux-Build, Kit und Archiv hochladen, auf dem Server mit sudo einspielen. Übertragen wird NUR das Programm (dotnet publish) –
+    ProfOMat auf liebler.iui.hs-osnabrueck.de ausrollen (gleiches Muster wie VibeVHS und FraktionPerfekt): framework-abhängiger
+    Linux-Build (Runtime einmalig auf dem Server, VibeVHS-Schritt 09), Kit und Archiv hochladen, auf dem Server mit sudo einspielen. Übertragen wird NUR das Programm (dotnet publish) –
     Datenbank, Schlüssel (Systemsiegel) und Logs bleiben auf dem Server in /var/lib/profomat bzw. /var/log/profomat.
 .EXAMPLE
     .\deploy\server\deploy.ps1                # testen, bauen, hochladen, einspielen (fragt nach dem sudo-Passwort)
@@ -18,6 +18,8 @@ param(
     [string] $Schluessel = "$env:USERPROFILE\.ssh\id_ed25519_liebler_iui_hs_osnabrueck",
     [switch] $NurKit,
     [switch] $NurBauen,
+    # Paket mit eigener .NET-Runtime (self-contained, ~70 statt ~20 MB) – nur, falls die gemeinsame Runtime fehlt
+    [switch] $MitRuntime,
     # Datenbank auf dem Server vor dem Start nach /var/lib/profomat/beiseite/ verschieben (nicht löschen); die Anwendung legt sie
     # neu an. Scheitert der Start, kommen vorige Version und vorige Datenbank automatisch zurück.
     [switch] $DbNeu,
@@ -74,11 +76,12 @@ if (-not $OhneTests) {
     if ($LASTEXITCODE -ne 0) { throw "Tests fehlgeschlagen – nichts ausgerollt." }
 }
 
-Write-Host "» dotnet publish (linux-x64, self-contained)" -ForegroundColor Cyan
+$eigeneRuntime = if ($MitRuntime) { "true" } else { "false" }
+Write-Host ("» dotnet publish (linux-x64, {0})" -f $(if ($MitRuntime) { "mit eigener Runtime" } else { "framework-abhängig" })) -ForegroundColor Cyan
 $build = Join-Path $ausgabe "profomat"
 if (Test-Path $build) { Remove-Item $build -Recurse -Force }
 # Eigener Artefakt-Ordner: Die lokal laufende Instanz (bin\) bleibt unberührt
-dotnet publish (Join-Path $wurzel "src\ProfOMat.Web") -c Release -r linux-x64 --self-contained true -o $build -p:DebugType=None `
+dotnet publish (Join-Path $wurzel "src\ProfOMat.Web") -c Release -r linux-x64 --self-contained $eigeneRuntime -o $build -p:DebugType=None `
     --artifacts-path (Join-Path $ausgabe "artefakte")
 if ($LASTEXITCODE -ne 0) { throw "Build fehlgeschlagen." }
 Remove-Item (Join-Path $build "appsettings.Development.json") -ErrorAction SilentlyContinue
