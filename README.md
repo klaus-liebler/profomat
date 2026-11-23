@@ -55,3 +55,6 @@ node tests\Browser\muendlich.mjs http://localhost:5310 <Ordner> # Mündliche Pr�
 Geheimnisse nur über Umgebungsvariablen: `Startkonto__Passwort` (erstes Konto der Systemverwaltung), `Mail__Host`, `Mail__Benutzer`,
 `Mail__Passwort`. Der Ordner `Speicher:Schluessel` enthält den Systemsiegel-Schlüssel und die Cookie-Schlüssel. Er gehört in die
 Sicherung, nie ins Repository.
+
+Testsystem auf dem Hochschulserver: `.\deploy\server\deploy.ps1` (Tests, Linux-Build, Upload, Einspielen mit Sicherung und
+Rückweg; `-DbNeu` nach geänderter Schemaversion). Einrichtung und Sicherheitsstand: [docs/deploy.md](docs/deploy.md).

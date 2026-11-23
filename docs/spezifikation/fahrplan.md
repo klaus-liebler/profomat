@@ -10,7 +10,8 @@
 | 2a | Klausuren-Feinschliff: QR-Code auf dem Deckblatt und Scan beim Punkte-Eintragen, Mitarbeitende für die Korrektur freigeben, Klausur der Katalogprüfung zuordnen, Sitzplan als PDF zum Aushängen | offen |
 | 3 | Anmeldung über das Hochschulsystem (SAML/Shibboleth), Vorausfüllen für Studierende | nach Klärung mit dem IT-Service |
 | 4 | Echte Katalogquelle (Webservice oder Exportdatei), PAdES-Siegel des Abschluss-PDFs, X.509-Zertifikate für Schlüssel | offen |
-| – | Vor dem Produktivbetrieb: EF-Migrationen statt EnsureCreated, Bereitstellung (nginx, Pfad-Basis), Sicherung inkl. Siegelschlüssel | offen |
+| B | Testsystem auf liebler.iui.hs-osnabrueck.de/profomat: Deploy-Kit (`deploy/`), nginx mit Zugangspasswort, Pfad-Basis, Sicherung inkl. Siegelschlüssel | fertig (23.11.2026) |
+| – | Vor dem Produktivbetrieb: EF-Migrationen statt EnsureCreated, SSO, Missbrauchsschutz, öffentliche Pfade ohne Zugangspasswort | offen |
 
 ## Offene Abklärungen
 

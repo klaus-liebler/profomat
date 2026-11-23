@@ -107,6 +107,18 @@ if (hinterProxy)
 if (app.Configuration["PathBase"] is { Length: > 1 } pfadBasis)
 {
     app.UsePathBase(pfadBasis);
+    // Außerhalb der Pfad-Basis nichts rendern: Sonst setzte z. B. /favicon.ico über die 404-Seite ein zweites Antiforgery-Cookie
+    // mit Path=/ und gleichem Namen, und Formulare unter der Pfad-Basis scheiterten mit 400.
+    app.Use(async (kontext, weiter) =>
+    {
+        if (!kontext.Request.PathBase.HasValue)
+        {
+            kontext.Response.StatusCode = StatusCodes.Status404NotFound;
+            return;
+        }
+
+        await weiter(kontext);
+    });
 }
 
 app.UseRouting();
