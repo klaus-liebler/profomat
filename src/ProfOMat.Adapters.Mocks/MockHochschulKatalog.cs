@@ -41,10 +41,52 @@ public sealed class MockHochschulKatalog : IHochschulKatalog
             P("51001", "Wirtschaftsmathematik"), P("51002", "Statistik"), P("51010", "Kosten- und Leistungsrechnung"),
         ]);
 
+        // Maschinenbau: Studiengänge wie auf hs-osnabrueck.de („Maschinenbau studieren“, Studiengänge A–Z, Stand 11/2026);
+        // Prüfungsordnungen und Prüfungen sind erfunden. Jede Prüfungsnummer nur einmal (eigener Nummernkreis je Studiengang).
+        static StudiengangQuelle M(string kuerzel, string name, string abschluss, string po, int nummernkreis, params string[] pruefungen)
+            => new($"stg:{kuerzel}:{po.Replace(" ", "", StringComparison.Ordinal)}", kuerzel, name, abschluss, po,
+                pruefungen.Select((t, i) => P((nummernkreis + i).ToString(System.Globalization.CultureInfo.InvariantCulture), t)).ToList());
+
+        string[] mbGrundlagen = ["Mathematik 1", "Mathematik 2", "Technische Mechanik 1", "Technische Mechanik 2", "Werkstofftechnik",
+            "Konstruktionslehre 1", "Thermodynamik", "Strömungslehre", "Fertigungstechnik", "Regelungstechnik"];
+        var maschinenbau =
+            new[]
+            {
+                M("MB-BSC", "Maschinenbau", "B.Sc.", "PO 2023", 61001, [.. mbGrundlagen, "Maschinenelemente 1", "Maschinenelemente 2"]),
+                M("MBP-BSC", "Maschinenbau im Praxisverbund", "B.Sc.", "PO 2023", 61101, [.. mbGrundlagen, "Maschinenelemente 1"]),
+                M("IWMB-BENG", "Ingenieurwesen – Maschinenbau (berufsbegleitend)", "B.Eng.", "PO 2022", 61201,
+                    "Mathematik 1", "Technische Mechanik 1", "Werkstofftechnik", "Konstruktionslehre 1", "Fertigungstechnik"),
+                M("FZT-BSC", "Fahrzeugtechnik", "B.Sc.", "PO 2023", 61301,
+                    [.. mbGrundlagen[..6], "Fahrzeugtechnik 1", "Fahrzeugdynamik", "Verbrennungsmotoren", "Elektrische Antriebe im Fahrzeug"]),
+                M("AFE-BSC", "Aircraft and Flight Engineering", "B.Sc.", "PO 2023", 61401,
+                    [.. mbGrundlagen[..6], "Aerodynamik", "Flugmechanik", "Flugzeugbau", "Luftfahrtantriebe"]),
+                M("BBFZT-BSC", "Berufliche Bildung – Teilstudiengang Fahrzeugtechnik", "B.Sc.", "PO 2021", 61501,
+                    "Mathematik 1", "Technische Mechanik 1", "Fahrzeugtechnik 1", "Kraftfahrzeugelektrik"),
+                M("BBMT-BSC", "Berufliche Bildung – Teilstudiengang Metalltechnik", "B.Sc.", "PO 2021", 61601,
+                    "Mathematik 1", "Technische Mechanik 1", "Werkstofftechnik", "Fertigungstechnik"),
+                M("MB-MSC", "Maschinenbau", "M.Sc.", "PO 2022", 62001,
+                    "Höhere Technische Mechanik", "Finite-Elemente-Methode", "Höhere Regelungstechnik", "Produktentwicklung", "Numerische Strömungsmechanik"),
+                M("FZT-MSC", "Fahrzeugtechnik", "M.Sc.", "PO 2022", 62101,
+                    "Fahrzeugsystemtechnik", "Alternative Antriebe", "Fahrerassistenzsysteme", "Fahrzeugakustik"),
+                M("LBSFZT-MED", "Lehramt an berufsbildenden Schulen – Teilstudiengang Fahrzeugtechnik", "M.Ed.", "PO 2021", 62201,
+                    "Fahrzeugtechnik 2", "Fachdidaktik Fahrzeugtechnik"),
+                M("LBSMT-MED", "Lehramt an berufsbildenden Schulen – Teilstudiengang Metalltechnik", "M.Ed.", "PO 2021", 62301,
+                    "Fertigungstechnik 2", "Fachdidaktik Metalltechnik"),
+            };
+        var lingen =
+            new[]
+            {
+                M("AMB-BSC", "Allgemeiner Maschinenbau (Standort Lingen)", "B.Sc.", "PO 2023", 71001,
+                    "Mathematik 1", "Technische Mechanik 1", "Werkstofftechnik", "Konstruktionslehre 1", "Thermodynamik", "Fertigungstechnik"),
+                M("ETSMB-BENG", "ETS – Maschinenbau (dual, Standort Lingen)", "B.Eng.", "PO 2023", 71101,
+                    "Mathematik 1", "Technische Mechanik 1", "Werkstofftechnik", "Konstruktionslehre 1", "Fertigungstechnik"),
+            };
+
         return Task.FromResult(new KatalogStand(
         [
-            new FakultaetQuelle("IuI", "Fakultät Ingenieurwissenschaften und Informatik", [et, ti, mt, esm]),
+            new FakultaetQuelle("IuI", "Fakultät Ingenieurwissenschaften und Informatik", [et, ti, mt, esm, .. maschinenbau]),
             new FakultaetQuelle("WiSo", "Fakultät Wirtschafts- und Sozialwissenschaften", [bwl]),
+            new FakultaetQuelle("MKT", "Fakultät Management, Kultur und Technik (Campus Lingen)", lingen),
         ]));
     }
 }
