@@ -13,6 +13,9 @@ internal sealed class Daten(ProfOMatDbContext db) : IDaten
     public void Hinzufuegen<T>(T eintrag)
         where T : class => db.Set<T>().Add(eintrag);
 
+    public void Entfernen<T>(T eintrag)
+        where T : class => db.Set<T>().Remove(eintrag);
+
     public async Task<T?> FindenAsync<T>(Guid id, CancellationToken abbruch = default)
         where T : class
         => db.ChangeTracker.Entries<T>().FirstOrDefault(e => e.Property<Guid>("Id").CurrentValue == id)?.Entity

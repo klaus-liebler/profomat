@@ -170,6 +170,37 @@ p { margin: 0; }
 .pm-gr-legende i.pm-gr-tuer { background: #9C6B3F; } .pm-gr-legende i.pm-gr-fenster { background: #A9D6F2; } .pm-gr-legende i.pm-gr-pult { background: #D9C7A7; }
 @media (max-width: 1100px) { .pm-editor { grid-template-columns: minmax(0, 1fr); } }
 
+/* Mündliche Prüfung live */
+.pm-live { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr) minmax(240px, 320px); align-items: start; }
+.pm-live-fragen { order: 1; }
+.pm-live-note { order: 2; position: sticky; top: 76px; }
+.pm-live-gross { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; margin-bottom: 12px; }
+.pm-live-gross b { font-size: 56px; line-height: 1; font-variant-numeric: tabular-nums; }
+.pm-live-gut { color: var(--pm-good); } .pm-live-warn { color: var(--pm-warn); } .pm-live-krit { color: var(--pm-crit); }
+.pm-live .pm-tbl { position: relative; }
+.pm-live-tabelle td { padding: 4px 6px; vertical-align: middle; }
+.pm-live-tabelle th { padding: 6px; }
+.pm-live-ein { width: 88px; padding: 5px 8px; font-variant-numeric: tabular-nums; }
+.pm-live-tabelle tr.pm-live-zurueck td { background: var(--pm-warn-weak); }
+.pm-live-tabelle tr.pm-live-laeuft td { background: var(--pm-accent-weak); }
+.pm-live-tabelle tr.pm-live-entwurf td { background: var(--pm-surface-2); }
+.pm-live-fehler { color: var(--pm-crit); font-size: 12.5px; }
+.pm-live-tasten { margin-top: 10px; line-height: 1.9; }
+kbd { font-family: var(--pm-mono); font-size: 11.5px; border: 1px solid var(--pm-line); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; background: var(--pm-surface); }
+.pm-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+@media (max-width: 860px) {
+    .pm-live { grid-template-columns: minmax(0, 1fr); }
+    .pm-live-note { order: 0; position: sticky; top: 0; z-index: 5; padding: 10px 14px; }
+    .pm-live-gross { flex-direction: row; align-items: baseline; gap: 10px; margin-bottom: 6px; }
+    .pm-live-gross b { font-size: 36px; }
+    .pm-live-note .pm-dl { grid-template-columns: max-content minmax(0, 1fr); font-size: 13px; }
+    .pm-live-note .pm-dl dt { margin-top: 0; }
+    .pm-live-ein { width: 58px; padding: 5px 6px; }
+    .pm-live-tabelle td, .pm-live-tabelle th { padding: 4px 3px; }
+    .pm-live-nr { display: none; }
+    .pm-live-tabelle .pm-pill { padding: 1px 6px; font-size: 11px; }
+}
+
 #blazor-error-ui { display: none; position: fixed; bottom: 0; left: 0; width: 100%; padding: 10px 20px; background: #FFF6D6; box-shadow: 0 -1px 2px rgba(0,0,0,.2); z-index: 1000; }
 #blazor-error-ui .dismiss { cursor: pointer; position: absolute; right: 12px; top: 8px; }
 

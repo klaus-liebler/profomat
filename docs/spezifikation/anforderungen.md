@@ -41,6 +41,17 @@ Aufbau, Leitlinien und Bausteine wie VibeVHS/FraktionPerfekt. FA-/NFA-Nummern we
 | FA-131 | Jede Unterschrift ist mit dem Systemsiegel (ECDSA-Schlüssel des Servers) versiegelt und über eine Hash-Kette mit der vorherigen verbunden; Veränderungen in der Datenbank werden angezeigt. | umgesetzt |
 | FA-132 | Das fertige PDF zusätzlich mit einem PAdES-Siegel (Zertifikat der Hochschule) versehen, damit es auch außerhalb des ProfOMat prüfbar ist. | geplant |
 
+## Iteration 1b – Mündliche Prüfung live (Protokollhilfe)
+
+| Nr. | Anforderung | Stand |
+|---|---|---|
+| FA-150 | Prüfende legen während einer mündlichen Prüfung ein Live-Protokoll an (Bezeichnung frei, z. B. Prüfung und Kandidat/in). Ein Protokoll sieht und ändert nur, wer es angelegt hat; Löschen mit Rückfrage. | umgesetzt |
+| FA-151 | Zeilenweise Eingabe der gestellten Fragen: Fragennummer (frei, z. B. „12“ oder „3b“), Höchstpunktzahl, erreichte Punkte (Komma oder Punkt, höchstens zwei Nachkommastellen, 0 bis Höchstpunktzahl). Jede Zeile wird sofort gespeichert. | umgesetzt |
+| FA-152 | Vollständig per Tastatur, ohne Maus: Enter springt Frage → Max. → Punkte → nächste Frage, ↑/↓ wechselt die Zeile (Korrektur), Esc verwirft, Strg+Entf löscht eine Zeile; leeres Max. übernimmt die Höchstpunktzahl der vorigen Frage. Der Fokus wechselt im Browser ohne Serverumweg, damit auch schnell Getipptes im richtigen Feld landet. | umgesetzt |
+| FA-153 | Zurückstellen: „z“ im Punktefeld vermerkt, dass die/der Studierende die Frage später beantworten möchte. Wird die Nummer erneut eingegeben, springt die Eingabe in deren Punktefeld; nachgeholte Fragen bleiben als „nachgeholt“ erkennbar. | umgesetzt |
+| FA-154 | Ständig sichtbar: aktuelle Note nach dem Standard-Notenschlüssel (FA-205) über die bewerteten Fragen – exakt in Prozent (49,5 % → 4,0 … 94,5 % → 1,0), ohne Rundung auf halbe Punkte, da die Summen klein sind –, Punkte und Prozent, Abstand zur nächstbesseren Note, offene/zurückgestellte Fragen und die Note, falls diese ohne Punkte bleiben. | umgesetzt |
+| FA-155 | Protokoll als PDF (Fragen, Punkte, Note) zum Unterschreiben durch Prüfende und Beisitz. | geplant |
+
 ## Iteration 2 – Klausuren: Vorbereitung, Bewertung, Veröffentlichung
 
 | Nr. | Anforderung | Stand |

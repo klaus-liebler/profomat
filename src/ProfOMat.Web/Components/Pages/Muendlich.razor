@@ -1,0 +1,129 @@
+@page "/muendlich"
+@attribute [Authorize]
+@using ProfOMat.Application.Muendlich
+@using ProfOMat.Domain.Muendlich
+@inject Vorgang Vorgang
+@inject Ortszeit Zeit
+@inject NavigationManager Navigation
+
+<PageTitle>Mündliche Prüfung live · ProfOMat</PageTitle>
+
+<div class="pm-head">
+    <div>
+        <h1>Mündliche Prüfung live</h1>
+        <p>Protokoll während der Prüfung: gestellte Fragen mit Höchst- und erreichter Punktzahl zeilenweise eintragen, zurückgestellte Fragen vermerken –
+            die Note nach dem Standard-Notenschlüssel steht jederzeit fest. Alles per Tastatur.</p>
+    </div>
+</div>
+
+@if (fehler is not null)
+{
+    <div class="pm-alert pm-crit" role="alert">@fehler</div>
+}
+
+<section class="pm-card">
+    <h2>Neue Prüfung protokollieren</h2>
+    <div class="pm-fields">
+        <div class="pm-field pm-field-weit">
+            <label class="pm-lbl" for="bezeichnung">Bezeichnung</label>
+            <input id="bezeichnung" class="pm-input" @ref="eingabe" @bind="bezeichnung" @bind:event="oninput" @onkeydown="TasteAsync"
+                   maxlength="@MuendlichePruefung.BezeichnungMaxLaenge" autocomplete="off" placeholder="z. B. Regelungstechnik – Kandidat/in 3" />
+            <span class="pm-hilfe">Enter beginnt das Protokoll. Nur Sie sehen es.</span>
+        </div>
+    </div>
+    <div>
+        <BegruendeterButton Text="Protokoll beginnen" Haupt="true" Click="AnlegenAsync" Beschaeftigt="@beschaeftigt"
+                            Freigabe="@(recht is { Erlaubt: false } ? recht : string.IsNullOrWhiteSpace(bezeichnung) ? Freigabe.Nein("Bitte zuerst eine Bezeichnung eingeben.") : Freigabe.Ja)" />
+    </div>
+</section>
+
+<section class="pm-card">
+    <h2>Meine Protokolle</h2>
+    @if (liste.Count == 0)
+    {
+        <p class="pm-muted">Noch keine.</p>
+    }
+    else
+    {
+        <div class="pm-tbl">
+            <table>
+                <thead><tr><th>Prüfung</th><th>Begonnen</th><th>Fragen</th><th>Punkte</th><th>Note</th></tr></thead>
+                <tbody>
+                    @foreach (var p in liste)
+                    {
+                        var n = p.Aktuell;
+                        var offen = p.Fragen.Count(f => f.Punkte is null);
+                        <tr>
+                            <td><a href="muendlich/@p.Id">@p.Bezeichnung</a></td>
+                            <td>@Zeit.Kurz(p.Begonnen)</td>
+                            <td>@p.Fragen.Count@(offen > 0 ? $" ({offen} offen)" : "")</td>
+                            <td>@MuendlichePruefung.Zahl(n.Erreicht) / @MuendlichePruefung.Zahl(n.Moeglich)</td>
+                            <td>@(n.Note?.ToString("0.0", System.Globalization.CultureInfo.GetCultureInfo("de-DE")) ?? "–")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</section>
+
+@code {
+    [CascadingParameter]
+    private Task<AuthenticationState>? Anmeldezustand { get; set; }
+
+    private IReadOnlyList<MuendlichePruefung> liste = [];
+    private string? bezeichnung, fehler;
+    private bool beschaeftigt;
+    private Freigabe? recht;
+    private ElementReference eingabe;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Anmeldezustand is not null)
+        {
+            recht = MuendlichDienst.Protokollieren(Anmeldung.AlsBenutzer((await Anmeldezustand).User) ?? Benutzer.Niemand);
+        }
+
+        liste = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<MuendlichDienst>().ListeAsync());
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await eingabe.FocusAsync();
+        }
+    }
+
+    private async Task TasteAsync(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !string.IsNullOrWhiteSpace(bezeichnung))
+        {
+            await AnlegenAsync();
+        }
+    }
+
+    private async Task AnlegenAsync()
+    {
+        if (beschaeftigt)
+        {
+            return;
+        }
+
+        fehler = null;
+        beschaeftigt = true;
+        try
+        {
+            var p = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<MuendlichDienst>().AnlegenAsync(bezeichnung ?? ""));
+            Navigation.NavigateTo($"muendlich/{p.Id}");
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+        }
+        finally
+        {
+            beschaeftigt = false;
+        }
+    }
+}

@@ -16,6 +16,10 @@ public interface IDaten
     void Hinzufuegen<T>(T eintrag)
         where T : class;
 
+    /// <summary>Löscht eine Wurzel (abhängige Einträge per Kaskade).</summary>
+    void Entfernen<T>(T eintrag)
+        where T : class;
+
     Task<T?> FindenAsync<T>(Guid id, CancellationToken abbruch = default)
         where T : class;
 

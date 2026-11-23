@@ -5,6 +5,7 @@ using ProfOMat.Domain.Drittpruefung;
 using ProfOMat.Domain.Katalog;
 using ProfOMat.Domain.Klausuren;
 using ProfOMat.Domain.Konten;
+using ProfOMat.Domain.Muendlich;
 
 namespace ProfOMat.Infrastructure.Datenbank;
 
@@ -15,7 +16,7 @@ namespace ProfOMat.Infrastructure.Datenbank;
 public sealed class ProfOMatDbContext(DbContextOptions<ProfOMatDbContext> optionen) : DbContext(optionen)
 {
     /// <summary>Erhöhen, wenn sich das Modell ändert: eine ältere Datei wird dann beim Start abgelehnt (statt still falsch zu laufen).</summary>
-    public const int Schemaversion = 3;
+    public const int Schemaversion = 4;
 
     protected override void ConfigureConventions(ModelConfigurationBuilder konventionen)
     {
@@ -167,6 +168,30 @@ public sealed class ProfOMatDbContext(DbContextOptions<ProfOMatDbContext> option
         {
             e.ToTable("Notenstufen");
             e.HasKey(s => s.Id);
+        });
+
+        m.Entity<MuendlichePruefung>(e =>
+        {
+            e.ToTable("MuendlichePruefungen");
+            e.HasKey(p => p.Id);
+            e.HasIndex(p => p.KontoId);
+            e.Ignore(p => p.FragenSortiert);
+            e.Ignore(p => p.Erreicht);
+            e.Ignore(p => p.MoeglichBewertet);
+            e.Ignore(p => p.MoeglichGesamt);
+            e.Ignore(p => p.Aktuell);
+            e.Ignore(p => p.OhneOffene);
+            e.Property(p => p.Bezeichnung).HasMaxLength(MuendlichePruefung.BezeichnungMaxLaenge);
+            e.HasOne<Konto>().WithMany().HasForeignKey(p => p.KontoId).OnDelete(DeleteBehavior.Restrict);
+            e.HasMany(p => p.Fragen).WithOne().HasForeignKey(f => f.PruefungId).OnDelete(DeleteBehavior.Cascade);
+            e.Navigation(p => p.Fragen).AutoInclude().UsePropertyAccessMode(PropertyAccessMode.Field);
+        });
+        m.Entity<GestellteFrage>(e =>
+        {
+            e.ToTable("GestellteFragen");
+            e.HasKey(f => f.Id);
+            e.Ignore(f => f.Stand);
+            e.Property(f => f.Nummer).HasMaxLength(GestellteFrage.NummerMaxLaenge);
         });
 
         m.Entity<Nachricht>(e =>

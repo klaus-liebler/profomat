@@ -1,7 +1,8 @@
 # ProfOMat
 
 Webanwendung für Professorinnen und Professoren der Hochschule Osnabrück: Prüfungsabläufe digital, mit Unterschrift, ohne Papier.
-Funktionen: **Anmeldung mündlicher Drittprüfungen** (ATPO § 18 Abs. 1 Satz 3) und **Klausuren** (Prüfungsliste importieren, Räume und Sitzplätze, Serienbrief-Daten, Punkte, Noten, Veröffentlichung mit Statistik). Aufbau und Leitlinien folgen
+Funktionen: **Anmeldung mündlicher Drittprüfungen** (ATPO § 18 Abs. 1 Satz 3), **Klausuren** (Prüfungsliste importieren, Räume und Sitzplätze, Serienbrief-Daten, Punkte, Noten, Veröffentlichung mit Statistik) und
+**Mündliche Prüfung live** (Fragen, Punkte und Zurückstellungen per Tastatur protokollieren, Note läuft mit). Aufbau und Leitlinien folgen
 **VibeVHS** (`C:\repos\vibevhs`).
 
 | Dokument | Inhalt |
@@ -33,6 +34,7 @@ Testkonten (alle erfunden, Testanmeldung ohne Passwort):
 Ablauf zum Ausprobieren: *Antrag stellen* (ohne Anmeldung, Mail z. B. `…@stud.hs-osnabrueck.de`) → Postausgang: Link öffnen und
 bestätigen → als Mustermann Termin festlegen und unterschreiben → als Beispiel bestellen → PDF.
 Klausuren: als Mustermann unter *Klausuren* die Datei `tools/Testdaten/pruefungsliste-beispiel.csv` (57 erfundene Personen) hochladen. Der Raum SI 0012 hat einen Beispielgrundriss (*Räume → Grundriss*).
+Mündliche Prüfung live: als Mustermann unter *Live-Protokoll* eine Bezeichnung eingeben, Enter, dann z. B. `7⏎5⏎4⏎ 8⏎⏎z⏎ 8⏎4⏎` tippen.
 
 Einen Schlüssel zum Testen erzeugt `openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -aes-256-cbc -out test.pem`.
 
@@ -45,6 +47,7 @@ dotnet test --project tests\ProfOMat.Application.Tests
 node tests\Signatur\signatur-test.mjs                        # Schlüsselformate (braucht openssl)
 node tests\Browser\ablauf.mjs http://localhost:5310 <Ordner>  # Drittprüfung im Headless-Edge, Instanz muss laufen
 node tests\Browser\klausur.mjs http://localhost:5310 <Ordner> # Klausurablauf (frische Datenbank)
+node tests\Browser\muendlich.mjs http://localhost:5310 <Ordner> # Mündliche Prüfung live: nur Tastatur, schnelles Tippen, 390 px
 ```
 
 ## Betrieb (Kurzfassung)

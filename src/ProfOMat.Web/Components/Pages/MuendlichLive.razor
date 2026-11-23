@@ -1,0 +1,514 @@
+@page "/muendlich/{Id:guid}"
+@attribute [Authorize]
+@using ProfOMat.Application.Muendlich
+@using ProfOMat.Domain.Klausuren
+@using ProfOMat.Domain.Muendlich
+@implements IAsyncDisposable
+@inject Vorgang Vorgang
+@inject Ortszeit Zeit
+@inject IJSRuntime JS
+@inject NavigationManager Navigation
+
+<PageTitle>Mündliche Prüfung live · ProfOMat</PageTitle>
+
+<a class="pm-zurueck" href="muendlich">← Zu den Protokollen</a>
+
+@if (ladefehler is not null)
+{
+    <section class="pm-card" role="alert"><h1>Protokoll nicht verfügbar</h1><p>@ladefehler</p></section>
+}
+else if (pruefung is null)
+{
+    <p class="pm-muted">Wird geladen …</p>
+}
+else
+{
+    var aktuell = pruefung.Aktuell;
+    var gesamt = pruefung.OhneOffene;
+    var unbewertet = pruefung.FragenSortiert.Where(f => f.Punkte is null).ToList();
+    <div class="pm-head">
+        <div>
+            <h1>Mündliche Prüfung live</h1>
+            <p>Begonnen @Zeit.Kurz(pruefung.Begonnen) · Fragen zeilenweise eintragen, die Note rechnet mit (Standard-Notenschlüssel).</p>
+        </div>
+    </div>
+
+    <div class="pm-live">
+        <section class="pm-card pm-live-note" aria-live="polite" aria-label="Aktuelle Note">
+            <div class="pm-live-gross">
+                <span class="pm-lbl">Aktuelle Note</span>
+                <b class="@NotenKlasse(aktuell.Note)">@(aktuell.Note is { } n ? n.ToString("0.0", Deutsch) : "–")</b>
+                <span>@(aktuell.Note is { } n2 ? Wort(n2) : "noch nichts bewertet")</span>
+            </div>
+            <dl class="pm-dl">
+                <dt>Punkte</dt>
+                <dd>@MuendlichePruefung.Zahl(aktuell.Erreicht) von @MuendlichePruefung.Zahl(aktuell.Moeglich)@(aktuell.Prozent is { } pz ? $" ({pz.ToString("0.#", Deutsch)} %)" : "")</dd>
+                @if (aktuell.NaechsteNote is { } besser)
+                {
+                    <dt>Zur @besser.ToString("0.0", Deutsch)</dt>
+                    <dd>fehlen @MuendlichePruefung.Zahl(aktuell.FehlendePunkte!.Value) Punkte</dd>
+                }
+                @if (unbewertet.Count > 0)
+                {
+                    <dt>Noch offen</dt>
+                    <dd>@string.Join(", ", unbewertet.Select(f => f.Stand == FrageStand.Zurueckgestellt ? $"{f.Nummer} (zurückgestellt)" : f.Nummer))</dd>
+                    <dt>Bleibt das ohne Punkte</dt>
+                    <dd>@(gesamt.Note is { } g ? g.ToString("0.0", Deutsch) : "–") (@MuendlichePruefung.Zahl(gesamt.Erreicht) von @MuendlichePruefung.Zahl(gesamt.Moeglich))</dd>
+                }
+            </dl>
+        </section>
+
+        <section class="pm-card pm-live-fragen">
+            <div class="pm-field">
+                <label class="pm-lbl" for="bezeichnung">Bezeichnung</label>
+                <input id="bezeichnung" class="pm-input" value="@pruefung.Bezeichnung" maxlength="@MuendlichePruefung.BezeichnungMaxLaenge"
+                       @onchange="e => UmbenennenAsync(e.Value as string)" autocomplete="off" />
+            </div>
+
+            @if (fehler is not null)
+            {
+                <div class="pm-alert pm-crit" role="alert">@fehler</div>
+            }
+
+            <div class="pm-tbl">
+                <table class="pm-live-tabelle" @ref="tabelle" data-vorschlag="@Vorschlag">
+                    <thead><tr><th class="pm-live-nr">#</th><th>Frage</th><th>Max.</th><th>Punkte</th><th>Stand</th><th><span class="pm-sr">Entfernen</span></th></tr></thead>
+                    <tbody>
+                        @foreach (var z in zeilen)
+                        {
+                            var frage = pruefung.Fragen.FirstOrDefault(f => f.Id == z.Id);
+                            <tr @key="z" data-zeile="" data-nummer="@frage?.Nummer.ToLowerInvariant()" data-offen="@(frage is { Punkte: null } ? "true" : "false")"
+                                class="@ZeilenKlasse(frage)">
+                                <td class="pm-muted pm-live-nr">@((zeilen.IndexOf(z) + 1).ToString(Deutsch))</td>
+                                <td><input class="pm-input pm-live-ein" data-spalte="nummer" @bind="z.Nummer" @bind:event="oninput"
+                                           @onkeydown="e => TasteAsync(e, z)" @onfocusout="() => SpeichernAsync(z)" maxlength="@GestellteFrage.NummerMaxLaenge"
+                                           autocomplete="off" aria-label="Fragennummer" /></td>
+                                <td><input class="pm-input pm-live-ein" data-spalte="max" inputmode="decimal" @bind="z.Max" @bind:event="oninput"
+                                           @onkeydown="e => TasteAsync(e, z)" @onfocusout="() => SpeichernAsync(z)" autocomplete="off" aria-label="Höchstpunktzahl" /></td>
+                                <td><input class="pm-input pm-live-ein" data-spalte="punkte" inputmode="decimal" @bind="z.Punkte" @bind:event="oninput"
+                                           @onkeydown="e => TasteAsync(e, z)" @onfocusout="() => SpeichernAsync(z)" autocomplete="off"
+                                           aria-label="Erreichte Punkte (z = zurückgestellt)" /></td>
+                                <td>
+                                    @if (z.Fehler is not null)
+                                    {
+                                        <span class="pm-live-fehler" role="alert">@z.Fehler</span>
+                                    }
+                                    else if (frage is not null)
+                                    {
+                                        @switch (frage.Stand)
+                                        {
+                                            case FrageStand.Bewertet:
+                                                <StatusPille Stil="gut">@(frage.Zurueckgestellt ? "nachgeholt" : "bewertet")</StatusPille>
+                                                break;
+                                            case FrageStand.Zurueckgestellt:
+                                                <StatusPille Stil="warn">zurückgestellt</StatusPille>
+                                                break;
+                                            default:
+                                                <StatusPille Stil="info">ohne Punkte</StatusPille>
+                                                break;
+                                        }
+                                    }
+                                </td>
+                                <td>
+                                    <button type="button" class="pm-linkbutton" tabindex="-1" title="Zeile entfernen (Strg+Entf)" aria-label="@($"Frage {z.Nummer} entfernen")"
+                                            @onclick="() => EntfernenAsync(z)">✕</button>
+                                </td>
+                            </tr>
+                        }
+                        @* Eingabezeile: gehört ganz dem Browser (muendlich.js), kein @bind – Enter im Punktefeld ruft Eintragen auf. *@
+                        <tr data-zeile="" data-entwurf="" class="pm-live-entwurf">
+                            <td class="pm-muted pm-live-nr">neu</td>
+                            <td><input class="pm-input pm-live-ein" data-spalte="nummer" maxlength="@GestellteFrage.NummerMaxLaenge" autocomplete="off"
+                                       aria-label="Fragennummer der nächsten Frage" placeholder="Nr." /></td>
+                            <td><input class="pm-input pm-live-ein" data-spalte="max" inputmode="decimal" autocomplete="off" aria-label="Höchstpunktzahl der nächsten Frage"
+                                       placeholder="@Vorschlag" /></td>
+                            <td><input class="pm-input pm-live-ein" data-spalte="punkte" inputmode="decimal" autocomplete="off"
+                                       aria-label="Erreichte Punkte der nächsten Frage (z = zurückgestellt, leer = später)" placeholder="z = zurück" /></td>
+                            <td colspan="2"></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <p class="pm-small pm-muted pm-live-tasten">
+                <kbd>Enter</kbd> Frage → Max. → Punkte → nächste Frage ·
+                <kbd>z</kbd> im Punktefeld: Studierende/r stellt die Frage zurück (leer: Punkte später) ·
+                Nummer einer offenen oder zurückgestellten Frage erneut eingeben springt zu deren Punkten ·
+                <kbd>↑</kbd> <kbd>↓</kbd> Zeile wechseln, dort korrigieren · <kbd>Esc</kbd> Eingabe verwerfen · <kbd>Strg</kbd>+<kbd>Entf</kbd> Zeile löschen.
+                Max. leer lassen übernimmt die Höchstpunktzahl der vorigen Frage. Jede Zeile wird sofort gespeichert.
+            </p>
+        </section>
+    </div>
+
+    <NaechsteSchritte Schritte="@([
+        new NaechsterSchritt("Nächste Prüfung protokollieren", "muendlich", "Neues Protokoll anlegen", Hauptschritt: true),
+    ])" />
+
+    <section class="pm-card">
+        <h2>Protokoll löschen</h2>
+        @if (!loeschenBestaetigen)
+        {
+            <div class="pm-row"><button type="button" class="pm-btn" @onclick="() => loeschenBestaetigen = true">Protokoll löschen …</button></div>
+        }
+        else
+        {
+            <p>Das Protokoll mit @pruefung.Fragen.Count Fragen wird endgültig gelöscht.</p>
+            <div class="pm-row">
+                <button type="button" class="pm-btn pm-btn-gefahr" @onclick="LoeschenAsync">Ja, endgültig löschen</button>
+                <button type="button" class="pm-btn" @onclick="() => loeschenBestaetigen = false">Abbrechen</button>
+            </div>
+        }
+    </section>
+}
+
+@code {
+    private static readonly System.Globalization.CultureInfo Deutsch = System.Globalization.CultureInfo.GetCultureInfo("de-DE");
+
+    [Parameter]
+    public Guid Id { get; set; }
+
+    private MuendlichePruefung? pruefung;
+    private readonly List<Zeile> zeilen = [];
+    private string? ladefehler, fehler;
+    private bool loeschenBestaetigen, eingerichtet;
+    private ElementReference tabelle;
+    private IJSObjectReference? modul;
+    private DotNetObjectReference<MuendlichLive>? selbst;
+    private readonly SemaphoreSlim sperre = new(1, 1);
+
+    /// <summary>Eingabepuffer einer gespeicherten Tabellenzeile.</summary>
+    private sealed class Zeile(Guid id)
+    {
+        public Guid Id { get; } = id;
+
+        public string Nummer { get; set; } = "";
+
+        public string Max { get; set; } = "";
+
+        public string Punkte { get; set; } = "";
+
+        public string? Fehler { get; set; }
+    }
+
+    /// <summary>Höchstpunktzahl der zuletzt gestellten Frage als Vorschlag für die nächste.</summary>
+    private string? Vorschlag => pruefung?.FragenSortiert.LastOrDefault() is { } f ? MuendlichePruefung.Zahl(f.MaxPunkte) : null;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        try
+        {
+            pruefung = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<MuendlichDienst>().LadenAsync(Id));
+            zeilen.Clear();
+            zeilen.AddRange(pruefung.FragenSortiert.Select(f =>
+            {
+                var z = new Zeile(f.Id);
+                Uebernehmen(z, f, (z.Nummer, z.Max, z.Punkte));
+                return z;
+            }));
+        }
+        catch (FachlicherFehler ex)
+        {
+            ladefehler = ex.Message;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (pruefung is null || eingerichtet)
+        {
+            return;
+        }
+
+        try
+        {
+            modul ??= await JS.InvokeAsync<IJSObjectReference>("import", Navigation.ToAbsoluteUri("muendlich.js").ToString());
+            selbst ??= DotNetObjectReference.Create(this);
+            await modul.InvokeVoidAsync("einrichten", tabelle, selbst);
+            eingerichtet = true;
+        }
+        catch (JSException ex)
+        {
+            fehler = $"Die Tastatursteuerung konnte nicht geladen werden ({ex.Message}). Bitte die Seite neu laden.";
+            StateHasChanged();
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (modul is not null)
+        {
+            try
+            {
+                await modul.InvokeVoidAsync("abbauen", tabelle);
+                await modul.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+            }
+        }
+
+        selbst?.Dispose();
+        sperre.Dispose();
+    }
+
+    // ---------------------------------------------------------------- Eingabezeile (aus muendlich.js)
+    /// <summary>Neue Frage aus der Eingabezeile. Liefert <c>null</c>, wenn übernommen, sonst das Feld, das nicht passt („nummer“/„max“).</summary>
+    /// <remarks>
+    /// Passen nur die Punkte nicht (z. B. über dem Maximum), wird die Frage trotzdem angelegt und die Zeile zeigt den Fehler –
+    /// so geht nichts verloren, während schon die nächste Frage getippt wird.
+    /// </remarks>
+    [JSInvokable]
+    public async Task<string?> Eintragen(string nummer, string max, string punkte)
+    {
+        await sperre.WaitAsync();
+        try
+        {
+            var m = string.IsNullOrWhiteSpace(max) ? pruefung?.FragenSortiert.LastOrDefault()?.MaxPunkte : MuendlichePruefung.ZahlLesen(max);
+            if (m is null)
+            {
+                fehler = string.IsNullOrWhiteSpace(max) ? $"Frage {nummer}: Bitte die Höchstpunktzahl eingeben." : $"Frage {nummer}: „{max}“ ist keine Zahl.";
+                return "max";
+            }
+
+            var bewertung = PunkteLesen(punkte);
+            var (p, frageId) = await Vorgang.AusfuehrenAsync(async d =>
+            {
+                var dienst = d.GetRequiredService<MuendlichDienst>();
+                var (neu, fid) = await dienst.FrageHinzufuegenAsync(Id, nummer, m.Value);
+                if (bewertung.Fehler is null && (bewertung.Punkte is not null || bewertung.Zurueckstellen))
+                {
+                    try
+                    {
+                        neu = await dienst.FrageBewertenAsync(Id, fid, bewertung.Punkte, bewertung.Zurueckstellen);
+                    }
+                    catch (FachlicherFehler)
+                    {
+                        // Frage ist angelegt; die Meldung kommt beim Speichern der Zeile unten.
+                    }
+                }
+
+                return (neu, fid);
+            });
+            pruefung = p;
+            fehler = null;
+            var frage = p.Fragen.First(f => f.Id == frageId);
+            var z = new Zeile(frageId);
+            Uebernehmen(z, frage, (z.Nummer, z.Max, z.Punkte));
+            if (bewertung.Fehler is not null || Unterschied(z, frage, frage.MaxPunkte, bewertung).Punkte)
+            {
+                z.Punkte = punkte;   // stehen lassen, damit man sie korrigieren kann
+                z.Fehler = bewertung.Fehler ?? PunkteFehler(frage, bewertung);
+            }
+
+            zeilen.Add(z);
+            return null;
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+            return "nummer";
+        }
+        finally
+        {
+            sperre.Release();
+            StateHasChanged();
+        }
+    }
+
+    private static string PunkteFehler(GestellteFrage f, Bewertung b)
+        => b.Punkte is { } p && (p < 0 || p > f.MaxPunkte) ? $"Frage {f.Nummer}: Punkte zwischen 0 und {MuendlichePruefung.Zahl(f.MaxPunkte)}." : "Punkte nicht übernommen.";
+
+    // ---------------------------------------------------------------- bestehende Zeilen
+    private async Task TasteAsync(KeyboardEventArgs e, Zeile z)
+    {
+        switch (e.Key)
+        {
+            case "Escape":
+                z.Fehler = null;
+                if (pruefung!.Fragen.FirstOrDefault(f => f.Id == z.Id) is { } f)
+                {
+                    Uebernehmen(z, f, (z.Nummer, z.Max, z.Punkte));
+                }
+
+                break;
+            case "Delete" when e.CtrlKey:
+                await EntfernenAsync(z);
+                break;
+        }
+    }
+
+    /// <summary>Beim Verlassen eines Feldes: geänderte Werte speichern.</summary>
+    private async Task SpeichernAsync(Zeile z)
+    {
+        await sperre.WaitAsync();
+        try
+        {
+            if (pruefung!.Fragen.FirstOrDefault(f => f.Id == z.Id) is not { } frage)
+            {
+                return;   // inzwischen entfernt
+            }
+
+            var stand = (z.Nummer, z.Max, z.Punkte);
+            var max = MuendlichePruefung.ZahlLesen(z.Max);
+            var bewertung = PunkteLesen(z.Punkte);
+            if (string.IsNullOrWhiteSpace(z.Nummer) || max is null || bewertung.Fehler is not null)
+            {
+                z.Fehler = string.IsNullOrWhiteSpace(z.Nummer) ? "Fragennummer fehlt (Esc stellt den alten Wert her)."
+                    : max is null ? "Höchstpunktzahl fehlt oder ist keine Zahl (Esc stellt den alten Wert her)." : bewertung.Fehler;
+                return;
+            }
+
+            var (kopfGeaendert, punkteGeaendert) = Unterschied(z, frage, max.Value, bewertung);
+            if (!kopfGeaendert && !punkteGeaendert)
+            {
+                z.Fehler = null;
+                return;
+            }
+
+            // Wird das Maximum gesenkt, zuerst die Punkte ändern, sonst zuerst das Maximum (die Punkte dürfen es nie überschreiten).
+            var (nummer, m, id) = (z.Nummer, max.Value, frage.Id);
+            var maxZuerst = m >= (frage.Punkte ?? 0m);
+            pruefung = await Vorgang.AusfuehrenAsync(async d =>
+            {
+                var dienst = d.GetRequiredService<MuendlichDienst>();
+                MuendlichePruefung? r = null;
+                if (kopfGeaendert && maxZuerst)
+                {
+                    r = await dienst.FrageAendernAsync(Id, id, nummer, m);
+                }
+
+                if (punkteGeaendert)
+                {
+                    r = await dienst.FrageBewertenAsync(Id, id, bewertung.Punkte, bewertung.Zurueckstellen);
+                }
+
+                if (kopfGeaendert && !maxZuerst)
+                {
+                    r = await dienst.FrageAendernAsync(Id, id, nummer, m);
+                }
+
+                return r!;
+            });
+            z.Fehler = null;
+            if (pruefung.Fragen.FirstOrDefault(f => f.Id == z.Id) is { } neu)
+            {
+                Uebernehmen(z, neu, stand);
+            }
+        }
+        catch (FachlicherFehler ex)
+        {
+            z.Fehler = ex.Message;
+            // Teilweise gespeichert? Aktuellen Stand neu laden, damit Anzeige und Datenbank übereinstimmen.
+            pruefung = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<MuendlichDienst>().LadenAsync(Id));
+        }
+        finally
+        {
+            sperre.Release();
+        }
+    }
+
+    private static (bool Kopf, bool Punkte) Unterschied(Zeile z, GestellteFrage f, decimal max, Bewertung b)
+        => (z.Nummer.Trim() != f.Nummer || max != f.MaxPunkte,
+            b.Zurueckstellen ? f.Stand != FrageStand.Zurueckgestellt : b.Punkte != f.Punkte || (b.Punkte is null && f.Zurueckgestellt));
+
+    /// <summary>Gespeicherten Stand anzeigen; Felder, in denen inzwischen weitergetippt wurde, bleiben unangetastet.</summary>
+    private static void Uebernehmen(Zeile z, GestellteFrage f, (string Nummer, string Max, string Punkte) stand)
+    {
+        if (z.Nummer == stand.Nummer)
+        {
+            z.Nummer = f.Nummer;
+        }
+
+        if (z.Max == stand.Max)
+        {
+            z.Max = MuendlichePruefung.Zahl(f.MaxPunkte);
+        }
+
+        if (z.Punkte == stand.Punkte)
+        {
+            z.Punkte = f.Punkte is { } p ? MuendlichePruefung.Zahl(p) : f.Zurueckgestellt ? "z" : "";
+        }
+    }
+
+    private sealed record Bewertung(decimal? Punkte, bool Zurueckstellen, string? Fehler);
+
+    private static Bewertung PunkteLesen(string eingabe)
+    {
+        var t = eingabe.Trim();
+        return t.Length == 0 ? new Bewertung(null, false, null)
+            : t.Equals("z", StringComparison.OrdinalIgnoreCase) ? new Bewertung(null, true, null)
+            : MuendlichePruefung.ZahlLesen(t) is { } p ? new Bewertung(p, false, null)
+            : new Bewertung(null, false, $"„{t}“: Punkte als Zahl oder z für zurückgestellt.");
+    }
+
+    // ---------------------------------------------------------------- weitere Aktionen
+    private async Task EntfernenAsync(Zeile z)
+    {
+        await sperre.WaitAsync();
+        try
+        {
+            pruefung = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<MuendlichDienst>().FrageEntfernenAsync(Id, z.Id));
+            zeilen.Remove(z);
+            fehler = null;
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+        }
+        finally
+        {
+            sperre.Release();
+        }
+    }
+
+    private async Task UmbenennenAsync(string? bezeichnung)
+    {
+        try
+        {
+            pruefung = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<MuendlichDienst>().UmbenennenAsync(Id, bezeichnung ?? ""));
+            fehler = null;
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+        }
+    }
+
+    private async Task LoeschenAsync()
+    {
+        try
+        {
+            await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<MuendlichDienst>().LoeschenAsync(Id));
+            Navigation.NavigateTo("muendlich");
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+        }
+    }
+
+    // ---------------------------------------------------------------- Darstellung
+    private static string ZeilenKlasse(GestellteFrage? f) => f?.Stand switch
+    {
+        FrageStand.Zurueckgestellt => "pm-live-zurueck",
+        FrageStand.Offen => "pm-live-laeuft",
+        _ => "",
+    };
+
+    private static string NotenKlasse(decimal? note) => note switch
+    {
+        null => "",
+        >= 5.0m => "pm-live-krit",
+        4.0m => "pm-live-warn",
+        _ => "pm-live-gut",
+    };
+
+    private static string Wort(decimal note) => KlausurAuswertung.Ganz(note) switch
+    {
+        1 => "sehr gut",
+        2 => "gut",
+        3 => "befriedigend",
+        4 => "ausreichend",
+        _ => "nicht ausreichend",
+    };
+}

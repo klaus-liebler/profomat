@@ -103,6 +103,16 @@ export async function browserStarten({ port = 9333, breite = 1280, hoehe = 900 }
             await s('DOM.setFileInputFiles', { nodeId, files: [pfad] });
             await warte(800);
         },
+        /** Echte Tastendrücke an das fokussierte Element: Zeichen einzeln, „⏎“ = Enter, „↑“/„↓“ = Pfeiltasten, „⎋“ = Escape. */
+        async tippen(folge, pause = 25) {
+            const sonder = { '⏎': ['Enter', 13, '\r'], '↑': ['ArrowUp', 38], '↓': ['ArrowDown', 40], '⎋': ['Escape', 27] };
+            for (const z of folge) {
+                const [key, code, text] = sonder[z] ?? [z, z.toUpperCase().charCodeAt(0), z];
+                await s('Input.dispatchKeyEvent', { type: text ? 'keyDown' : 'rawKeyDown', key, code: key, windowsVirtualKeyCode: code, text, unmodifiedText: text });
+                await s('Input.dispatchKeyEvent', { type: 'keyUp', key, code: key, windowsVirtualKeyCode: code });
+                if (pause) { await warte(pause); }
+            }
+        },
         text: () => seite.eval('document.body.innerText'),
     };
     return {
