@@ -18,7 +18,7 @@ RestartSec=5
 TimeoutStopSec=30
 
 Environment=ASPNETCORE_ENVIRONMENT=Testsystem
-# Nur lokal: nach außen spricht ausschließlich nginx (mit Zugangspasswort)
+# Nur lokal: nach außen spricht ausschließlich nginx (TLS); die Anmeldung schützt die App selbst (wie Podium)
 Environment=ASPNETCORE_URLS=http://127.0.0.1:@PORT@
 Environment=DOTNET_NOLOGO=1
 Environment=DOTNET_CLI_TELEMETRY_OPTOUT=1

@@ -56,7 +56,7 @@ function Kit-Hochladen {
 
 if ($DbNeu -and ($NurKit -or $NurBauen)) { throw "-DbNeu wirkt nur beim Einspielen, nicht zusammen mit -NurKit oder -NurBauen." }
 if ($DbNeu -and -not $OhneRueckfrage) {
-    Write-Host "! -DbNeu: Die Datenbank auf dem Testsystem wird beiseitegelegt und neu angelegt (Demodaten bzw. Startkonto)." -ForegroundColor Yellow
+    Write-Host "! -DbNeu: Die Datenbank auf dem Testsystem wird beiseitegelegt und neu angelegt (danach Ersteinrichtung auf der Anmeldeseite)." -ForegroundColor Yellow
     Write-Host "  Alle dort erfassten Daten sind danach nicht mehr in der Anwendung (Datei bleibt unter /var/lib/profomat/beiseite/)." -ForegroundColor Yellow
     if ((Read-Host "  Fortfahren? (j/N)") -notmatch '^(j|ja|y|yes)$') { Write-Host "Abgebrochen – nichts geändert."; return }
 }
@@ -103,3 +103,4 @@ $dbNeuArg = if ($DbNeu) { "--db-neu " } else { "" }
 ssh @sshArgs -t $Ziel "sudo bash /tmp/profomat-kit/schritte/ausrollen.sh $dbNeuArg/tmp/profomat.tar.gz"
 if ($LASTEXITCODE -ne 0) { throw "Einspielen fehlgeschlagen – Meldung oben (eine vorhandene Version läuft unverändert weiter)." }
 Write-Host ("✓ ausgerollt: https://{0}{1}/" -f $konfig["HOST"], $konfig["PFAD"]) -ForegroundColor Green
+Write-Host "  Erstes Ausrollen? Sofort die Anmeldeseite öffnen und das erste Konto anlegen (Ersteinrichtung)." -ForegroundColor Yellow

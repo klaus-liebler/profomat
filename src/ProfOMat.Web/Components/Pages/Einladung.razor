@@ -1,0 +1,160 @@
+@page "/einladung"
+@attribute [AllowAnonymous]
+@attribute [ExcludeFromInteractiveRouting]
+@layout LeeresLayout
+@using Microsoft.AspNetCore.Authentication
+@using Microsoft.AspNetCore.Authentication.Cookies
+@using ProfOMat.Application.Konten
+@inject KontoDienst Konten
+@inject NavigationManager Navigation
+@inject ILogger<Einladung> Log
+@inject Ortszeit Zeit
+@* Einladungs- und Passwort-Links (wie Podium). Das Token steht hinter „#“ und erreicht so nie ein Server-Log; seite.js trägt es in das
+   Prüfformular ein und schickt es einmal ab. Danach steht es nur noch als verstecktes Feld in diesem Formular. *@
+
+<PageTitle>@Titel · ProfOMat</PageTitle>
+
+<div class="pm-login">
+    <div class="pm-row"><span class="pm-brand-zeichen">P</span><h1>@Titel</h1></div>
+
+    @if (fehler is not null)
+    {
+        <div class="pm-alert pm-crit" role="alert">@fehler</div>
+    }
+
+    @* Prüfformular immer rendern: Blazor beantwortet einen POST nur, wenn das abgesendete Formular in der Antwort wieder vorkommt. *@
+    <form method="post" @formname="pruefen" id="pm-einladung-pruefen">
+        <AntiforgeryToken />
+        <input type="hidden" name="PToken" />
+        @if (info is null && fehler is null)
+        {
+            <p class="pm-muted">Link wird geprüft …</p>
+        }
+    </form>
+
+    @if (info is null)
+    {
+        <p class="pm-small pm-muted">Fragen Sie bei Problemen die Systemverwaltung nach einem neuen Link. Zur <a href="anmelden">Anmeldung</a>.</p>
+    }
+    else
+    {
+        @if (info.Art == EinladungsArt.Konto)
+        {
+            <p>Sie wurden zu ProfOMat eingeladen@(info.Notiz is { } n ? $" ({n})" : "") – Rollen: <b>@string.Join(", ", info.Rollen.Select(r => r.Anzeigename()))</b>.
+                Legen Sie Kennung und Passwort selbst fest. Der Link gilt bis @Zeit.Kurz(info.Ablauf) und nur einmal.</p>
+        }
+        else
+        {
+            <p>Neues Passwort für <b>@info.Name</b> (Kennung <span class="pm-mono">@info.Kennung</span>). Der Link gilt nur einmal.</p>
+        }
+
+        <form method="post" @formname="einloesen" @onsubmit="EinloesenAsync" class="pm-fields">
+            <AntiforgeryToken />
+            <input type="hidden" name="Token" value="@Token" />
+            @if (info.Art == EinladungsArt.Konto)
+            {
+                <div class="pm-field"><label class="pm-lbl" for="i-kennung">Kennung</label>
+                    <input id="i-kennung" name="IKennung" class="pm-input" autocomplete="username" required value="@IKennung" placeholder="z. B. niemeyer" />
+                    <span class="pm-hilfe">3–40 Zeichen: a–z, 0–9, Punkt, Bindestrich, Unterstrich.</span></div>
+                <div class="pm-field"><label class="pm-lbl" for="i-titel">Titel</label>
+                    <input id="i-titel" name="ITitel" class="pm-input" value="@ITitel" placeholder="Prof. Dr." /></div>
+                <div class="pm-field"><label class="pm-lbl" for="i-vorname">Vorname</label>
+                    <input id="i-vorname" name="IVorname" class="pm-input" autocomplete="given-name" value="@IVorname" /></div>
+                <div class="pm-field"><label class="pm-lbl" for="i-nachname">Nachname</label>
+                    <input id="i-nachname" name="INachname" class="pm-input" autocomplete="family-name" required value="@INachname" /></div>
+                <div class="pm-field pm-field-weit"><label class="pm-lbl" for="i-mail">Mail</label>
+                    <input id="i-mail" name="IMail" type="email" class="pm-input" autocomplete="email" required value="@IMail" /></div>
+            }
+            <div class="pm-field"><label class="pm-lbl" for="i-pw">Passwort (mind. @KontoDienst.MinPasswortLaenge Zeichen)</label>
+                <input id="i-pw" name="IPasswort" type="password" class="pm-input" autocomplete="new-password" required minlength="@KontoDienst.MinPasswortLaenge" /></div>
+            <div class="pm-field"><label class="pm-lbl" for="i-pw2">Passwort wiederholen</label>
+                <input id="i-pw2" name="IPasswort2" type="password" class="pm-input" autocomplete="new-password" required /></div>
+            <div class="pm-field pm-field-weit"><div>
+                <button type="submit" class="pm-btn pm-btn-haupt">@(info.Art == EinladungsArt.Konto ? "Konto anlegen und anmelden" : "Passwort setzen und anmelden")</button>
+            </div></div>
+        </form>
+    }
+</div>
+
+@code {
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    [SupplyParameterFromForm(FormName = "pruefen")]
+    private string? PToken { get; set; }
+
+    [SupplyParameterFromForm(FormName = "einloesen")]
+    private string? Token { get; set; }
+
+    [SupplyParameterFromForm(FormName = "einloesen")]
+    private string? IKennung { get; set; }
+
+    [SupplyParameterFromForm(FormName = "einloesen")]
+    private string? ITitel { get; set; }
+
+    [SupplyParameterFromForm(FormName = "einloesen")]
+    private string? IVorname { get; set; }
+
+    [SupplyParameterFromForm(FormName = "einloesen")]
+    private string? INachname { get; set; }
+
+    [SupplyParameterFromForm(FormName = "einloesen")]
+    private string? IMail { get; set; }
+
+    [SupplyParameterFromForm(FormName = "einloesen")]
+    private string? IPasswort { get; set; }
+
+    [SupplyParameterFromForm(FormName = "einloesen")]
+    private string? IPasswort2 { get; set; }
+
+    private EinladungsInfo? info;
+    private string? fehler;
+
+    private string Titel => info?.Art == EinladungsArt.Passwort ? "Neues Passwort" : "Einladung";
+
+    private const string Ungueltig = "Der Link ist ungültig, abgelaufen oder wurde schon verwendet.";
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Prüfformular abgeschickt (aus seite.js) oder Einlöseformular erneut angezeigt (nach einem Fehler)
+        Token ??= PToken;
+        if (HttpMethods.IsPost(HttpContext.Request.Method))
+        {
+            info = await Konten.EinladungPruefenAsync(Token);
+            if (info is null)
+            {
+                fehler = Ungueltig;
+            }
+        }
+    }
+
+    private async Task EinloesenAsync()
+    {
+        if (info is null)
+        {
+            return;
+        }
+
+        if (IPasswort != IPasswort2)
+        {
+            fehler = "Die beiden Passwörter stimmen nicht überein.";
+            return;
+        }
+
+        try
+        {
+            var angaben = info.Art == EinladungsArt.Konto ? new Kontoangaben(IKennung ?? "", ITitel, IVorname ?? "", INachname ?? "", IMail ?? "") : null;
+            var benutzer = await Konten.EinladungEinloesenAsync(Token, angaben, IPasswort ?? "");
+            var stempel = await Konten.StempelAsync(benutzer.KontoIdPflicht) ?? throw new FachlicherFehler("Das Konto ist gesperrt.");
+            await HttpContext.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme,
+                Anmeldung.Principal(benutzer, "Passwort", CookieAuthenticationDefaults.AuthenticationScheme, stempel));
+            Log.LogInformation("Link eingelöst ({Art}), Konto {Konto}", info.Art, Pseudonym.Id(benutzer.KontoIdPflicht));
+            Navigation.NavigateTo("./");
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+            info = await Konten.EinladungPruefenAsync(Token);
+        }
+    }
+}

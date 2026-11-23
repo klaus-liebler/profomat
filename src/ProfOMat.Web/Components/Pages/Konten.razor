@@ -2,6 +2,8 @@
 @attribute [Authorize]
 @using ProfOMat.Application.Konten
 @inject Vorgang Vorgang
+@inject Ortszeit Zeit
+@inject NavigationManager Navigation
 @inject NotificationService Hinweise
 
 <PageTitle>Konten · ProfOMat</PageTitle>
@@ -9,7 +11,8 @@
 <div class="pm-head">
     <div>
         <h1>Konten</h1>
-        <p>Lokale Konten mit Kennung und Passwort. Später kommen Konten zusätzlich über die Hochschulkennung (Single Sign-on) hinzu.</p>
+        <p>Konten für Lehrende, Studiendekanat, Sekretariat und Verwaltung (Studierende brauchen keins). Neue Konten entstehen nur per
+            <b>Einladungslink</b>, vergessene Passwörter setzt man per <b>Passwort-Link</b> neu – Passwörter vergibt hier niemand.</p>
     </div>
 </div>
 
@@ -18,7 +21,59 @@
     <div class="pm-alert pm-crit" role="alert">@fehler</div>
 }
 
+@if (link is not null)
+{
+    <section class="pm-card pm-hervor" aria-live="polite">
+        <h2>@linkTitel</h2>
+        <p>Diesen Link per Mail schicken. Er gilt bis @Zeit.Kurz(link.Einladung.Ablauf) und nur einmal; er wird nur jetzt angezeigt.</p>
+        <input class="pm-input pm-mono" readonly value="@LinkAdresse(link)" aria-label="Link" id="pm-link" />
+        <div class="pm-row"><button type="button" class="pm-btn" @onclick="() => link = null">Fertig</button></div>
+    </section>
+}
+
 <section class="pm-card">
+    <h2>Kolleginnen und Kollegen einladen</h2>
+    <div class="pm-fields">
+        <div class="pm-field pm-field-weit">
+            <span class="pm-lbl">Rollen des neuen Kontos</span>
+            @foreach (var r in Enum.GetValues<Rolle>())
+            {
+                <label class="pm-check"><input type="checkbox" checked="@einladungRollen.Contains(r)" @onchange="e => Umschalten(einladungRollen, r, e.Value is true)" /> @r.Anzeigename()</label>
+            }
+        </div>
+        <div class="pm-field"><label class="pm-lbl" for="notiz">Für wen (nur zur Übersicht)</label>
+            <input id="notiz" class="pm-input" @bind="notiz" maxlength="200" placeholder="z. B. Prof. Dr. Niemeyer" /></div>
+        <div class="pm-field"><label class="pm-lbl" for="tage">Gültig (Tage)</label>
+            <input id="tage" class="pm-input" type="number" min="1" max="30" @bind="tage" /></div>
+    </div>
+    <BegruendeterButton Text="Einladungslink erzeugen" Haupt="true" Click="EinladenAsync"
+                        Freigabe="@(einladungRollen.Count == 0 ? Freigabe.Nein("Bitte mindestens eine Rolle wählen.") : Freigabe.Ja)" />
+
+    @if (offen.Count > 0)
+    {
+        <h3>Offene Links</h3>
+        <div class="pm-tbl">
+            <table>
+                <thead><tr><th>Art</th><th>Für</th><th>Rollen</th><th>Gültig bis</th><th></th></tr></thead>
+                <tbody>
+                    @foreach (var e in offen)
+                    {
+                        <tr>
+                            <td>@(e.Art == EinladungsArt.Konto ? "Einladung" : "Passwort-Link")</td>
+                            <td>@e.Notiz</td>
+                            <td>@string.Join(", ", e.RollenListe.Select(r => r.Anzeigename()))</td>
+                            <td>@Zeit.Kurz(e.Ablauf)</td>
+                            <td><button type="button" class="pm-linkbutton" @onclick="() => ZurueckziehenAsync(e)">zurückziehen</button></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</section>
+
+<section class="pm-card">
+    <h2>Alle Konten</h2>
     <div class="pm-tbl">
         <table>
             <thead><tr><th>Name</th><th>Kennung</th><th>Mail</th><th>Rollen</th><th>Schlüssel</th><th></th></tr></thead>
@@ -31,24 +86,22 @@
                         <td>@k.Email</td>
                         <td>@string.Join(", ", k.Rollen.Select(r => r.Rolle.Anzeigename()))</td>
                         <td>@k.Schluessel.Count(s => s.WiderrufenAm is null)</td>
-                        <td><button type="button" class="pm-linkbutton" @onclick="() => Bearbeiten(k)">bearbeiten</button></td>
+                        <td class="pm-nowrap">
+                            <button type="button" class="pm-linkbutton" @onclick="() => Bearbeiten(k)">bearbeiten</button> ·
+                            <button type="button" class="pm-linkbutton" @onclick="() => PasswortLinkAsync(k)">Passwort-Link</button>
+                        </td>
                     </tr>
                 }
             </tbody>
         </table>
     </div>
-    <div><button type="button" class="pm-btn" @onclick="Neu">Neues Konto</button></div>
 </section>
 
-@if (formular)
+@if (bearbeitet is not null)
 {
     <section class="pm-card">
-        <h2>@(bearbeitet is null ? "Neues Konto" : $"Konto {bearbeitet.Kennung}")</h2>
+        <h2>Konto @bearbeitet.Kennung</h2>
         <div class="pm-fields">
-            @if (bearbeitet is null)
-            {
-                <div class="pm-field"><label class="pm-lbl" for="kennung">Kennung</label><input id="kennung" class="pm-input" @bind="kennung" autocomplete="off" /></div>
-            }
             <div class="pm-field"><label class="pm-lbl" for="titel">Titel</label><input id="titel" class="pm-input" @bind="titel" placeholder="Prof. Dr." /></div>
             <div class="pm-field"><label class="pm-lbl" for="vorname">Vorname</label><input id="vorname" class="pm-input" @bind="vorname" /></div>
             <div class="pm-field"><label class="pm-lbl" for="nachname">Nachname</label><input id="nachname" class="pm-input" @bind="nachname" /></div>
@@ -57,31 +110,29 @@
                 <span class="pm-lbl">Rollen</span>
                 @foreach (var r in Enum.GetValues<Rolle>())
                 {
-                    <label class="pm-check"><input type="checkbox" checked="@rollen.Contains(r)" @onchange="e => Umschalten(r, e.Value is true)" /> @r.Anzeigename()</label>
+                    <label class="pm-check"><input type="checkbox" checked="@rollen.Contains(r)" @onchange="e => Umschalten(rollen, r, e.Value is true)" /> @r.Anzeigename()</label>
                 }
             </div>
-            <div class="pm-field">
-                <label class="pm-lbl" for="pw">@(bearbeitet is null ? "Passwort (mind. 12 Zeichen)" : "Neues Passwort (leer = unverändert)")</label>
-                <input id="pw" type="password" class="pm-input" @bind="passwort" autocomplete="new-password" />
-            </div>
-            @if (bearbeitet is not null)
-            {
-                <div class="pm-field"><span class="pm-lbl">Zugang</span><label class="pm-check"><input type="checkbox" @bind="aktiv" /> aktiv</label></div>
-            }
+            <div class="pm-field"><span class="pm-lbl">Zugang</span><label class="pm-check"><input type="checkbox" @bind="aktiv" /> aktiv</label>
+                <span class="pm-hilfe">Sperren und Rollenänderungen beenden bestehende Sitzungen sofort.</span></div>
         </div>
         <div class="pm-row">
             <BegruendeterButton Text="Speichern" Haupt="true" Click="SpeichernAsync" />
-            <button type="button" class="pm-btn" @onclick="() => formular = false">Abbrechen</button>
+            <button type="button" class="pm-btn" @onclick="() => bearbeitet = null">Abbrechen</button>
         </div>
     </section>
 }
 
 @code {
     private IReadOnlyList<Konto> konten = [];
+    private IReadOnlyList<ProfOMat.Domain.Konten.Einladung> offen = [];
     private Konto? bearbeitet;
-    private bool formular, aktiv = true;
-    private string? fehler, kennung, titel, vorname, nachname, email, passwort;
+    private bool aktiv = true;
+    private string? fehler, titel, vorname, nachname, email, notiz, linkTitel;
+    private int tage = KontoDienst.EinladungTageStandard;
     private HashSet<Rolle> rollen = [];
+    private readonly HashSet<Rolle> einladungRollen = [Rolle.Pruefende];
+    private EinladungsLink? link;
 
     protected override Task OnInitializedAsync() => LadenAsync();
 
@@ -90,7 +141,11 @@
         try
         {
             ProfOMat.Application.Betrieb.Rechte.Verwaltung(await Vorgang.BenutzerAsync()).Sicherstellen();
-            konten = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<KontoDienst>().AlleAsync());
+            (konten, offen) = await Vorgang.AusfuehrenAsync(async d =>
+            {
+                var dienst = d.GetRequiredService<KontoDienst>();
+                return (await dienst.AlleAsync(), await dienst.OffeneEinladungenAsync());
+            });
         }
         catch (FachlicherFehler ex)
         {
@@ -98,32 +153,62 @@
         }
     }
 
-    private void Neu()
+    /// <summary>Token hinter „#“: erreicht nie ein Server-Log (wie Podium).</summary>
+    private string LinkAdresse(EinladungsLink l) => $"{Navigation.BaseUri}einladung#{l.Token}";
+
+    private async Task EinladenAsync()
     {
-        bearbeitet = null;
-        kennung = titel = vorname = nachname = email = passwort = null;
-        rollen = [Rolle.Pruefende];
-        aktiv = true;
-        formular = true;
+        fehler = null;
+        try
+        {
+            link = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<KontoDienst>().EinladungErzeugenAsync(einladungRollen.ToList(), notiz, tage));
+            linkTitel = "Einladungslink";
+            notiz = null;
+            await LadenAsync();
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+        }
+    }
+
+    private async Task PasswortLinkAsync(Konto k)
+    {
+        fehler = null;
+        try
+        {
+            link = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<KontoDienst>().PasswortLinkErzeugenAsync(k.Id));
+            linkTitel = $"Passwort-Link für {k.Anzeigename}";
+            await LadenAsync();
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+        }
+    }
+
+    private async Task ZurueckziehenAsync(ProfOMat.Domain.Konten.Einladung e)
+    {
+        await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<KontoDienst>().EinladungZurueckziehenAsync(e.Id));
+        await LadenAsync();
     }
 
     private void Bearbeiten(Konto k)
     {
         bearbeitet = k;
-        (titel, vorname, nachname, email, passwort, aktiv) = (k.Titel, k.Vorname, k.Nachname, k.Email, null, k.Aktiv);
+        (titel, vorname, nachname, email, aktiv) = (k.Titel, k.Vorname, k.Nachname, k.Email, k.Aktiv);
         rollen = k.Rollen.Select(r => r.Rolle).ToHashSet();
-        formular = true;
     }
 
-    private void Umschalten(Rolle r, bool an)
+    private static void Umschalten(HashSet<Rolle> menge, Rolle r, bool an)
     {
         if (an)
         {
-            rollen.Add(r);
+            menge.Add(r);
         }
         else
         {
-            rollen.Remove(r);
+            menge.Remove(r);
         }
     }
 
@@ -132,23 +217,8 @@
         fehler = null;
         try
         {
-            await Vorgang.AusfuehrenAsync(async d =>
-            {
-                var dienst = d.GetRequiredService<KontoDienst>();
-                if (bearbeitet is null)
-                {
-                    await dienst.AnlegenAsync(kennung ?? "", titel, vorname ?? "", nachname ?? "", email ?? "", rollen, passwort);
-                }
-                else
-                {
-                    await dienst.AendernAsync(bearbeitet.Id, titel, vorname ?? "", nachname ?? "", email ?? "", rollen, aktiv);
-                    if (!string.IsNullOrEmpty(passwort))
-                    {
-                        await dienst.PasswortSetzenAsync(bearbeitet.Id, null, passwort);
-                    }
-                }
-            });
-            formular = false;
+            await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<KontoDienst>().AendernAsync(bearbeitet!.Id, titel, vorname ?? "", nachname ?? "", email ?? "", rollen, aktiv));
+            bearbeitet = null;
             Hinweise.Notify(NotificationSeverity.Success, "Konto gespeichert.");
             await LadenAsync();
         }

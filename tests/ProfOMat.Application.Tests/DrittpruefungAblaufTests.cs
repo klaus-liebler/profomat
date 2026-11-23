@@ -35,7 +35,7 @@ public sealed class DrittpruefungAblaufTests
         var entwurf = await u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>().EntwurfAsync(angaben));
         using var studiSchluessel = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         await u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>()
-            .EinreichenAsync(entwurf, unterschrift ?? Unterschriften.MitSchluessel(studiSchluessel, entwurf.Text)));
+            .EinreichenAsync(entwurf, unterschrift ?? Unterschriften.MitSchluessel(studiSchluessel, entwurf.Text), TestUmgebung.Mensch(d)));
         var mail = await LetzteMailAnAsync(u, "mia.musterstudentin@hs-osnabrueck.de");
         var link = mail.Text.Split('\n').Select(z => z.Trim()).First(z => z.Contains("/drittpruefung/status/", StringComparison.Ordinal));
         var teile = link.Split('/');
@@ -131,6 +131,27 @@ public sealed class DrittpruefungAblaufTests
     }
 
     [Fact]
+    public async Task Oeffentliches_Formular_nur_mit_Sicherheitsaufgabe_und_begrenzt_je_Mailadresse()
+    {
+        await using var u = await TestUmgebung.StartenAsync();
+        u.Benutzer.Aktuell = Benutzer.Niemand;
+        var angaben = await AngabenAsync(u);
+        using var schluessel = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var entwurf = await u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>().EntwurfAsync(angaben));
+        (await Should.ThrowAsync<FachlicherFehler>(() => u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>()
+            .EinreichenAsync(entwurf, Unterschriften.MitSchluessel(schluessel, entwurf.Text), null)))).Message.ShouldContain("Sicherheitsprüfung");
+
+        for (var i = 0; i < DrittpruefungDienst.MaxUnbestaetigtJeMailUndTag; i++)
+        {
+            await EinreichenAsync(u);
+        }
+
+        var vierter = await u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>().EntwurfAsync(angaben));
+        (await Should.ThrowAsync<FachlicherFehler>(() => u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>()
+            .EinreichenAsync(vierter, Unterschriften.MitSchluessel(schluessel, vierter.Text), TestUmgebung.Mensch(d))))).Message.ShouldContain("unbestätigte");
+    }
+
+    [Fact]
     public async Task Geaenderter_Text_wird_abgelehnt()
     {
         await using var u = await TestUmgebung.StartenAsync();
@@ -139,13 +160,13 @@ public sealed class DrittpruefungAblaufTests
         using var k = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         var gefaelscht = entwurf with { Text = entwurf.Text.Replace("1234567", "7654321", StringComparison.Ordinal) };
         var fehler = await Should.ThrowAsync<FachlicherFehler>(() => u.InBereichAsync(d =>
-            d.GetRequiredService<DrittpruefungDienst>().EinreichenAsync(gefaelscht, Unterschriften.MitSchluessel(k, gefaelscht.Text))));
+            d.GetRequiredService<DrittpruefungDienst>().EinreichenAsync(gefaelscht, Unterschriften.MitSchluessel(k, gefaelscht.Text), TestUmgebung.Mensch(d))));
         fehler.Message.ShouldContain("geändert");
 
         // Signatur über anderen Text als den angezeigten
         var falsch = Unterschriften.MitSchluessel(k, entwurf.Text + "x");
         (await Should.ThrowAsync<FachlicherFehler>(() => u.InBereichAsync(d =>
-            d.GetRequiredService<DrittpruefungDienst>().EinreichenAsync(entwurf, falsch)))).Message.ShouldContain("passt nicht");
+            d.GetRequiredService<DrittpruefungDienst>().EinreichenAsync(entwurf, falsch, TestUmgebung.Mensch(d))))).Message.ShouldContain("passt nicht");
     }
 
     [Fact]
@@ -156,9 +177,9 @@ public sealed class DrittpruefungAblaufTests
         var entwurf = await u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>().EntwurfAsync(angaben));
         using var kurz = RSA.Create(1024);
         (await Should.ThrowAsync<FachlicherFehler>(() => u.InBereichAsync(d =>
-            d.GetRequiredService<DrittpruefungDienst>().EinreichenAsync(entwurf, Unterschriften.MitRsa(kurz, entwurf.Text))))).Message.ShouldContain("2048");
+            d.GetRequiredService<DrittpruefungDienst>().EinreichenAsync(entwurf, Unterschriften.MitRsa(kurz, entwurf.Text), TestUmgebung.Mensch(d))))).Message.ShouldContain("2048");
         using var gut = RSA.Create(2048);
-        (await u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>().EinreichenAsync(entwurf, Unterschriften.MitRsa(gut, entwurf.Text))))
+        (await u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>().EinreichenAsync(entwurf, Unterschriften.MitRsa(gut, entwurf.Text), TestUmgebung.Mensch(d))))
             .ShouldBe(entwurf.Nummer);
     }
 
@@ -170,7 +191,7 @@ public sealed class DrittpruefungAblaufTests
         var entwurf = await u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>().EntwurfAsync(angaben));
         u.Uhr.Advance(TimeSpan.FromMinutes(31));
         (await Should.ThrowAsync<FachlicherFehler>(() => u.InBereichAsync(d =>
-            d.GetRequiredService<DrittpruefungDienst>().EinreichenAsync(entwurf, Unterschriften.Gezeichnet())))).Message.ShouldContain("abgelaufen");
+            d.GetRequiredService<DrittpruefungDienst>().EinreichenAsync(entwurf, Unterschriften.Gezeichnet(), TestUmgebung.Mensch(d))))).Message.ShouldContain("abgelaufen");
     }
 
     [Fact]

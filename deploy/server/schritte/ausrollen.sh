@@ -4,7 +4,7 @@
 # Version nicht, kommt die vorige automatisch zurück.
 # Aufruf: sudo bash /tmp/profomat-kit/schritte/ausrollen.sh [--db-neu] /tmp/profomat.tar.gz
 #   --db-neu  Datenbank (samt -wal/-shm) vor dem Start nach /var/lib/profomat/beiseite/ verschieben; die Anwendung legt sie neu an
-#             (Demodaten bzw. Startkonto). Nötig, solange es keine EF-Migrationen gibt und sich die Schemaversion ändert
+#             (danach Ersteinrichtung auf der Anmeldeseite). Nötig, solange es keine EF-Migrationen gibt und sich die Schemaversion ändert
 #             („Datenbankschema veraltet“). Der Schlüsselordner (Systemsiegel) bleibt. Scheitert der Start, kommen vorige Version
 #             UND vorige Datenbank zurück.
 # Rückweg von Hand: sudo bash /tmp/profomat-kit/schritte/ausrollen.sh --zurueck
@@ -26,9 +26,7 @@ fi
 # Voraussetzungen aus Schritt 01 – sonst vor jeder Änderung abbrechen
 id "$DIENST" >/dev/null 2>&1 && [[ -f "/etc/systemd/system/$DIENST.service" && -d "$DATEN" && -d "$SICHERUNGEN" ]] \
     || fehler "Schritt 01 fehlt (Dienstbenutzer, $DATEN, $DIENST.service) – erst einrichten, dann erneut ausrollen. Nichts geändert."
-# Ohne Hochschulanmeldung nie ohne Zugangspasswort
-zugangsschutz_aktiv || fehler "Zugangspasswort nicht aktiv ($HTPASSWD, /etc/nginx/liebler.d/$DIENST.conf) – Schritt 01 ausführen. Nichts geändert."
-anmeldung_pruefen
+oeffentlich_pruefen
 
 archiv="${1:?Pfad zum Archiv fehlt}"
 [[ -f "$archiv" ]] || fehler "Archiv $archiv fehlt"
@@ -80,6 +78,7 @@ systemctl start "$DIENST"
 if gesund 120; then
     ok "neue Version läuft · $(curl -fsS "$GESUND")"
     rm -f "$archiv"
+    ersteinrichtung_hinweis
 else
     warn "neue Version antwortet nicht – zurück zur vorigen"
     journalctl -u "$DIENST" --since "@$start" -n 30 --no-pager | sed 's/^/   /'

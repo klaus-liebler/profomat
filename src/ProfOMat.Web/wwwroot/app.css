@@ -98,6 +98,11 @@ p { margin: 0; }
 .pm-tbl th { text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--pm-muted); font-weight: 600; padding: 8px 10px; border-bottom: 1px solid var(--pm-line); white-space: nowrap; }
 .pm-tbl td { padding: 8px 10px; border-bottom: 1px solid var(--pm-line); vertical-align: top; }
 .pm-tbl tr.pm-hervor td { background: var(--pm-accent-weak); }
+.pm-card.pm-hervor { border-color: var(--pm-accent); box-shadow: 0 0 0 2px var(--pm-accent-weak); }
+.pm-nowrap { white-space: nowrap; }
+/* Köderfeld gegen Formular-Programme: aus dem sichtbaren Bereich geschoben, für Screenreader verborgen */
+.pm-koeder { position: absolute; left: -10000px; top: auto; width: 1px; height: 1px; overflow: hidden; }
+.pm-sicherheit { margin: 0 0 8px; }
 .pm-tbl tr.pm-alt td { color: var(--pm-muted); }
 .pm-dl { display: grid; grid-template-columns: minmax(130px, max-content) minmax(0, 1fr); gap: 6px 14px; margin: 0; }
 .pm-dl dt { color: var(--pm-muted); }

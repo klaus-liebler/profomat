@@ -1,8 +1,8 @@
-# Bereitstellung auf dem Webserver (Testsystem)
+# Bereitstellung auf dem Webserver
 
 Ziel: **https://liebler.iui.hs-osnabrueck.de/profomat/** auf demselben Server wie VibeVHS, FraktionPerfekt und Podium. Das Kit in
 `deploy/server` folgt dem FraktionPerfekt-Kit (`C:\repos\fraktionperfekt\deploy`): self-contained Linux-Build, Programm in `/opt`,
-Daten in `/var/lib`, systemd-Dienst nur auf `127.0.0.1`, nginx davor mit Zugangspasswort, jeder root-Schritt als eigenes Skript
+Daten in `/var/lib`, systemd-Dienst nur auf `127.0.0.1`, nginx davor (TLS, ohne Passwort – die App meldet selbst an, wie Podium), jeder root-Schritt als eigenes Skript
 mit Sicherung und Rückweg. Die nginx-Einbindung nutzt das gemeinsame Schema `schritte/liebler-nginx.sh` (identisch in allen Kits).
 
 | | ProfOMat |
@@ -14,34 +14,35 @@ mit Sicherung und Rückweg. Die nginx-Einbindung nutzt das gemeinsame Schema `sc
 | Logs | `/var/log/profomat` (Serilog, 30 Tage) und `journalctl -u profomat` |
 | Sicherungen | `/var/backups/profomat` (Datenbank + Schlüssel, vor jedem Update und täglich 02:00 Uhr) |
 | Umgebung | `/etc/profomat/profomat.env` (Schalter und Geheimnisse, root:profomat 0640) |
-| Zugangspasswort | `/etc/nginx/profomat.htpasswd` (Benutzer `profomat-test`) |
 | nginx | `/etc/nginx/liebler.d/profomat.conf` → `/etc/nginx/snippets/profomat-*.conf` |
 | Schema | EnsureCreated + `Schemaversion` (noch ohne Migrationen, siehe „Update“) |
 
 ## Sicherheitsstand – bitte zuerst lesen
 
-- **Keine Hochschulanmeldung (SSO) bisher.** Deshalb verlangt nginx für **alles** unter `/profomat/` das Zugangspasswort, auch für
-  das öffentliche Antragsformular und die Statuslinks der Studierenden. Ohne Passwort erreichbar ist nur `/gesund` (nur „ok“).
-  `ausrollen.sh` bricht ab, solange Passwortdatei oder nginx-Einbindung fehlen.
-- **Testanmeldung** (`Anmeldung__TestanmeldungErlaubt=true`): Wer das Zugangspasswort kennt, kann sich als jedes Demokonto
-  anmelden, auch als Systemverwaltung. Nur zusammen mit Demodaten und nur für Testpersonen, die alles sehen dürfen.
-- **Demodaten** (`Demodaten__Anlegen=true`): erfundene Konten (`…@demo.invalid`) und der Katalog aus dem Mock-Hochschulsystem.
-  Ohne Demodaten ist die Datenbank leer; dann legt `Startkonto__Passwort` (mit `Startkonto__Kennung`, `Startkonto__Email`) das erste
-  Konto der Systemverwaltung an, das weitere Konten anlegt.
-- **Mail:** ohne `Mail__Host` wird nur simuliert (Log „Mail simuliert“). Auf dem Testsystem leer lassen, solange echte Studierende
-  nicht beteiligt sein sollen.
+- **Anmeldung wie Podium, ohne nginx-Passwort.** Die Seite ist öffentlich erreichbar; die App schützt sich selbst:
+  - **Ersteinrichtung:** Solange die Datenbank kein Konto enthält, zeigt `/profomat/anmelden` die Ersteinrichtung – dort einmalig
+    Kennung, Name, Mail und Passwort des ersten Kontos (Systemverwaltung, auf Wunsch zugleich Prüfende) festlegen. Weil bis dahin jede
+    Person mit Zugang zur Seite das Konto anlegen könnte: **direkt nach dem ersten Ausrollen** erledigen (`ausrollen.sh` erinnert daran).
+  - **Kolleginnen und Kollegen** lädt die Systemverwaltung unter *Verwaltung → Konten* per Einladungslink ein (Rollen fest, 1–30 Tage,
+    einmal verwendbar). Passwort vergessen → **Passwort-Link** beim Konto. Die Tokens stehen hinter `#` und erreichen nie ein
+    Server-Log; in der Datenbank liegt nur ihr SHA-256.
+  - Passwörter: PBKDF2-HMAC-SHA512 (210 000 Iterationen), mindestens 12 Zeichen; nach 5 Fehlversuchen je IP und Kennung wachsende
+    Wartezeit bis 5 Minuten. Sperren, Rollenänderung oder neues Passwort beenden bestehende Sitzungen.
+  - Kein Passwort in `profomat.env`. **Testanmeldung und Demodaten sind verboten** – `01-einrichten.sh` und `ausrollen.sh` brechen ab,
+    wenn `Anmeldung__TestanmeldungErlaubt=true` oder `Demodaten__Anlegen=true` gesetzt ist.
+- **Studierende** stellen den Antrag auf mündliche Drittprüfung ohne Anmeldung. Schutz des öffentlichen Formulars: Sicherheitsaufgabe
+  (Captcha nach dem ALTCHA-Prinzip, selbst gehostet, ohne Bilderrätsel und ohne Dritte), unsichtbares Köderfeld, höchstens 3
+  unbestätigte Anträge je Mailadresse und Tag, nur Hochschul-Mailadressen; erst der Link in der Bestätigungsmail leitet weiter.
+- **Mail:** ohne `Mail__Host` wird nur simuliert (Log „Mail simuliert“) – dann erreichen Bestätigungsmails die Studierenden nicht.
+  Für echten Betrieb den Mailserver der Hochschule eintragen.
+- **Katalog:** noch Mock-Daten (erfundene Prüfungsordnungen/Prüfungen), echte Quelle folgt (Fahrplan Iteration 4).
 - **Systemsiegel:** Der Schlüssel entsteht beim ersten Start in `/var/lib/profomat/schluessel/systemsiegel.pem`. Geht er verloren,
   sind bestehende Siegel nicht mehr prüfbar – deshalb sichert `profomat-sicherung.sh` den Ordner mit. `-DbNeu` lässt ihn unberührt.
-- **Vor echtem Betrieb fehlt** (Fahrplan): SSO (Iteration 3), Missbrauchsschutz für das öffentliche Formular, EF-Migrationen statt
-  EnsureCreated, Klärung der Rechtsform des Antrags. Erst dann `/drittpruefung/` ohne Zugangspasswort freigeben
-  (`nginx/profomat-ohne-passwort.conf`).
 
 ## Vor dem ersten Lauf entscheiden bzw. eintragen
 
-1. `deploy/server/konfiguration.env`: Host, Pfad (`/profomat`), Port (`5082`, Schritt 01 prüft, ob er frei ist), Benutzer des Zugangspassworts.
-2. Zugangspasswort: `01-einrichten.sh` fragt es einmal ab (htpasswd, bcrypt). Weitere Konten: `sudo htpasswd -B /etc/nginx/profomat.htpasswd <name>`.
-3. In `/etc/profomat/profomat.env` (Schritt 01 legt die Datei aus `profomat.env.beispiel` an): Demodaten + Testanmeldung **oder**
-   Startkonto; optional Mail.
+1. `deploy/server/konfiguration.env`: Host, Pfad (`/profomat`), Port (`5082`, Schritt 01 prüft, ob er frei ist).
+2. In `/etc/profomat/profomat.env` (Schritt 01 legt die Datei aus `profomat.env.beispiel` an): optional Mailserver. Sonst nichts.
 
 ## Erstinstallation
 
@@ -49,12 +50,13 @@ Voraussetzung: Das VibeVHS-Kit ist eingerichtet (nginx mit `liebler.conf`, Zerti
 
 ```powershell
 .\deploy\server\deploy.ps1 -NurKit                                          # Kit nach /tmp/profomat-kit
-ssh -t srvadmin@liebler.iui.hs-osnabrueck.de "sudo bash /tmp/profomat-kit/schritte/01-einrichten.sh"   # Benutzer, Verzeichnisse, Unit, nginx, Passwort
-ssh -t srvadmin@liebler.iui.hs-osnabrueck.de "sudo nano /etc/profomat/profomat.env"                    # Entscheidungen eintragen (siehe oben)
+ssh -t srvadmin@liebler.iui.hs-osnabrueck.de "sudo bash /tmp/profomat-kit/schritte/01-einrichten.sh"   # Benutzer, Verzeichnisse, Unit, nginx
 .\deploy\server\deploy.ps1                                                  # testen, bauen, hochladen, einspielen
+# sofort danach: https://liebler.iui.hs-osnabrueck.de/profomat/anmelden → Ersteinrichtung
 ```
 
-Prüfen: `https://liebler.iui.hs-osnabrueck.de/profomat/` fragt nach dem Zugangspasswort, danach die Anmeldung. Auf dem Server:
+Prüfen: `https://liebler.iui.hs-osnabrueck.de/profomat/anmelden` zeigt die Ersteinrichtung (bzw. danach die Anmeldung);
+`…/profomat/drittpruefung/antrag` ist ohne Anmeldung erreichbar. Auf dem Server:
 `curl http://127.0.0.1:5082/profomat/gesund` → `ok`, Logs `journalctl -u profomat -f` und `/var/log/profomat/`.
 
 ## Update
@@ -72,8 +74,9 @@ starten, `/gesund` abwarten. Antwortet die neue Version nicht, kommt die vorige 
 
 **Schemaversion geändert:** Solange es keine EF-Migrationen gibt, startet eine neue Version mit höherer `Schemaversion` nicht auf
 einer alten Datenbank („Datenbankschema veraltet“). `ausrollen.sh` erkennt das, rollt zurück und nennt den Ausweg `-DbNeu`: Die
-Datenbank wird nach `/var/lib/profomat/beiseite/` verschoben (nicht gelöscht) und neu angelegt. Scheitert auch das, kommen vorige
-Version und vorige Datenbank zurück. Alle auf dem Testsystem erfassten Daten sind danach nicht mehr in der Anwendung – vor dem
+Datenbank wird nach `/var/lib/profomat/beiseite/` verschoben (nicht gelöscht) und neu angelegt – danach ist wieder die
+Ersteinrichtung fällig (sofort erledigen). Scheitert auch das, kommen vorige
+Version und vorige Datenbank zurück. Alle auf dem Server erfassten Daten sind danach nicht mehr in der Anwendung – vor dem
 Produktivbetrieb deshalb Migrationen einführen (Fahrplan).
 
 ## Sicherung und Rücksicherung

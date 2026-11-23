@@ -24,8 +24,12 @@ public sealed class DrittpruefungDienst(
     Protokoll protokoll,
     Ortszeit ortszeit,
     IOptions<ProfOMatOptionen> optionen,
-    TimeProvider uhr)
+    TimeProvider uhr,
+    Menschenpruefung menschenpruefung)
 {
+    /// <summary>Höchstens so viele unbestätigte Anträge je Mailadresse und Tag (Missbrauchsschutz des öffentlichen Formulars).</summary>
+    public const int MaxUnbestaetigtJeMailUndTag = 3;
+
     /// <summary>So lange darf zwischen Anzeigen und Absenden einer Unterschrift liegen.</summary>
     public static readonly TimeSpan Signierfenster = TimeSpan.FromMinutes(30);
 
@@ -58,16 +62,28 @@ public sealed class DrittpruefungDienst(
             Signaturinhalt.Erstellen(Signaturschritt.Antragstellung, text, null, null, $"{a.Vorname} {a.Nachname}", zeitpunkt));
     }
 
-    /// <summary>Reicht den unterschriebenen Antrag ein und schickt den Bestätigungslink. Liefert die Antragsnummer.</summary>
-    public async Task<string> EinreichenAsync(Antragsentwurf entwurf, Unterschrift unterschrift, CancellationToken abbruch = default)
+    /// <summary>
+    /// Reicht den unterschriebenen Antrag ein und schickt den Bestätigungslink. Liefert die Antragsnummer.
+    /// Öffentlich ohne Anmeldung: nur mit gelöster Sicherheitsaufgabe (<see cref="Menschenpruefung"/>) und begrenzt je Mailadresse.
+    /// </summary>
+    public async Task<string> EinreichenAsync(Antragsentwurf entwurf, Unterschrift unterschrift, Rechenloesung? sicherheit, CancellationToken abbruch = default)
     {
         ArgumentNullException.ThrowIfNull(entwurf);
         ArgumentNullException.ThrowIfNull(unterschrift);
+        menschenpruefung.Pruefen(sicherheit);
         ImSignierfenster(entwurf.Zeitpunkt);
         var a = entwurf.Angaben.Bereinigt();
         if (!MaildomainErlaubt(a.Email) || a.Beanstandung() is not null)
         {
             throw new FachlicherFehler("Die Angaben sind unvollständig. Bitte das Formular erneut prüfen.");
+        }
+
+        var seit = uhr.GetUtcNow().AddDays(-1);
+        if (await daten.AnzahlAsync(daten.Menge<Antrag>().Where(x => x.Email == a.Email && x.Status == AntragStatus.WartetAufBestaetigung && x.Erstellt > seit),
+                abbruch) >= MaxUnbestaetigtJeMailUndTag)
+        {
+            throw new FachlicherFehler($"Für diese Mailadresse liegen schon {MaxUnbestaetigtJeMailUndTag} unbestätigte Anträge vor. Bitte zuerst den Link "
+                                       + "in der Bestätigungsmail anklicken (auch im Spam-Ordner nachsehen).");
         }
 
         // Text serverseitig neu bilden – unterschrieben gilt nur, was der Server selbst so erzeugt.

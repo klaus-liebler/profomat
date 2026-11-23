@@ -7,10 +7,15 @@ Aufbau, Leitlinien und Bausteine wie VibeVHS/FraktionPerfekt. FA-/NFA-Nummern we
 
 | Nr. | Anforderung | Stand |
 |---|---|---|
-| FA-001 | Anmeldung für Beschäftigte mit lokalem Konto (Kennung + Passwort, PBKDF2 nach ASP.NET Core Identity, mind. 12 Zeichen). | umgesetzt |
+| FA-001 | Anmeldung nur für Lehrende, Studiendekanat, Sekretariat und Verwaltung mit lokalem Konto (Kennung + Passwort, PBKDF2-HMAC-SHA512 mit 210 000 Iterationen nach ASP.NET Core Identity, mind. 12 Zeichen; ältere Hashes werden bei der Anmeldung erneuert). Studierende brauchen kein Konto. | umgesetzt |
 | FA-002 | Später zusätzlich Anmeldung über das Hochschulsystem (SAML 2.0, Shibboleth-IdP der Hochschule), siehe architektur.md. Lokale Konten bleiben als Rückfall. | geplant |
 | FA-003 | Rollen: Prüfende, Studiendekanat, Studierendensekretariat, Systemverwaltung; mehrere Rollen gleichzeitig. Rechte werden im Dienst geprüft, gesperrte Aktionen erklären sich (Tooltip). | umgesetzt |
-| FA-004 | Startkonto der Systemverwaltung nur aus der Umgebung (`Startkonto__Passwort`), Testanmeldung nur in der Entwicklung. | umgesetzt |
+| FA-004 | ~~Startkonto aus der Umgebung~~ ersetzt durch FA-005 (wie Podium: kein Passwort in Konfiguration oder Umgebung). Testanmeldung nur in der Entwicklung; auf dem Server verboten (Deploy bricht ab). | umgesetzt |
+| FA-005 | Ersteinrichtung: Solange es kein Konto gibt, legt man auf der Anmeldeseite einmalig das erste Konto der Systemverwaltung an (auf Wunsch zugleich Prüfende); danach gesperrt. Der Start und das Ausrollen erinnern daran. | umgesetzt |
+| FA-006 | Weitere Konten nur per Einladungslink der Systemverwaltung (Rollen fest vorgegeben, 1–30 Tage gültig, einmal verwendbar, zurückziehbar); die eingeladene Person wählt Kennung und Passwort selbst. Passwörter vergibt niemand. | umgesetzt |
+| FA-007 | Passwort vergessen: Passwort-Link der Systemverwaltung (3 Tage, einmal verwendbar). Links tragen ein Zufallstoken hinter „#“ (erreicht kein Server-Log); gespeichert wird nur dessen SHA-256. | umgesetzt |
+| FA-008 | Schutz gegen Passwort-Raten: je IP und Kennung ab dem 5. Fehlversuch wachsende Wartezeit (15 s … 5 min); bei unbekannter Kennung wird trotzdem gehasht (keine Zeitunterschiede). | umgesetzt |
+| FA-009 | Sitzungsstempel: Passwortwechsel, Rollenänderung oder Sperre beenden bestehende Sitzungen beim nächsten Aufruf bzw. offene Seiten binnen einer Minute. | umgesetzt |
 | FA-010 | Katalog: Fakultäten, Studiengänge (mit Prüfungsordnung), Prüfungen – regelmäßig (nachts) und auf Knopfdruck aus dem Hochschulsystem abgeglichen. | umgesetzt (Quelle: Mock) |
 | FA-011 | Katalogeinträge werden **nie gelöscht**. Verschwindet ein Eintrag im Hochschulsystem oder wird er von Hand archiviert, wird er „alt“. | umgesetzt |
 | FA-012 | Auswahlen zeigen alte Studiengänge/Prüfungen nur, wenn man es ausdrücklich wünscht („auch alte anzeigen“). | umgesetzt |
@@ -35,6 +40,7 @@ Aufbau, Leitlinien und Bausteine wie VibeVHS/FraktionPerfekt. FA-/NFA-Nummern we
 | FA-111 | Erstprüfende legen nach Rücksprache Termin, Ort und Zweitprüfende (mit Konto oder ohne) fest, können vormerken und unterschreiben dann (Schlüssel oder Unterschriftsfeld). Studierende erfahren den vorläufigen Termin. | umgesetzt |
 | FA-112 | Erstprüfende können mit Begründung ablehnen; die Begründung geht an die Studierenden. | umgesetzt |
 | FA-113 | Beschäftigte unterschreiben mit Schlüssel nur, wenn er im Profil hinterlegt ist (Besitznachweis per Signatur, Widerruf möglich). | umgesetzt |
+| FA-114 | Missbrauchsschutz des öffentlichen Antragsformulars: Sicherheitsaufgabe nach dem ALTCHA-Prinzip (Proof-of-Work, selbst gehostet, ohne Bilderrätsel, Cookies oder Dritte; signiert, 10 Minuten gültig, einmal verwendbar), unsichtbares Köderfeld, höchstens 3 unbestätigte Anträge je Mailadresse und Tag. | umgesetzt |
 | FA-120 | Danach unterschreibt das zuständige Studiendekanat (Bestellung der Prüfenden, ATPO § 24 Abs. 2). Wer selbst prüft, bestellt sich nicht selbst – dann jede andere Person mit der Rolle. | umgesetzt |
 | FA-121 | Das Studiendekanat kann mit Rückfrage zurückgeben; die Unterschrift der Erstprüfenden wird dann „überholt“ (bleibt sichtbar). | umgesetzt |
 | FA-130 | Nach der letzten Unterschrift entsteht ein PDF (alle Angaben, Unterschriften mit Prüfergebnis, Prüfwert, QR-Code zur Prüfansicht, Anhang: unterschriebener Text) und geht per Mail an das Studierendensekretariat; Kopie an Studierende, Erst- und Zweitprüfende. | umgesetzt |

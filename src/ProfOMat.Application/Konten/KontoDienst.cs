@@ -1,3 +1,6 @@
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Identity;
 using ProfOMat.Application.Betrieb;
 using ProfOMat.Application.Signaturen;
@@ -6,12 +9,35 @@ using ProfOMat.Domain.Konten;
 
 namespace ProfOMat.Application.Konten;
 
-/// <summary>Lokale Konten: Anmeldung mit Passwort, Rollen, Signaturschlüssel. Später zusätzlich Anmeldung über das Hochschulsystem.</summary>
-public sealed class KontoDienst(IDaten daten, IAktuellerBenutzer aktuell, Protokoll protokoll, TimeProvider uhr)
+/// <summary>Angaben zu einem neuen Konto (Ersteinrichtung, Einladung).</summary>
+public sealed record Kontoangaben(string Kennung, string? Titel, string Vorname, string Nachname, string Email);
+
+/// <summary>Frisch erzeugter Einmal-Link: das Token gibt es nur jetzt (gespeichert wird sein SHA-256).</summary>
+public sealed record EinladungsLink(Einladung Einladung, string Token);
+
+/// <summary>Was ein (noch gültiger) Link anbietet – für die öffentliche Einlöseseite.</summary>
+public sealed record EinladungsInfo(EinladungsArt Art, string? Notiz, DateTimeOffset Ablauf, IReadOnlyList<Rolle> Rollen, string? Kennung, string? Name);
+
+/// <summary>
+/// Lokale Konten der Lehrenden und Verwaltung (Anmeldung wie in Podium): Ersteinrichtung des ersten Kontos über die Oberfläche,
+/// weitere Konten nur per Einladungslink, vergessene Passwörter per Passwort-Link. Studierende brauchen kein Konto.
+/// Später zusätzlich Anmeldung über das Hochschulsystem.
+/// </summary>
+public sealed partial class KontoDienst(IDaten daten, IAktuellerBenutzer aktuell, Protokoll protokoll, TimeProvider uhr)
 {
     public const int MinPasswortLaenge = 12;
+    public const int EinladungTageStandard = 7;
+    public const int PasswortLinkTage = 3;
 
-    private static readonly PasswordHasher<Konto> Hasher = new();
+    /// <summary>PBKDF2-HMAC-SHA512 mit 210 000 Iterationen (OWASP); ältere Hashes werden bei der Anmeldung erneuert.</summary>
+    private static readonly PasswordHasher<Konto> Hasher = new(Microsoft.Extensions.Options.Options.Create(new PasswordHasherOptions { IterationCount = 210_000 }));
+
+    /// <summary>Ersteinrichtung nur einmal gleichzeitig (zwei Anfragen könnten sonst beide „kein Konto“ sehen).</summary>
+    private static readonly SemaphoreSlim EinrichtungSperre = new(1, 1);
+
+    /// <summary>Auch bei unbekannter Kennung einmal prüfen, damit die Antwortzeit nichts verrät.</summary>
+    private static readonly Konto Attrappe = new("attrappe", null, "", "Attrappe", "attrappe@example.invalid");
+    private static readonly string AttrappenHash = Hasher.HashPassword(Attrappe, Guid.NewGuid().ToString());
 
     public static Benutzer AlsBenutzer(Konto konto)
     {
@@ -31,6 +57,7 @@ public sealed class KontoDienst(IDaten daten, IAktuellerBenutzer aktuell, Protok
         var konto = await daten.ErsterAsync(daten.Menge<Konto>().Where(x => x.Kennung == k), abbruch);
         if (konto is not { Aktiv: true, PasswortHash: { } hash })
         {
+            Hasher.VerifyHashedPassword(Attrappe, AttrappenHash, passwort);
             return null;
         }
 
@@ -211,22 +238,203 @@ public sealed class KontoDienst(IDaten daten, IAktuellerBenutzer aktuell, Protok
         return wer.KontoId is { } id ? await daten.FindenAsync<Konto>(id, abbruch) : null;
     }
 
-    /// <summary>Erstes Konto der Systemverwaltung beim allerersten Start (Passwort nur aus der Umgebung, nie aus dem Repository).</summary>
-    public async Task<bool> StartkontoAnlegenAsync(string kennung, string email, string passwort, CancellationToken abbruch = default)
+    // ================================================================================================ Sitzungen
+
+    /// <summary>
+    /// Stempel einer Sitzung: ändert sich mit Passwort, Rollen und Sperre. Steht im Anmelde-Cookie; passt er nicht mehr,
+    /// ist die Sitzung beendet (wie Podium).
+    /// </summary>
+    public static string Stempel(Konto konto)
     {
-        if (await daten.AnzahlAsync(daten.Menge<Konto>(), abbruch) > 0)
+        ArgumentNullException.ThrowIfNull(konto);
+        var roh = $"{konto.PasswortHash}|{konto.Aktiv}|{string.Join(',', konto.Rollen.Select(r => r.Rolle).Order())}";
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(roh)))[..16];
+    }
+
+    /// <summary>Aktueller Stempel eines aktiven Kontos; <c>null</c>, wenn es das Konto nicht (mehr) gibt oder es gesperrt ist.</summary>
+    public async Task<string?> StempelAsync(Guid kontoId, CancellationToken abbruch = default)
+        => await daten.FindenAsync<Konto>(kontoId, abbruch) is { Aktiv: true } konto ? Stempel(konto) : null;
+
+    // ================================================================================================ Ersteinrichtung
+
+    /// <summary>Solange es kein einziges Konto gibt, legt man das erste Konto der Systemverwaltung über die Anmeldeseite an.</summary>
+    public async Task<bool> ErsteinrichtungNoetigAsync(CancellationToken abbruch = default)
+        => await daten.AnzahlAsync(daten.Menge<Konto>(), abbruch) == 0;
+
+    /// <summary>Erstes Konto (Systemverwaltung, auf Wunsch zugleich Prüfende). Danach ist die Ersteinrichtung gesperrt.</summary>
+    public async Task<Benutzer> ErsteinrichtenAsync(Kontoangaben angaben, string passwort, bool auchPruefende, CancellationToken abbruch = default)
+    {
+        ArgumentNullException.ThrowIfNull(angaben);
+        await EinrichtungSperre.WaitAsync(abbruch);
+        try
         {
-            return false;
+            if (!await ErsteinrichtungNoetigAsync(abbruch))
+            {
+                throw new FachlicherFehler("ProfOMat ist bereits eingerichtet – bitte anmelden.");
+            }
+
+            var konto = NeuesKonto(angaben, passwort, auchPruefende ? [Rolle.Systemverwaltung, Rolle.Pruefende] : [Rolle.Systemverwaltung]);
+            daten.Hinzufuegen(konto);
+            var benutzer = AlsBenutzer(konto);
+            protokoll.Eintragen(benutzer, "Konto.Ersteinrichtung", $"Ersteinrichtung: Konto {konto.Kennung} (Systemverwaltung) angelegt", konto.Id);
+            await daten.SpeichernAsync(abbruch);
+            return benutzer;
+        }
+        finally
+        {
+            EinrichtungSperre.Release();
+        }
+    }
+
+    // ================================================================================================ Einladungen und Passwort-Links
+
+    /// <summary>Einladungslink für ein neues Konto mit festen Rollen (1–30 Tage gültig, einmal verwendbar).</summary>
+    public async Task<EinladungsLink> EinladungErzeugenAsync(IReadOnlyCollection<Rolle> rollen, string? notiz, int tage, CancellationToken abbruch = default)
+    {
+        ArgumentNullException.ThrowIfNull(rollen);
+        var wer = await aktuell.ErmittelnAsync(abbruch);
+        Rechte.Verwaltung(wer).Sicherstellen();
+        if (rollen.Count == 0)
+        {
+            throw new FachlicherFehler("Bitte mindestens eine Rolle für das neue Konto wählen.");
         }
 
-        var konto = new Konto(kennung, null, "", "Systemverwaltung", email);
-        konto.RolleGeben(Rolle.Systemverwaltung);
-        konto.PasswortSetzen(Hash(konto, passwort));
-        daten.Hinzufuegen(konto);
-        protokoll.Eintragen(Benutzer.Automatik, "Konto.Angelegt", $"Startkonto {konto.Kennung} angelegt", konto.Id);
+        var (token, hash) = NeuesToken();
+        var jetzt = uhr.GetUtcNow();
+        var e = new Einladung(EinladungsArt.Konto, hash, rollen, null, notiz, wer.KontoIdPflicht, jetzt, jetzt.AddDays(Math.Clamp(tage, 1, 30)));
+        daten.Hinzufuegen(e);
+        protokoll.Eintragen(wer, "Konto.Einladung", $"Einladungslink erzeugt ({string.Join(", ", e.RollenListe.Select(r => r.Anzeigename()))})", e.Id);
         await daten.SpeichernAsync(abbruch);
-        return true;
+        return new EinladungsLink(e, token);
     }
+
+    /// <summary>Passwort-Link für ein bestehendes Konto (3 Tage, einmal verwendbar).</summary>
+    public async Task<EinladungsLink> PasswortLinkErzeugenAsync(Guid kontoId, CancellationToken abbruch = default)
+    {
+        var wer = await aktuell.ErmittelnAsync(abbruch);
+        Rechte.Verwaltung(wer).Sicherstellen();
+        var konto = await daten.FindenAsync<Konto>(kontoId, abbruch) ?? throw new FachlicherFehler("Konto nicht gefunden.");
+        var (token, hash) = NeuesToken();
+        var jetzt = uhr.GetUtcNow();
+        var e = new Einladung(EinladungsArt.Passwort, hash, [], konto.Id, $"Passwort für {konto.Kennung}", wer.KontoIdPflicht, jetzt, jetzt.AddDays(PasswortLinkTage));
+        daten.Hinzufuegen(e);
+        protokoll.Eintragen(wer, "Konto.PasswortLink", $"Passwort-Link für {konto.Kennung} erzeugt", konto.Id);
+        await daten.SpeichernAsync(abbruch);
+        return new EinladungsLink(e, token);
+    }
+
+    /// <summary>Noch nicht eingelöste, nicht abgelaufene Links (Übersicht der Systemverwaltung).</summary>
+    public async Task<IReadOnlyList<Einladung>> OffeneEinladungenAsync(CancellationToken abbruch = default)
+    {
+        var wer = await aktuell.ErmittelnAsync(abbruch);
+        Rechte.Verwaltung(wer).Sicherstellen();
+        var jetzt = uhr.GetUtcNow();
+        return (await daten.ListeAsync(daten.Menge<Einladung>().Where(e => e.Eingeloest == null), abbruch))
+            .Where(e => e.Ablauf > jetzt).OrderByDescending(e => e.Erstellt).ToList();
+    }
+
+    public async Task EinladungZurueckziehenAsync(Guid einladungId, CancellationToken abbruch = default)
+    {
+        var wer = await aktuell.ErmittelnAsync(abbruch);
+        Rechte.Verwaltung(wer).Sicherstellen();
+        if (await daten.FindenAsync<Einladung>(einladungId, abbruch) is { } e)
+        {
+            daten.Entfernen(e);
+            protokoll.Eintragen(wer, "Konto.EinladungZurueck", "Link zurückgezogen", e.Id);
+            await daten.SpeichernAsync(abbruch);
+        }
+    }
+
+    /// <summary>Öffentlich: Was bietet dieser Link? <c>null</c>, wenn ungültig, abgelaufen oder schon verwendet.</summary>
+    public async Task<EinladungsInfo?> EinladungPruefenAsync(string? token, CancellationToken abbruch = default)
+    {
+        if (await GueltigeEinladungAsync(token, abbruch) is not { } e)
+        {
+            return null;
+        }
+
+        var konto = e.KontoId is { } k ? await daten.FindenAsync<Konto>(k, abbruch) : null;
+        return new EinladungsInfo(e.Art, e.Notiz, e.Ablauf, e.RollenListe, konto?.Kennung, konto?.Anzeigename);
+    }
+
+    /// <summary>Öffentlich: Link einlösen – neues Konto anlegen bzw. Passwort setzen. Liefert das Konto zum direkten Anmelden.</summary>
+    public async Task<Benutzer> EinladungEinloesenAsync(string? token, Kontoangaben? angaben, string passwort, CancellationToken abbruch = default)
+    {
+        var e = await GueltigeEinladungAsync(token, abbruch) ?? throw new FachlicherFehler("Der Link ist ungültig, abgelaufen oder wurde schon verwendet.");
+        Konto konto;
+        if (e.Art == EinladungsArt.Passwort)
+        {
+            konto = await daten.FindenAsync<Konto>(e.KontoId!.Value, abbruch) ?? throw new FachlicherFehler("Das Konto gibt es nicht mehr.");
+            konto.PasswortSetzen(Hash(konto, passwort));
+        }
+        else
+        {
+            konto = NeuesKonto(angaben ?? throw new FachlicherFehler("Bitte die Angaben zum Konto ausfüllen."), passwort, e.RollenListe);
+            if (await daten.AnzahlAsync(daten.Menge<Konto>().Where(x => x.Kennung == konto.Kennung), abbruch) > 0)
+            {
+                throw new FachlicherFehler("Diese Kennung ist schon vergeben – bitte eine andere wählen.");
+            }
+
+            daten.Hinzufuegen(konto);
+        }
+
+        e.Einloesen(konto.Id, uhr.GetUtcNow());
+        protokoll.Eintragen(AlsBenutzer(konto), e.Art == EinladungsArt.Konto ? "Konto.Angelegt" : "Konto.Passwort",
+            e.Art == EinladungsArt.Konto ? $"Konto {konto.Kennung} per Einladung angelegt" : $"Passwort für {konto.Kennung} per Link gesetzt", konto.Id);
+        await daten.SpeichernAsync(abbruch);
+        return AlsBenutzer(konto);
+    }
+
+    public static string TokenHash(string token) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token)));
+
+    private async Task<Einladung?> GueltigeEinladungAsync(string? token, CancellationToken abbruch)
+    {
+        if (string.IsNullOrEmpty(token) || token.Length > 100)
+        {
+            return null;
+        }
+
+        var hash = TokenHash(token);
+        var e = await daten.ErsterAsync(daten.Menge<Einladung>().Where(x => x.TokenHash == hash), abbruch);
+        return e is not null && e.Gueltig(uhr.GetUtcNow()) ? e : null;
+    }
+
+    private static (string Token, string Hash) NeuesToken()
+    {
+        var token = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        return (token, TokenHash(token));
+    }
+
+    private static Konto NeuesKonto(Kontoangaben a, string passwort, IEnumerable<Rolle> rollen)
+    {
+        var kennung = a.Kennung?.Trim().ToLowerInvariant() ?? "";
+        if (!KennungMuster().IsMatch(kennung))
+        {
+            throw new FachlicherFehler("Kennung: 3–40 Zeichen, nur a–z, 0–9, Punkt, Bindestrich, Unterstrich.");
+        }
+
+        if (string.IsNullOrWhiteSpace(a.Nachname))
+        {
+            throw new FachlicherFehler("Bitte den Nachnamen angeben.");
+        }
+
+        if (string.IsNullOrWhiteSpace(a.Email) || !a.Email.Contains('@', StringComparison.Ordinal))
+        {
+            throw new FachlicherFehler("Bitte eine gültige Mailadresse angeben (für Benachrichtigungen).");
+        }
+
+        var konto = new Konto(kennung, a.Titel, a.Vorname?.Trim() ?? "", a.Nachname.Trim(), a.Email.Trim());
+        foreach (var r in rollen)
+        {
+            konto.RolleGeben(r);
+        }
+
+        konto.PasswortSetzen(Hash(konto, passwort));
+        return konto;
+    }
+
+    [GeneratedRegex("^[a-z0-9._-]{3,40}$")]
+    private static partial Regex KennungMuster();
 
     private static string Hash(Konto konto, string passwort)
     {

@@ -13,8 +13,10 @@ internal static class Anmeldung
 {
     public const string KontoClaim = ClaimTypes.NameIdentifier;
     public const string ArtClaim = "profomat:anmeldeart";
+    public const string StempelClaim = "profomat:stempel";
 
-    public static ClaimsPrincipal Principal(Benutzer benutzer, string art, string schema)
+    /// <param name="stempel">Sitzungsstempel (<see cref="ProfOMat.Application.Konten.KontoDienst.Stempel"/>); ändert er sich, endet die Sitzung.</param>
+    public static ClaimsPrincipal Principal(Benutzer benutzer, string art, string schema, string stempel)
     {
         ArgumentNullException.ThrowIfNull(benutzer);
         var claims = new List<Claim>
@@ -23,6 +25,7 @@ internal static class Anmeldung
             new(ClaimTypes.Name, benutzer.Name),
             new("profomat:kennung", benutzer.Kennung),
             new(ArtClaim, art),
+            new(StempelClaim, stempel),
         };
         claims.AddRange(benutzer.Rollen.Select(r => new Claim(ClaimTypes.Role, r.ToString())));
         return new ClaimsPrincipal(new ClaimsIdentity(claims, schema, ClaimTypes.Name, ClaimTypes.Role));
@@ -38,6 +41,77 @@ internal static class Anmeldung
         var rollen = p.FindAll(ClaimTypes.Role).Select(c => Enum.TryParse<Rolle>(c.Value, out var r) ? r : (Rolle?)null).OfType<Rolle>().ToList();
         return new Benutzer(p.FindFirst("profomat:kennung")?.Value ?? "?", p.Identity.Name ?? "?", id, rollen);
     }
+}
+
+/// <summary>
+/// Sitzung noch gültig? Wie Podium: Das Konto muss aktiv sein und der Stempel im Cookie zum aktuellen Stand passen
+/// (Passwortwechsel, Rollenänderung oder Sperre beenden alle bisherigen Sitzungen).
+/// </summary>
+internal static class Sitzung
+{
+    public static async Task<bool> GueltigAsync(ClaimsPrincipal? p, IServiceProvider dienste, CancellationToken abbruch = default)
+    {
+        if (p?.Identity?.IsAuthenticated != true)
+        {
+            return true;   // nicht angemeldet: nichts zu prüfen
+        }
+
+        if (!Guid.TryParse(p.FindFirst(Anmeldung.KontoClaim)?.Value, out var id) || p.FindFirst(Anmeldung.StempelClaim)?.Value is not { } stempel)
+        {
+            return false;
+        }
+
+        var aktuell = await dienste.GetRequiredService<ProfOMat.Application.Konten.KontoDienst>().StempelAsync(id, abbruch);
+        return string.Equals(aktuell, stempel, StringComparison.Ordinal);
+    }
+}
+
+/// <summary>Prüft laufende Blazor-Verbindungen jede Minute nach (gesperrte Konten verlieren auch eine offene Seite).</summary>
+internal sealed class Sitzungspruefung(ILoggerFactory log, IServiceScopeFactory bereiche)
+    : Microsoft.AspNetCore.Components.Server.RevalidatingServerAuthenticationStateProvider(log)
+{
+    protected override TimeSpan RevalidationInterval => TimeSpan.FromMinutes(1);
+
+    protected override async Task<bool> ValidateAuthenticationStateAsync(AuthenticationState zustand, CancellationToken abbruch)
+    {
+        ArgumentNullException.ThrowIfNull(zustand);
+        await using var bereich = bereiche.CreateAsyncScope();
+        return await Sitzung.GueltigAsync(zustand.User, bereich.ServiceProvider, abbruch);
+    }
+}
+
+/// <summary>
+/// Schutz gegen Passwort-Raten (wie Podium): je IP-Adresse und Kennung ab dem 5. Fehlversuch eine Wartezeit,
+/// die sich verdoppelt (15 s, 30 s, … höchstens 5 min). Erfolgreiche Anmeldung setzt zurück.
+/// </summary>
+internal sealed class Anmeldebremse(TimeProvider uhr)
+{
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, (int Fehler, DateTimeOffset Bis)> stand = new(StringComparer.Ordinal);
+
+    private static string Schluessel(string? ip, string kennung) => $"{ip}|{kennung.Trim().ToLowerInvariant()}";
+
+    /// <summary>Verbleibende Wartezeit; <c>null</c> = darf versuchen.</summary>
+    public TimeSpan? Wartezeit(string? ip, string kennung)
+        => stand.TryGetValue(Schluessel(ip, kennung), out var s) && s.Bis > uhr.GetUtcNow() ? s.Bis - uhr.GetUtcNow() : null;
+
+    public void Fehlversuch(string? ip, string kennung)
+    {
+        var jetzt = uhr.GetUtcNow();
+        stand.AddOrUpdate(Schluessel(ip, kennung), _ => (1, DateTimeOffset.MinValue), (_, s) =>
+        {
+            var n = s.Fehler + 1;
+            return (n, n >= 5 ? jetzt.AddSeconds(Math.Min(300, 15 * Math.Pow(2, n - 5))) : DateTimeOffset.MinValue);
+        });
+        if (stand.Count > 10_000)
+        {
+            foreach (var alt in stand.Where(x => x.Value.Bis < jetzt.AddHours(-1)).Select(x => x.Key).ToList())
+            {
+                stand.TryRemove(alt, out _);
+            }
+        }
+    }
+
+    public void Erfolg(string? ip, string kennung) => stand.TryRemove(Schluessel(ip, kennung), out _);
 }
 
 /// <summary>Hält den Benutzer für Arbeitsbereiche, die außerhalb der Blazor-Verbindung erzeugt werden.</summary>

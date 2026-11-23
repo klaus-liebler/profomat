@@ -18,6 +18,7 @@ public static class Registrierung
         dienste.AddScoped<Postausgang>();
         dienste.AddScoped<KontoDienst>();
         dienste.AddScoped<KatalogDienst>();
+        dienste.AddSingleton<Menschenpruefung>();
         dienste.AddScoped<DrittpruefungDienst>();
         dienste.AddScoped<Klausuren.KlausurDienst>();
         dienste.AddScoped<Muendlich.MuendlichDienst>();

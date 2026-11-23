@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 # Schritt 01: ProfOMat auf dem Server einrichten, auf dem schon das VibeVHS-Kit läuft (nginx, Zertifikat, Firewall, sqlite3).
-# Legt an: Dienstbenutzer, Verzeichnisse, Umgebungsdatei, systemd-Unit, nächtliche Sicherung, nginx-Snippets mit Zugangspasswort
-# und die eigene nginx-Datei /etc/nginx/liebler.d/profomat.conf. Die Anwendung selbst bringt deploy.ps1.
+# Legt an: Dienstbenutzer, Verzeichnisse, Umgebungsdatei, systemd-Unit, nächtliche Sicherung, nginx-Snippets und die eigene
+# nginx-Datei /etc/nginx/liebler.d/profomat.conf (ohne nginx-Passwort, wie Podium). Die Anwendung selbst bringt deploy.ps1.
 # Start:   ssh -t srvadmin@liebler.iui.hs-osnabrueck.de "sudo bash /tmp/profomat-kit/schritte/01-einrichten.sh"
 # Rückweg: sudo bash /tmp/profomat-kit/schritte/01-zurueck.sh   (Daten in /var/lib/profomat bleiben)
 source "$(dirname "$0")/gemeinsam.sh"
 source "$(dirname "$0")/liebler-nginx.sh"
 als_root
 
-command -v nginx >/dev/null && command -v sqlite3 >/dev/null && command -v htpasswd >/dev/null \
-    || fehler "nginx, sqlite3 oder htpasswd fehlen – erst das VibeVHS-Kit (Schritt 02/03) einspielen. Nichts geändert."
+command -v nginx >/dev/null && command -v sqlite3 >/dev/null \
+    || fehler "nginx oder sqlite3 fehlen – erst das VibeVHS-Kit (Schritt 02/03) einspielen. Nichts geändert."
+oeffentlich_pruefen
 [[ -f "$NGINX_SITE" ]] || fehler "$NGINX_SITE fehlt (VibeVHS-Schritt 03). Nichts geändert."
 belegt=$(ss -ltnH "sport = :$PORT" 2>/dev/null || true)
 if [[ -n "$belegt" ]] && ! systemctl is-active --quiet "$DIENST"; then
@@ -39,22 +40,14 @@ if [[ $neu -eq 1 ]]; then systemctl daemon-reload; fi
 systemctl enable "$DIENST" >/dev/null 2>&1
 systemctl enable --now "$DIENST-sicherung.timer" >/dev/null 2>&1 && ok "nächtliche Sicherung aktiv (02:00 Uhr → $SICHERUNGEN)"
 
-# Zugangspasswort (nginx Basic Auth) – solange es keine Hochschulanmeldung gibt, Pflicht
-if [[ ! -s "$HTPASSWD" ]]; then
-    info "Zugangspasswort für $PFAD anlegen (Benutzer $ZUGANG_BENUTZER) – htpasswd fragt nach dem Passwort:"
-    htpasswd -c -B "$HTPASSWD" "$ZUGANG_BENUTZER"
-    chown root:www-data "$HTPASSWD"
-    chmod 0640 "$HTPASSWD"
-    ok "$HTPASSWD angelegt"
-fi
-
 # nginx: Snippets nach /etc/nginx/snippets, Einbindung als eigene Datei /etc/nginx/liebler.d/$DIENST.conf
 # (gemeinsames Schema mit VibeVHS, FraktionPerfekt und Podium, schritte/liebler-nginx.sh): die Einträge anderer Apps bleiben
 # unberührt; bei Fehler (nginx -t) zurück zum vorigen Stand.
 snippets=0
 if vorlage_einspielen nginx/profomat-proxy.conf "/etc/nginx/snippets/$DIENST-proxy.conf"; then snippets=1; fi
 if vorlage_einspielen nginx/profomat-locations.conf "/etc/nginx/snippets/$DIENST-locations.conf"; then snippets=1; fi
-if vorlage_einspielen nginx/profomat-ohne-passwort.conf "/etc/nginx/snippets/$DIENST-ohne-passwort.conf"; then snippets=1; fi
+# frühere Fassung mit Zugangspasswort: Ausnahmen-Snippet wird nicht mehr gebraucht
+if [[ -f "/etc/nginx/snippets/$DIENST-ohne-passwort.conf" ]]; then sichern "/etc/nginx/snippets/$DIENST-ohne-passwort.conf"; rm -f "/etc/nginx/snippets/$DIENST-ohne-passwort.conf"; snippets=1; fi
 eintrag=$(mktemp)
 printf '# ProfOMat – Ziel: %s/%s.conf (Kit profomat, Schritt 01)\ninclude /etc/nginx/snippets/%s-locations.conf;\n' "$LIEBLER_D" "$DIENST" "$DIENST" > "$eintrag"
 liebler_app_setzen "$DIENST" "$eintrag"
@@ -65,12 +58,11 @@ if (( snippets )); then
     else nginx -t || true; fehler "nginx-Konfiguration fehlerhaft – vorige Snippets in $SICHERUNG"; fi
 fi
 
-anmeldung_pruefen
-
 if [[ -x "$PROGRAMM/ProfOMat.Web" ]]; then
     systemctl restart "$DIENST"
     if gesund 60; then ok "ProfOMat läuft: $GESUND → ok"; else journalctl -u "$DIENST" -n 30 --no-pager | sed 's/^/   /'; fehler "ProfOMat antwortet nicht"; fi
+    ersteinrichtung_hinweis
 else
-    warn "Noch keine Anwendung in $PROGRAMM – erst $UMGEBUNG ausfüllen, dann vom Entwicklungsrechner:  .\\deploy\\server\\deploy.ps1"
+    warn "Noch keine Anwendung in $PROGRAMM – jetzt vom Entwicklungsrechner:  .\\deploy\\server\\deploy.ps1"
 fi
-ok "Schritt 01 fertig · https://$HOST$PFAD/ (Zugangspasswort: Benutzer $ZUGANG_BENUTZER)"
+ok "Schritt 01 fertig · https://$HOST$PFAD/"

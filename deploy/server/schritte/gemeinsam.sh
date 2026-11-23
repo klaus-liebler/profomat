@@ -13,7 +13,6 @@ DB="$DATEN/profomat.db"
 LOGS="/var/log/$DIENST"
 SICHERUNGEN="/var/backups/$DIENST"
 UMGEBUNG="/etc/$DIENST/$DIENST.env"
-HTPASSWD="/etc/nginx/$DIENST.htpasswd"
 GESUND="http://127.0.0.1:$PORT$PFAD/gesund"
 
 info()  { printf '\033[1;34m»\033[0m %s\n' "$*"; }
@@ -52,18 +51,19 @@ vorlage_einspielen() {
 
 gesund() { for _ in $(seq 1 "${1:-90}"); do curl -fsS -o /dev/null "$GESUND" && return 0; sleep 1; done; return 1; }
 
-# Ohne Hochschulanmeldung nur hinter dem Zugangspasswort: nginx-Einbindung und Passwortdatei müssen da sein.
-zugangsschutz_aktiv() {
-    [[ -s "$HTPASSWD" ]] && grep -qs "include /etc/nginx/snippets/$DIENST-locations.conf;" "/etc/nginx/liebler.d/$DIENST.conf" \
-        && grep -qs "auth_basic_user_file $HTPASSWD;" "/etc/nginx/snippets/$DIENST-locations.conf"
+# Öffentlich erreichbar (ohne nginx-Passwort, wie Podium): Testanmeldung (Konto ohne Passwort wählen) und Demodaten sind verboten.
+oeffentlich_pruefen() {
+    if grep -qsE '^\s*(Anmeldung__TestanmeldungErlaubt|Demodaten__Anlegen)\s*=\s*[Tt]rue' "$UMGEBUNG"; then
+        fehler "In $UMGEBUNG ist Testanmeldung oder Demodaten eingeschaltet – auf dem öffentlichen Server verboten. Zeile entfernen. Nichts geändert."
+    fi
 }
 
-# Kann sich jemand anmelden? Demodaten (Testanmeldung) oder ein Startkonto der Systemverwaltung.
-anmeldung_pruefen() {
-    if grep -qE '^\s*Demodaten__Anlegen=true' "$UMGEBUNG" 2>/dev/null; then
-        grep -qE '^\s*Anmeldung__TestanmeldungErlaubt=true' "$UMGEBUNG" \
-            || warn "Demodaten ohne Anmeldung__TestanmeldungErlaubt=true – die Demokonten haben kein Passwort, niemand kann sich anmelden."
-    elif ! grep -qE '^\s*Startkonto__Passwort=.+' "$UMGEBUNG" 2>/dev/null; then
-        warn "In $UMGEBUNG weder Demodaten__Anlegen=true noch Startkonto__Passwort – eine neue Datenbank hätte kein Konto (docs/deploy.md)."
+# Erinnerung an die Ersteinrichtung (wie Podium): Solange es kein Konto gibt, kann JEDE Person mit Zugang zur Seite das erste
+# Konto der Systemverwaltung anlegen – deshalb direkt nach dem ersten Ausrollen erledigen.
+ersteinrichtung_hinweis() {
+    local n
+    n=$(sqlite3 -readonly "$DB" "SELECT count(*) FROM Konten;" 2>/dev/null || echo "?")
+    if [[ "$n" == "0" ]]; then
+        warn "Noch KEIN Konto: jetzt sofort https://$HOST$PFAD/anmelden öffnen und das erste Konto (Systemverwaltung) anlegen – bis dahin könnte das jede Person tun."
     fi
 }

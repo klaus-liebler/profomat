@@ -4,6 +4,10 @@
 @using ProfOMat.Application.Konten
 @using ProfOMat.Domain.Katalog
 @inject Vorgang Vorgang
+@inject ProfOMat.Application.Betrieb.Menschenpruefung Menschenpruefung
+@inject IJSRuntime JS
+@inject NavigationManager Navigation
+@implements IAsyncDisposable
 
 <PageTitle>Antrag auf mündliche Drittprüfung · ProfOMat</PageTitle>
 
@@ -92,6 +96,11 @@
                 <span class="pm-hilfe">Dem Vorschlag soll entsprochen werden, soweit keine triftigen Gründe entgegenstehen (ATPO § 24 Abs. 4).</span>
             </div>
         </div>
+        @* Köderfeld: für Menschen unsichtbar und nicht erreichbar; Programme, die alle Felder füllen, verraten sich damit. *@
+        <div class="pm-koeder" aria-hidden="true">
+            <label for="webseite">Webseite</label>
+            <input id="webseite" name="webseite" tabindex="-1" autocomplete="off" @bind="koeder" />
+        </div>
         <div class="pm-row">
             <BegruendeterButton Text="Weiter: prüfen und unterschreiben" Haupt="true" Beschaeftigt="@beschaeftigt" Click="WeiterAsync" />
         </div>
@@ -99,6 +108,8 @@
 }
 else if (schritt == 2 && entwurf is not null)
 {
+    <p class="pm-small pm-muted pm-sicherheit">Beim Einreichen löst Ihr Browser eine kurze Rechenaufgabe (Schutz vor automatisierten Anträgen,
+        ohne Bilderrätsel und ohne Daten an Dritte). Das dauert meist nur einen Moment.</p>
     <Unterschreiben Text="@entwurf.Text" Titel="Antrag prüfen und unterschreiben" Unterzeichner="@($"{entwurf.Angaben.Vorname} {entwurf.Angaben.Nachname}")"
                     Knopftext="Unterschreiben und einreichen" Beschaeftigt="@beschaeftigt" Unterschrieben="EinreichenAsync">
         <button type="button" class="pm-btn" @onclick="() => { schritt = 1; fehler = null; }">Zurück zu den Angaben</button>
@@ -128,7 +139,8 @@ else if (schritt == 3)
     private IReadOnlyList<Pruefung> pruefungen = [];
     private IReadOnlyList<Konto> pruefende = [];
     private Antragsentwurf? entwurf;
-    private string? nummer;
+    private string? nummer, koeder;
+    private IJSObjectReference? modul;
 
     protected override async Task OnInitializedAsync()
     {
@@ -184,13 +196,44 @@ else if (schritt == 3)
         }
     }
 
+    /// <summary>Captcha nach dem ALTCHA-Prinzip: Aufgabe vom Server, Lösung im Browser (WebCrypto), Prüfung im Dienst.</summary>
+    private async Task<ProfOMat.Application.Betrieb.Rechenloesung?> SicherheitsaufgabeLoesenAsync()
+    {
+        var aufgabe = Menschenpruefung.Neu();
+        try
+        {
+            modul ??= await JS.InvokeAsync<IJSObjectReference>("import", Navigation.ToAbsoluteUri("menschenpruefung.js").ToString());
+            var zahl = await modul.InvokeAsync<int>("loesen", aufgabe.Salz, aufgabe.Herausforderung, aufgabe.Maximum);
+            return zahl < 0 ? null : new ProfOMat.Application.Betrieb.Rechenloesung(aufgabe.Salz, zahl, aufgabe.Signatur, koeder);
+        }
+        catch (JSException)
+        {
+            return null;   // der Dienst meldet dann verständlich, dass die Sicherheitsprüfung fehlgeschlagen ist
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (modul is not null)
+        {
+            try
+            {
+                await modul.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+            }
+        }
+    }
+
     private async Task EinreichenAsync(Unterschrift unterschrift)
     {
         fehler = null;
         beschaeftigt = true;
         try
         {
-            nummer = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<DrittpruefungDienst>().EinreichenAsync(entwurf!, unterschrift));
+            var sicherheit = await SicherheitsaufgabeLoesenAsync();
+            nummer = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<DrittpruefungDienst>().EinreichenAsync(entwurf!, unterschrift, sicherheit));
             schritt = 3;
         }
         catch (FachlicherFehler ex)

@@ -43,7 +43,7 @@ internal sealed class TestUmgebung : IAsyncDisposable
 
     public TestBenutzer Benutzer => (TestBenutzer)Dienste.GetRequiredService<IAktuellerBenutzer>();
 
-    public static async Task<TestUmgebung> StartenAsync(IDictionary<string, string?>? einstellungen = null)
+    public static async Task<TestUmgebung> StartenAsync(IDictionary<string, string?>? einstellungen = null, bool demodaten = true)
     {
         var ordner = Path.Combine(Path.GetTempPath(), "profomat-tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(ordner);
@@ -72,8 +72,9 @@ internal sealed class TestUmgebung : IAsyncDisposable
         dienste.AddSingleton<IAktuellerBenutzer>(d => d.GetRequiredService<TestBenutzer>());
         var anbieter = dienste.BuildServiceProvider();
         await DatenbankInitialisierung.InitialisierenAsync(anbieter);
-        await using (var b = anbieter.CreateAsyncScope())
+        if (demodaten)
         {
+            await using var b = anbieter.CreateAsyncScope();
             await b.ServiceProvider.GetRequiredService<Demodaten>().AnlegenAsync();
         }
 
@@ -92,6 +93,10 @@ internal sealed class TestUmgebung : IAsyncDisposable
         await arbeit(d);
         return true;
     });
+
+    /// <summary>Gelöste Sicherheitsaufgabe wie aus dem Browser (öffentliches Antragsformular).</summary>
+    public static ProfOMat.Application.Betrieb.Rechenloesung Mensch(IServiceProvider d)
+        => ProfOMat.Application.Betrieb.Menschenpruefung.Loesen(d.GetRequiredService<ProfOMat.Application.Betrieb.Menschenpruefung>().Neu());
 
     public async Task<Konto> KontoAsync(string kennung) => await InBereichAsync(async d =>
     {

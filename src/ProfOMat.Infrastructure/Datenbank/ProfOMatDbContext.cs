@@ -17,7 +17,7 @@ namespace ProfOMat.Infrastructure.Datenbank;
 public sealed class ProfOMatDbContext(DbContextOptions<ProfOMatDbContext> optionen) : DbContext(optionen)
 {
     /// <summary>Erhöhen, wenn sich das Modell ändert: eine ältere Datei wird dann beim Start abgelehnt (statt still falsch zu laufen).</summary>
-    public const int Schemaversion = 6;
+    public const int Schemaversion = 7;
 
     protected override void ConfigureConventions(ModelConfigurationBuilder konventionen)
     {
@@ -202,6 +202,18 @@ public sealed class ProfOMatDbContext(DbContextOptions<ProfOMatDbContext> option
             e.Ignore(f => f.Stand);
             e.Property(f => f.Nummer).HasMaxLength(GestellteFrage.NummerMaxLaenge);
             e.Property(f => f.Bemerkung).HasMaxLength(GestellteFrage.BemerkungMaxLaenge);
+        });
+
+        m.Entity<Einladung>(e =>
+        {
+            e.ToTable("Einladungen");
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => x.TokenHash).IsUnique();
+            e.Ignore(x => x.RollenListe);
+            e.Property(x => x.TokenHash).HasMaxLength(64);
+            e.Property(x => x.Rollen).HasMaxLength(200);
+            e.Property(x => x.Notiz).HasMaxLength(Einladung.NotizMaxLaenge);
+            e.HasOne<Konto>().WithMany().HasForeignKey(x => x.KontoId).OnDelete(DeleteBehavior.Cascade);
         });
 
         m.Entity<Schaltschrank>(e =>

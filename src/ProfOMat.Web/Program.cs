@@ -42,9 +42,20 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
         o.Cookie.SameSite = SameSiteMode.Lax;
         o.ExpireTimeSpan = TimeSpan.FromHours(10);
         o.SlidingExpiration = true;
+        // Gesperrte Konten, neues Passwort oder geänderte Rollen beenden bestehende Sitzungen beim nächsten Aufruf (wie Podium).
+        o.Events.OnValidatePrincipal = async ctx =>
+        {
+            if (!await Sitzung.GueltigAsync(ctx.Principal, ctx.HttpContext.RequestServices, ctx.HttpContext.RequestAborted))
+            {
+                ctx.RejectPrincipal();
+                await ctx.HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+            }
+        };
     });
 builder.Services.AddAuthorization();
 builder.Services.AddCascadingAuthenticationState();
+builder.Services.AddScoped<Microsoft.AspNetCore.Components.Authorization.AuthenticationStateProvider, Sitzungspruefung>();
+builder.Services.AddSingleton<Anmeldebremse>();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<BenutzerKontext>();
 builder.Services.AddScoped<IAktuellerBenutzer, AktuellerBenutzer>();
@@ -88,14 +99,10 @@ await using (var bereich = app.Services.CreateAsyncScope())
             app.Logger.LogInformation("Demodaten angelegt (Konten zur Testanmeldung, Katalog aus dem Mock-Hochschulsystem)");
         }
     }
-    else if (app.Configuration["Startkonto:Passwort"] is { Length: > 0 } passwort)
+    else if (await bereich.ServiceProvider.GetRequiredService<KontoDienst>().ErsteinrichtungNoetigAsync())
     {
-        // Erstes Konto der Systemverwaltung nur aus der Umgebung (Startkonto__Passwort), nie aus dem Repository.
-        if (await bereich.ServiceProvider.GetRequiredService<KontoDienst>().StartkontoAnlegenAsync(
-                app.Configuration["Startkonto:Kennung"] ?? "verwaltung", app.Configuration["Startkonto:Email"] ?? "verwaltung@example.invalid", passwort))
-        {
-            app.Logger.LogInformation("Startkonto der Systemverwaltung angelegt");
-        }
+        // Wie Podium: kein Passwort in Konfiguration oder Umgebung – das erste Konto legt man auf der Anmeldeseite an.
+        app.Logger.LogWarning("Noch kein Konto vorhanden – das erste Konto der Systemverwaltung bitte JETZT auf der Anmeldeseite anlegen (Ersteinrichtung).");
     }
 }
 
