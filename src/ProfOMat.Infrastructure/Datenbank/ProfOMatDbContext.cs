@@ -6,6 +6,7 @@ using ProfOMat.Domain.Katalog;
 using ProfOMat.Domain.Klausuren;
 using ProfOMat.Domain.Konten;
 using ProfOMat.Domain.Muendlich;
+using ProfOMat.Domain.Beschriftung;
 
 namespace ProfOMat.Infrastructure.Datenbank;
 
@@ -16,7 +17,7 @@ namespace ProfOMat.Infrastructure.Datenbank;
 public sealed class ProfOMatDbContext(DbContextOptions<ProfOMatDbContext> optionen) : DbContext(optionen)
 {
     /// <summary>Erhöhen, wenn sich das Modell ändert: eine ältere Datei wird dann beim Start abgelehnt (statt still falsch zu laufen).</summary>
-    public const int Schemaversion = 5;
+    public const int Schemaversion = 6;
 
     protected override void ConfigureConventions(ModelConfigurationBuilder konventionen)
     {
@@ -201,6 +202,39 @@ public sealed class ProfOMatDbContext(DbContextOptions<ProfOMatDbContext> option
             e.Ignore(f => f.Stand);
             e.Property(f => f.Nummer).HasMaxLength(GestellteFrage.NummerMaxLaenge);
             e.Property(f => f.Bemerkung).HasMaxLength(GestellteFrage.BemerkungMaxLaenge);
+        });
+
+        m.Entity<Schaltschrank>(e =>
+        {
+            e.ToTable("Schaltschraenke");
+            e.HasKey(s => s.Id);
+            e.HasIndex(s => s.KontoId);
+            e.Ignore(s => s.FelderSortiert);
+            e.Ignore(s => s.AlleGeraete);
+            e.Ignore(s => s.ReiheBreiteMm);
+            e.Property(s => s.Bezeichnung).HasMaxLength(Schaltschrank.BezeichnungMaxLaenge);
+            e.HasOne<Konto>().WithMany().HasForeignKey(s => s.KontoId).OnDelete(DeleteBehavior.Restrict);
+            e.HasMany(s => s.Felder).WithOne().HasForeignKey(f => f.SchrankId).OnDelete(DeleteBehavior.Cascade);
+            e.Navigation(s => s.Felder).AutoInclude().UsePropertyAccessMode(PropertyAccessMode.Field);
+        });
+        m.Entity<Feld>(e =>
+        {
+            e.ToTable("SchrankFelder");
+            e.HasKey(f => f.Id);
+            e.Property(f => f.Bezeichnung).HasMaxLength(Feld.BezeichnungMaxLaenge);
+            e.HasMany(f => f.Geraete).WithOne().HasForeignKey(g => g.FeldId).OnDelete(DeleteBehavior.Cascade);
+            e.Navigation(f => f.Geraete).AutoInclude().UsePropertyAccessMode(PropertyAccessMode.Field);
+        });
+        m.Entity<Geraet>(e =>
+        {
+            e.ToTable("SchrankGeraete");
+            e.HasKey(g => g.Id);
+            e.Ignore(g => g.Ende);
+            e.Property(g => g.Kennzeichen).HasMaxLength(Geraet.KennzeichenMaxLaenge);
+            e.Property(g => g.Text).HasMaxLength(Geraet.TextMaxLaenge);
+            e.Property(g => g.Zusatz).HasMaxLength(Geraet.TextMaxLaenge);
+            e.Property(g => g.Hintergrund).HasMaxLength(7);
+            e.Property(g => g.Schrift).HasMaxLength(7);
         });
 
         m.Entity<Nachricht>(e =>

@@ -223,3 +223,47 @@ kbd { font-family: var(--pm-mono); font-size: 11.5px; border: 1px solid var(--pm
     .pm-dl { grid-template-columns: minmax(0, 1fr); }
     .pm-dl dt { margin-top: 6px; }
 }
+
+/* Verteiler beschriften */
+.pm-bs { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr) minmax(280px, 340px); align-items: start; }
+.pm-bs-seite { position: sticky; top: 76px; display: flex; flex-direction: column; gap: 8px; }
+.pm-bs-palette { display: flex; flex-wrap: wrap; gap: 6px; }
+.pm-bs-teil { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border: 1px solid var(--pm-line); border-radius: 8px;
+    background: var(--pm-surface); cursor: grab; font: inherit; font-size: 13px; }
+.pm-bs-teil:hover, .pm-bs-teil:focus-visible { border-color: var(--pm-accent); }
+.pm-bs-teil-farbe { width: 12px; height: 12px; border: 1px solid #999; border-radius: 3px; }
+.pm-bs-hilfe { margin: 8px 0 10px; line-height: 1.8; }
+.pm-bs-felder { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 520px), 1fr)); outline: none; }
+.pm-bs-feld { border: 2px solid #8C96A3; border-radius: 6px; padding: 8px 8px 10px; background: #E9ECEF; }
+.pm-bs-feldkopf { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-bottom: 8px; font-size: 13px; }
+.pm-bs-feldname { flex: 1 1 120px; max-width: 220px; padding: 3px 8px; }
+.pm-bs-reihenzahl { display: inline-flex; align-items: center; gap: 6px; }
+.pm-btn-klein { padding: 1px 9px; min-height: 0; font-size: 14px; line-height: 1.4; }
+.pm-bs-reihe { display: flex; align-items: center; gap: 6px; margin-top: 10px; }
+.pm-bs-rnr { width: 14px; font-size: 11px; color: var(--pm-muted); text-align: right; }
+.pm-bs-te { flex: 1; display: grid; background: #C9CED4; border: 1px solid #8C96A3; }
+.pm-bs-geraet, .pm-bs-frei { display: block; min-width: 0; padding: 0; margin: 0; border: 0; background: #fff; font: inherit; cursor: pointer; }
+.pm-bs-geraet { outline: 1px solid #8C96A3; outline-offset: -1px; cursor: grab; }
+.pm-bs-geraet svg { display: block; width: 100%; height: 100%; }
+.pm-bs-frei { background: repeating-linear-gradient(135deg, #DCE0E5 0 6px, #D3D8DE 6px 12px); color: #8C96A3; font-size: 12px; border-right: 1px dashed #B3BAC2; }
+.pm-bs-frei:hover, .pm-bs-frei:focus-visible { background: var(--pm-accent-weak); color: var(--pm-accent); }
+.pm-bs-geraet.pm-bs-aktiv, .pm-bs-frei.pm-bs-aktiv { outline: 3px solid var(--pm-accent); outline-offset: -3px; position: relative; z-index: 1; }
+.pm-bs-geraet:focus-visible { outline: 3px solid var(--pm-accent); outline-offset: -3px; }
+.pm-bs-vorschau { width: 100%; max-height: 120px; border: 1px solid #8C96A3; background: #fff; }
+.pm-bs-vorschau svg { display: block; width: 100%; height: 100%; }
+.pm-bs-felder2 { display: grid; gap: 8px 10px; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.pm-bs-felder2 .pm-field-weit { grid-column: 1 / -1; }
+.pm-bs-symbole { display: grid; gap: 4px; grid-template-columns: repeat(auto-fill, minmax(36px, 1fr)); }
+.pm-bs-symbolwahl { height: 36px; display: grid; place-items: center; border: 1px solid var(--pm-line); border-radius: 6px; background: var(--pm-surface);
+    cursor: pointer; color: var(--pm-text); padding: 3px; }
+.pm-bs-symbol { width: 24px; height: 24px; }
+.pm-bs-farben { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
+.pm-bs-farbe { width: 26px; height: 26px; border: 1px solid #888; border-radius: 6px; cursor: pointer; padding: 0; }
+.pm-bs-symbolwahl.pm-bs-aktiv, .pm-bs-farbe.pm-bs-aktiv { outline: 3px solid var(--pm-accent); outline-offset: 1px; }
+.pm-bs-farbwahl { width: 36px; height: 28px; padding: 0 2px; border: 1px solid var(--pm-line); border-radius: 6px; background: var(--pm-surface); cursor: pointer; }
+.pm-bs-aktionen { margin-top: 6px; }
+.pm-bs-auswahl { display: grid; gap: 4px 16px; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); margin: 10px 0 12px; }
+@media (max-width: 1100px) {
+    .pm-bs { grid-template-columns: minmax(0, 1fr); }
+    .pm-bs-seite { position: static; }
+}

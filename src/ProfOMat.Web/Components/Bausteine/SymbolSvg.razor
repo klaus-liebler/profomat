@@ -1,0 +1,64 @@
+@using ProfOMat.Domain.Beschriftung
+@* Symbol aus Symbolzeichnung (Raster 0…10). Eigenständig (Eigenstaendig=true) als kleines Icon, sonst als Gruppe in einem Streifen-SVG. *@
+
+@if (Eigenstaendig)
+{
+    <svg class="pm-bs-symbol" viewBox="0 0 10 10" aria-hidden="true">@Zeichnung(0, 0, 10)</svg>
+}
+else
+{
+    @Zeichnung(X, Y, Groesse)
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public Symbol Symbol { get; set; }
+
+    [Parameter]
+    public double X { get; set; }
+
+    [Parameter]
+    public double Y { get; set; }
+
+    [Parameter]
+    public double Groesse { get; set; } = 10;
+
+    [Parameter]
+    public string Farbe { get; set; } = "currentColor";
+
+    [Parameter]
+    public bool Eigenstaendig { get; set; }
+
+    private static string F(double d) => d.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture);
+
+    private static string Punkte(double[] p) => string.Join(' ', Enumerable.Range(0, p.Length / 2).Select(i => $"{F(p[2 * i])},{F(p[(2 * i) + 1])}"));
+
+    private RenderFragment Zeichnung(double x, double y, double groesse) => __builder =>
+    {
+        <g transform="translate(@F(x) @F(y)) scale(@F(groesse / 10))" stroke="@Farbe" stroke-width="@F(Symbolzeichnung.Strichstaerke)" fill="none"
+           stroke-linecap="round" stroke-linejoin="round">
+            @foreach (var s in Symbolzeichnung.Von(Symbol))
+            {
+                @switch (s)
+                {
+                    case Linienzug l:
+                        <polyline points="@Punkte(l.Punkte)" />
+                        break;
+                    case Vieleck v:
+                        <polygon points="@Punkte(v.Punkte)" fill="@(v.Gefuellt ? Farbe : "none")" />
+                        break;
+                    case Kreis k:
+                        <circle cx="@F(k.X)" cy="@F(k.Y)" r="@F(k.R)" fill="@(k.Gefuellt ? Farbe : "none")" stroke="@(k.Gefuellt ? "none" : Farbe)" />
+                        break;
+                    case Rechteck r:
+                        <rect x="@F(r.X)" y="@F(r.Y)" width="@F(r.B)" height="@F(r.H)" />
+                        break;
+                    case Zeichen z:
+                        <g><text x="@F(z.X)" y="@F(z.Y + (z.Hoehe * 0.5))" font-size="@F(z.Hoehe / 0.72)" font-weight="bold" text-anchor="middle"
+                              fill="@Farbe" stroke="none" font-family="Liberation Sans, Arial, Helvetica, sans-serif">@z.Text</text></g>
+                        break;
+                }
+            }
+        </g>
+    };
+}

@@ -1,0 +1,128 @@
+@page "/beschriftung"
+@attribute [Authorize]
+@using ProfOMat.Application.Beschriftung
+@using ProfOMat.Domain.Beschriftung
+@inject Vorgang Vorgang
+@inject NavigationManager Navigation
+
+<PageTitle>Verteiler beschriften · ProfOMat</PageTitle>
+
+<div class="pm-head">
+    <div>
+        <h1>Verteiler beschriften</h1>
+        <p>Schaltschrank nachbauen (Felder, Reihen, Teilungseinheiten), Leitungsschutzschalter, FI, RCBO, Zähler, Schütze und Bausteine einsetzen,
+            mit Text, Symbol und Farbe beschriften – und die Beschriftungsstreifen als DIN-A4-PDF mit Schnittmarken drucken. Nur Sie sehen Ihre Schränke.</p>
+    </div>
+</div>
+
+@if (fehler is not null)
+{
+    <div class="pm-alert pm-crit" role="alert">@fehler</div>
+}
+
+<section class="pm-card">
+    <h2>Neuer Schaltschrank</h2>
+    <div class="pm-fields">
+        <div class="pm-field pm-field-weit">
+            <label class="pm-lbl" for="bezeichnung">Bezeichnung</label>
+            <input id="bezeichnung" class="pm-input" @bind="bezeichnung" @bind:event="oninput" @onkeydown="TasteAsync"
+                   maxlength="@Schaltschrank.BezeichnungMaxLaenge" autocomplete="off" placeholder="z. B. Hauptverteiler Keller" />
+            <span class="pm-hilfe">Beginnt mit einem Feld zu 4 Reihen; Felder, Reihen und Maße sind später änderbar.</span>
+        </div>
+        <div class="pm-field">
+            <label class="pm-lbl" for="te">TE je Reihe</label>
+            <input id="te" class="pm-input" type="number" min="1" max="48" @bind="te" />
+        </div>
+        <div class="pm-field">
+            <label class="pm-lbl" for="temm">Breite einer TE (mm)</label>
+            <input id="temm" class="pm-input" inputmode="decimal" @bind="teMm" />
+            <span class="pm-hilfe">Üblich 17,5 oder 18 mm – nachmessen: Breite von 12 TE ÷ 12.</span>
+        </div>
+        <div class="pm-field">
+            <label class="pm-lbl" for="hmm">Höhe des Beschriftungsstreifens (mm)</label>
+            <input id="hmm" class="pm-input" inputmode="decimal" @bind="hoeheMm" />
+        </div>
+    </div>
+    <div>
+        <BegruendeterButton Text="Schaltschrank anlegen" Haupt="true" Click="AnlegenAsync" Beschaeftigt="@beschaeftigt"
+                            Freigabe="@AnlegenFreigabe()" />
+    </div>
+</section>
+
+<section class="pm-card">
+    <h2>Meine Schaltschränke</h2>
+    @if (liste.Count == 0)
+    {
+        <p class="pm-muted">Noch keine.</p>
+    }
+    else
+    {
+        <div class="pm-tbl">
+            <table>
+                <thead><tr><th>Schaltschrank</th><th>Felder</th><th>Reihen</th><th>Geräte</th><th>Teilung</th></tr></thead>
+                <tbody>
+                    @foreach (var s in liste)
+                    {
+                        <tr>
+                            <td><a href="beschriftung/@s.Id">@s.Bezeichnung</a></td>
+                            <td>@s.Felder.Count</td>
+                            <td>@s.Felder.Sum(f => f.Reihen)</td>
+                            <td>@s.AlleGeraete.Count()</td>
+                            <td>@s.TeProReihe TE × @s.TeBreiteMm.ToString("0.#", System.Globalization.CultureInfo.GetCultureInfo("de-DE")) mm</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</section>
+
+@code {
+    private IReadOnlyList<Schaltschrank> liste = [];
+    private string? bezeichnung, fehler;
+    private string? teMm = "18", hoeheMm = "10";
+    private int te = 12;
+    private bool beschaeftigt;
+
+    private Freigabe AnlegenFreigabe() => string.IsNullOrWhiteSpace(bezeichnung) ? Freigabe.Nein("Bitte zuerst eine Bezeichnung eingeben.")
+        : Zahl(teMm) is null || Zahl(hoeheMm) is null ? Freigabe.Nein("TE-Breite und Streifenhöhe bitte als Zahl in mm angeben (z. B. 17,5).")
+        : Freigabe.Ja;
+
+    private static decimal? Zahl(string? s) => decimal.TryParse(s?.Trim().Replace(',', '.'), System.Globalization.NumberStyles.AllowDecimalPoint,
+        System.Globalization.CultureInfo.InvariantCulture, out var d) ? d : null;
+
+    protected override async Task OnInitializedAsync()
+        => liste = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<BeschriftungDienst>().ListeAsync());
+
+    private async Task TasteAsync(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && AnlegenFreigabe().Erlaubt)
+        {
+            await AnlegenAsync();
+        }
+    }
+
+    private async Task AnlegenAsync()
+    {
+        if (beschaeftigt || Zahl(teMm) is not { } breite || Zahl(hoeheMm) is not { } hoehe)
+        {
+            return;
+        }
+
+        fehler = null;
+        beschaeftigt = true;
+        try
+        {
+            var s = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<BeschriftungDienst>().AnlegenAsync(bezeichnung ?? "", te, breite, hoehe));
+            Navigation.NavigateTo($"beschriftung/{s.Id}");
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+        }
+        finally
+        {
+            beschaeftigt = false;
+        }
+    }
+}

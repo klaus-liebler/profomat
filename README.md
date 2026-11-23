@@ -2,7 +2,7 @@
 
 Webanwendung für Professorinnen und Professoren der Hochschule Osnabrück: Prüfungsabläufe digital, mit Unterschrift, ohne Papier.
 Funktionen: **Anmeldung mündlicher Drittprüfungen** (ATPO § 18 Abs. 1 Satz 3), **Klausuren** (Prüfungsliste importieren, Räume und Sitzplätze, Serienbrief-Daten, Punkte, Noten, Veröffentlichung mit Statistik) und
-**Mündliche Prüfung live** (Fragen, Punkte, Bemerkungen und Zurückstellungen per Tastatur protokollieren, Note läuft mit; Protokoll-PDF mit Erst-/Zweitprüfung, festgelegter Note und Unterschriftsfeldern). Aufbau und Leitlinien folgen
+**Mündliche Prüfung live** (Fragen, Punkte, Bemerkungen und Zurückstellungen per Tastatur protokollieren, Note läuft mit; Protokoll-PDF mit Erst-/Zweitprüfung, festgelegter Note und Unterschriftsfeldern). Dazu als persönliche Hilfe **Verteiler beschriften** (Schaltschrank nachbauen, Geräte beschriften, Streifen-PDF mit Schnittmarken). Aufbau und Leitlinien folgen
 **VibeVHS** (`C:\repos\vibevhs`).
 
 | Dokument | Inhalt |
@@ -35,6 +35,7 @@ Ablauf zum Ausprobieren: *Antrag stellen* (ohne Anmeldung, Mail z. B. `…@stud.
 bestätigen → als Mustermann Termin festlegen und unterschreiben → als Beispiel bestellen → PDF.
 Klausuren: als Mustermann unter *Klausuren* die Datei `tools/Testdaten/pruefungsliste-beispiel.csv` (57 erfundene Personen) hochladen. Der Raum SI 0012 hat einen Beispielgrundriss (*Räume → Grundriss*).
 Mündliche Prüfung live: als Klaus Liebler (oder Philip Niemeyer, Erika Mustermann) unter *Live-Protokoll* eine Bezeichnung eingeben, Enter, dann z. B. `7⏎5⏎4⏎ 8⏎⏎z⏎ 8⏎4⏎` tippen.
+Verteiler beschriften: unter *Persönlich → Verteiler beschriften* einen Schrank anlegen, freien Platz (+) anklicken, Gerät wählen, rechts beschriften, unten *PDF erstellen*.
 Der Katalog (Mock) enthält die Maschinenbau-Studiengänge der Hochschule (Osnabrück und Lingen); Prüfungsordnungen und Prüfungen darin sind erfunden.
 
 Einen Schlüssel zum Testen erzeugt `openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -aes-256-cbc -out test.pem`.
@@ -49,6 +50,7 @@ node tests\Signatur\signatur-test.mjs                        # Schlüsselformate
 node tests\Browser\ablauf.mjs http://localhost:5310 <Ordner>  # Drittprüfung im Headless-Edge, Instanz muss laufen
 node tests\Browser\klausur.mjs http://localhost:5310 <Ordner> # Klausurablauf (frische Datenbank)
 node tests\Browser\muendlich.mjs http://localhost:5310 <Ordner> # Mündliche Prüfung live: Tastatur, Bemerkung, Protokoll-PDF, 390 px
+node tests\Browser\beschriftung.mjs http://localhost:5310 <Ordner> # Verteiler beschriften: Klick, Ziehen, Pfeiltasten, PDF, 390 px
 ```
 
 ## Betrieb (Kurzfassung)

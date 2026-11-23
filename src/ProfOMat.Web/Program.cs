@@ -197,6 +197,27 @@ app.MapGet("/muendlich/{id:guid}/protokoll.pdf", async (Guid id, ProfOMat.Applic
     }
 }).RequireAuthorization();
 
+// Beschriftungsstreifen (nur wer den Schrank angelegt hat; prüft der Dienst). r=<FeldId ohne Bindestriche>-<Reihe>,…
+app.MapGet("/beschriftung/{id:guid}/streifen.pdf", async (Guid id, string? r, ProfOMat.Application.Beschriftung.BeschriftungDienst dienst, HttpContext http) =>
+{
+    var auswahl = (r ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries)
+        .Select(t => t.Split('-') is [var feld, var reihe] && Guid.TryParseExact(feld, "N", out var f) && int.TryParse(reihe, out var n)
+            ? new ProfOMat.Application.Beschriftung.ReiheWahl(f, n)
+            : null)
+        .OfType<ProfOMat.Application.Beschriftung.ReiheWahl>().ToHashSet();
+    try
+    {
+        var (inhalt, name) = await dienst.PdfAsync(id, auswahl);
+        http.Response.Headers.CacheControl = "no-store";
+        http.Response.Headers.ContentDisposition = new System.Net.Mime.ContentDisposition { Inline = true, FileName = name }.ToString();
+        return Results.Bytes(inhalt, "application/pdf");
+    }
+    catch (FachlicherFehler ex)
+    {
+        return Results.Text(ex.Message, "text/plain; charset=utf-8", statusCode: StatusCodes.Status409Conflict);
+    }
+}).RequireAuthorization();
+
 // Klausur-Ausgaben (Rechte prüft der Dienst)
 app.MapGet("/klausuren/{id:guid}/{datei}", async (Guid id, string datei, ProfOMat.Application.Klausuren.KlausurDienst dienst, HttpContext http) =>
 {

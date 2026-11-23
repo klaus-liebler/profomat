@@ -1,0 +1,40 @@
+@using ProfOMat.Application.Beschriftung
+@using ProfOMat.Domain.Beschriftung
+@* Zeichnet einen gesetzten Streifen bzw. ein Etikett (mm-Koordinaten aus dem Streifenlayout) als SVG – dieselben Elemente wie im PDF. *@
+
+<svg class="@Klasse" viewBox="0 0 @F(Streifen.Breite) @F(Streifen.Hoehe)" preserveAspectRatio="xMidYMid meet" role="img" aria-label="@Beschreibung"
+     font-family="Liberation Sans, Arial, Helvetica, sans-serif">
+    <rect x="0" y="0" width="@F(Streifen.Breite)" height="@F(Streifen.Hoehe)" fill="#FFFFFF" />
+    @foreach (var e in Streifen.Elemente)
+    {
+        @switch (e)
+        {
+            case Flaeche f:
+                <rect x="@F(f.X)" y="@F(f.Y)" width="@F(f.B)" height="@F(f.H)" fill="@f.Farbe" />
+                break;
+            case Strecke l:
+                <line x1="@F(l.X1)" y1="@F(l.Y1)" x2="@F(l.X2)" y2="@F(l.Y2)" stroke="@l.Farbe" stroke-width="@F(l.Staerke)" />
+                break;
+            case Schrift t:
+                <g><text x="@F(t.X)" y="@F(t.Y)" font-size="@F(t.GroessePt * Streifenlayout.PtZuMm)" font-weight="@(t.Fett ? "bold" : "normal")"
+                      fill="@t.Farbe" text-anchor="@(t.Mittig ? "middle" : "start")">@t.Text</text></g>
+                break;
+            case Bild b:
+                <SymbolSvg Symbol="b.Symbol" X="b.X" Y="b.Y" Groesse="b.Groesse" Farbe="@b.Farbe" />
+                break;
+        }
+    }
+</svg>
+
+@code {
+    [Parameter, EditorRequired]
+    public Streifen Streifen { get; set; } = default!;
+
+    [Parameter]
+    public string? Klasse { get; set; }
+
+    [Parameter]
+    public string? Beschreibung { get; set; }
+
+    private static string F(double d) => d.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+}

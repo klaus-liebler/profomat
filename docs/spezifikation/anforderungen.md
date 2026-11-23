@@ -72,3 +72,16 @@ Aufbau, Leitlinien und Bausteine wie VibeVHS/FraktionPerfekt. FA-/NFA-Nummern we
 | FA-210 | Tischnummern automatisch nach wählbarem Muster: Startecke (oben/unten, links/rechts), reihen- oder spaltenweise, wahlweise Schlangenlinie. | umgesetzt |
 | FA-211 | Verteilungsoptimiert: Ist ein Raum nicht voll, werden die belegten Plätze gleichmäßig über die Nummernfolge gestreut (größtmögliche Lücken). Der Serienbrief ist zum Austeilen sortiert: Raum für Raum, darin nach Tischnummer, mit den Spalten Platz, Reihe und PlatzInReihe. | umgesetzt |
 | FA-212 | Sitzplan je Raum in der Klausur (belegte und freie Tische, Klausur-ID und Name beim Darüberfahren). | umgesetzt |
+
+## Persönliche Hilfe – Verteiler beschriften
+
+Private Hilfe für jedes Konto (kein Prüfungsbezug): Beschriftungsstreifen für Stromkreisverteiler bzw. Schaltschränke.
+
+| Nr. | Anforderung | Stand |
+|---|---|---|
+| FA-500 | Jede angemeldete Person legt eigene Schaltschränke an; einen Schrank sieht, ändert und druckt nur, wer ihn angelegt hat. | umgesetzt |
+| FA-501 | Schrank nachbauen: Felder nebeneinander (bis 12, je mit Bezeichnung), je Feld 1–12 Reihen; alle Reihen mit gleich vielen Teilungseinheiten (Standard 12 TE à 18 mm, Streifenhöhe 10 mm; TE je Reihe, TE-Breite und Streifenhöhe schon beim Anlegen und jederzeit oben im Editor einstellbar: 1–48 TE, 9–36 mm, 5–40 mm, auch mit Nachkommastelle wie 17,5 mm). Änderungen, durch die Geräte herausfielen, werden mit Begründung abgelehnt. | umgesetzt |
+| FA-502 | Geräte einsetzen: Leitungsschutzschalter (LS), Fehlerstromschutzschalter (FI), FI/LS (RCBO), Zähler, Automationsstation, Schaltschütz, digitale Ausgangs- und Eingangsbausteine, Sonstiges – mit üblicher Breite und Farbe je Art. Das Betriebsmittelkennzeichen wird nicht vergeben, sondern aus dem Stromlaufplan eingetragen (nach dem Einsetzen steht der Cursor im Kennzeichenfeld). Einsetzen per Klick (freien Platz wählen, dann Gerät) oder durch Ziehen; Geräte dürfen sich nicht überlappen. | umgesetzt |
+| FA-503 | Beschriften: Art, Breite (TE), Kennzeichen, Text (automatisch umbrochen und verkleinert, „\|“ erzwingt einen Umbruch), Zusatz (kleine Zeile), Symbol (22 einfache Vektorsymbole) sowie Hintergrund- und Schriftfarbe (Vorgaben oder frei). Die Vorschau zeigt das Etikett in Originalproportion; Editor und PDF nutzen dasselbe Layout. | umgesetzt |
+| FA-504 | Bearbeiten: verschieben per Ziehen (auch in ein anderes Feld) oder mit den Pfeiltasten, „Kopie daneben“, entfernen (Entf). | umgesetzt |
+| FA-505 | Druck: DIN A4 quer, ein Streifen je gewählter Reihe (Vorauswahl: Reihen mit Geräten), Schnittmarken an allen Ecken außerhalb des Streifens, Trennlinien an den Gerätegrenzen, Beschriftung „Schrank · Feld · Reihe“, 100-mm-Kontrollmaß für den Druck in Originalgröße. Reihen breiter als 265 mm werden mit Begründung abgelehnt. | umgesetzt |

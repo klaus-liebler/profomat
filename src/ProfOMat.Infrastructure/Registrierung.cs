@@ -28,6 +28,8 @@ public static class Registrierung
         dienste.AddSingleton<ISystemsiegel>(new Systemsiegel(Path.Combine(inhaltsordner, konfiguration["Speicher:Schluessel"] ?? "data/schluessel")));
         dienste.AddSingleton<IAntragPdf, AntragPdf>();
         dienste.AddSingleton<ProfOMat.Application.Muendlich.IMuendlichProtokollPdf, MuendlichProtokollPdf>();
+        dienste.AddSingleton<ProfOMat.Application.Beschriftung.ITextmass, Textmass>();
+        dienste.AddSingleton<ProfOMat.Application.Beschriftung.IStreifenPdf, StreifenPdf>();
         dienste.AddSingleton<ProfOMat.Application.Klausuren.IKlausurDokumente, KlausurDokumente>();
         dienste.Configure<SmtpOptionen>(konfiguration.GetSection(SmtpOptionen.Abschnitt));
         dienste.AddSingleton<IMailZustellung, SmtpZustellung>();

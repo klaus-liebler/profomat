@@ -7,6 +7,7 @@
 | 1b | Mündliche Prüfung live: Fragen, Punkte, Bemerkungen und Zurückstellungen per Tastatur protokollieren, laufende Note nach Standardschlüssel, Protokoll-PDF mit Erst-/Zweitprüfung und festgelegter Note | fertig (23.11.2026) |
 | 2 | Klausuren: CSV-Import, Klausur-ID, Räume und Sitzplätze, Serienbrief-Datenquelle, Aufgaben/Punkte/Notenschlüssel, Veröffentlichung mit Statistik, Notenexport | fertig (21.11.2026) |
 | 2b | Grundriss-Editor, Tischnummerierung nach Muster, gestreute Platzvergabe, Serienbrief in Austeilreihenfolge, Sitzplan | fertig (21.11.2026) |
+| 2c | Persönliche Hilfe: Verteiler beschriften (Schrank nachbauen, Geräte einsetzen und beschriften, Streifen-PDF mit Schnittmarken) | fertig (23.11.2026) |
 | 2a | Klausuren-Feinschliff: QR-Code auf dem Deckblatt und Scan beim Punkte-Eintragen, Mitarbeitende für die Korrektur freigeben, Klausur der Katalogprüfung zuordnen, Sitzplan als PDF zum Aushängen | offen |
 | 3 | Anmeldung über das Hochschulsystem (SAML/Shibboleth), Vorausfüllen für Studierende | nach Klärung mit dem IT-Service |
 | 4 | Echte Katalogquelle (Webservice oder Exportdatei), PAdES-Siegel des Abschluss-PDFs, X.509-Zertifikate für Schlüssel | offen |

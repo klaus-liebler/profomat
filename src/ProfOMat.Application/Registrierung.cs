@@ -21,6 +21,8 @@ public static class Registrierung
         dienste.AddScoped<DrittpruefungDienst>();
         dienste.AddScoped<Klausuren.KlausurDienst>();
         dienste.AddScoped<Muendlich.MuendlichDienst>();
+        dienste.AddSingleton<Beschriftung.Streifenlayout>();
+        dienste.AddScoped<Beschriftung.BeschriftungDienst>();
         return dienste;
     }
 }

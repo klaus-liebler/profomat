@@ -1,0 +1,678 @@
+@page "/beschriftung/{Id:guid}"
+@attribute [Authorize]
+@using ProfOMat.Application.Beschriftung
+@using ProfOMat.Domain.Beschriftung
+@implements IAsyncDisposable
+@inject Vorgang Vorgang
+@inject Streifenlayout Layout
+@inject IJSRuntime JS
+@inject NavigationManager Navigation
+
+<PageTitle>@(schrank?.Bezeichnung ?? "Schaltschrank") · Verteiler beschriften · ProfOMat</PageTitle>
+
+<a class="pm-zurueck" href="beschriftung">← Zu den Schaltschränken</a>
+
+@if (ladefehler is not null)
+{
+    <section class="pm-card" role="alert"><h1>Schaltschrank nicht verfügbar</h1><p>@ladefehler</p></section>
+}
+else if (schrank is null)
+{
+    <p class="pm-muted">Wird geladen …</p>
+}
+else
+{
+    var s = schrank;
+    var gewaehlt = Gewaehlt;
+    <div class="pm-head">
+        <div>
+            <h1>@s.Bezeichnung</h1>
+            <p>@s.Felder.Count @(s.Felder.Count == 1 ? "Feld" : "Felder") · Reihen à @s.TeProReihe TE × @Mm(s.TeBreiteMm) mm = @Mm(s.ReiheBreiteMm) mm · Streifenhöhe @Mm(s.HoeheMm) mm</p>
+        </div>
+    </div>
+
+    <section class="pm-card pm-bs-masse" id="masse">
+        <h2>Maße</h2>
+        <p class="pm-muted pm-small">Teilung und Streifenhöhe Ihres Verteilers – am besten nachmessen. Editor und PDF rechnen damit.</p>
+        <div class="pm-fields">
+            <div class="pm-field pm-field-weit">
+                <label class="pm-lbl" for="bs-bez">Bezeichnung</label>
+                <input id="bs-bez" class="pm-input" @bind="einstellung.Bezeichnung" maxlength="@Schaltschrank.BezeichnungMaxLaenge" />
+            </div>
+            <div class="pm-field">
+                <label class="pm-lbl" for="bs-te">TE je Reihe</label>
+                <input id="bs-te" class="pm-input" type="number" min="1" max="48" @bind="einstellung.Te" />
+            </div>
+            <div class="pm-field">
+                <label class="pm-lbl" for="bs-temm">Breite einer TE (mm)</label>
+                <input id="bs-temm" class="pm-input" inputmode="decimal" @bind="einstellung.TeMm" />
+                <span class="pm-hilfe">Üblich 17,5 oder 18 mm – am besten nachmessen: Breite von 12 TE ÷ 12.</span>
+            </div>
+            <div class="pm-field">
+                <label class="pm-lbl" for="bs-hmm">Streifenhöhe (mm)</label>
+                <input id="bs-hmm" class="pm-input" inputmode="decimal" @bind="einstellung.HoeheMm" />
+            </div>
+        </div>
+        <BegruendeterButton Text="Maße übernehmen" Click="EinstellenAsync" Freigabe="EinstellungFreigabe()" />
+    </section>
+
+    <div class="pm-bs" @ref="wurzel">
+        <section class="pm-card pm-bs-schrank">
+            <div class="pm-bs-palette" role="toolbar" aria-label="Geräte">
+                @foreach (var art in Geraetearten.Alle)
+                {
+                    <button type="button" class="pm-bs-teil" draggable="true" title="@($"{art.Name}, {art.Breite} TE – auf einen freien Platz ziehen oder Platz wählen und klicken")"
+                            @ondragstart="() => ziehe = (art.Typ, null)" @ondragend="() => ziehe = null" @onclick="() => EinsetzenAsync(art.Typ)">
+                        <span class="pm-bs-teil-farbe" style="background:@art.Hintergrund"></span>@art.Kurz <span class="pm-muted">@art.Breite TE</span>
+                    </button>
+                }
+            </div>
+            <p class="pm-small pm-muted pm-bs-hilfe">
+                @if (platz is { } p)
+                {
+                    <span>Gewählt: <b>@FeldName(p.FeldId), Reihe @p.Reihe, Platz @(p.Start + 1)</b> (@s.FreiAb(p.FeldId, p.Reihe, p.Start) TE frei) – jetzt oben ein Gerät anklicken.</span>
+                }
+                else
+                {
+                    <span>Freien Platz (+) anklicken und dann ein Gerät wählen – oder ein Gerät auf einen Platz ziehen. Gerät anklicken zum Beschriften;
+                        <kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> <kbd>↓</kbd> verschieben, <kbd>Entf</kbd> entfernt.</span>
+                }
+            </p>
+
+            @if (fehler is not null)
+            {
+                <div class="pm-alert pm-crit" role="alert">@fehler</div>
+            }
+
+            <div class="pm-bs-felder" tabindex="-1" @onkeydown="TasteAsync">
+                @foreach (var feld in s.FelderSortiert)
+                {
+                    var f = feld;
+                    <div class="pm-bs-feld">
+                        <div class="pm-bs-feldkopf">
+                            <b>@FeldName(f.Id)</b>
+                            <input class="pm-input pm-bs-feldname" value="@f.Bezeichnung" placeholder="Bezeichnung" maxlength="@Feld.BezeichnungMaxLaenge" aria-label="@($"Bezeichnung {FeldName(f.Id)}")"
+                                   @onchange="e => FeldAendernAsync(f, e.Value as string, f.Reihen)" />
+                            <span class="pm-bs-reihenzahl">
+                                <button type="button" class="pm-btn pm-btn-klein" title="Reihe unten entfernen" aria-label="Reihe entfernen" @onclick="() => FeldAendernAsync(f, f.Bezeichnung, f.Reihen - 1)">−</button>
+                                @f.Reihen Reihen
+                                <button type="button" class="pm-btn pm-btn-klein" title="Reihe unten anfügen" aria-label="Reihe anfügen" @onclick="() => FeldAendernAsync(f, f.Bezeichnung, f.Reihen + 1)">+</button>
+                            </span>
+                            @if (s.Felder.Count > 1)
+                            {
+                                <button type="button" class="pm-linkbutton" @onclick="() => FeldEntfernenAsync(f)">@(feldLoeschen == f.Id ? $"Wirklich entfernen ({f.Geraete.Count} Geräte)?" : "Feld entfernen")</button>
+                            }
+                        </div>
+                        @for (var r = 1; r <= f.Reihen; r++)
+                        {
+                            var reihe = r;
+                            var belegt = f.InReihe(reihe).ToDictionary(g => g.Start);
+                            <div class="pm-bs-reihe">
+                                <span class="pm-bs-rnr" aria-hidden="true">@reihe</span>
+                                <div class="pm-bs-te" style="grid-template-columns: repeat(@s.TeProReihe, minmax(0, 1fr)); aspect-ratio: @F((double)s.ReiheBreiteMm) / @F((double)s.HoeheMm);">
+                                    @for (var t = 0; t < s.TeProReihe; t++)
+                                    {
+                                        var te = t;
+                                        if (belegt.TryGetValue(te, out var g))
+                                        {
+                                            var geraet = g;
+                                            <button type="button" class="@($"pm-bs-geraet{(geraet.Id == geraetId ? " pm-bs-aktiv" : "")}")" draggable="true"
+                                                    style="grid-column: @(te + 1) / span @geraet.Breite;" data-id="@geraet.Id"
+                                                    aria-label="@Beschreibung(geraet)" aria-pressed="@(geraet.Id == geraetId ? "true" : "false")"
+                                                    @onclick="() => Waehlen(geraet)" @ondragstart="() => ziehe = (null, geraet.Id)" @ondragend="() => ziehe = null">
+                                                <StreifenSvg Streifen="Layout.Einzeln(s, geraet)" />
+                                            </button>
+                                            t += geraet.Breite - 1;
+                                        }
+                                        else
+                                        {
+                                            var istPlatz = platz is { } pl && pl.FeldId == f.Id && pl.Reihe == reihe && pl.Start == te;
+                                            <button type="button" class="@($"pm-bs-frei{(istPlatz ? " pm-bs-aktiv" : "")}")" style="grid-column: @(te + 1);"
+                                                    aria-label="@($"Frei: {FeldName(f.Id)}, Reihe {reihe}, Platz {te + 1}")" data-platz="@($"{reihe}-{te + 1}")"
+                                                    @onclick="() => PlatzWaehlen(f.Id, reihe, te)"
+                                                    @ondragover:preventDefault="true" @ondrop="() => AblegenAsync(f.Id, reihe, te)">+</button>
+                                        }
+                                    }
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+            <div class="pm-row">
+                <button type="button" class="pm-btn" @onclick="FeldHinzufuegenAsync">Feld hinzufügen</button>
+            </div>
+        </section>
+
+        <aside class="pm-card pm-bs-seite" aria-label="Beschriftung des gewählten Geräts">
+            @if (gewaehlt is null)
+            {
+                <h2>Beschriftung</h2>
+                <p class="pm-muted">Ein Gerät im Schrank anklicken, um Text, Symbol und Farben festzulegen.</p>
+            }
+            else
+            {
+                <h2>@Geraetearten.Von(gewaehlt.Typ).Name @(gewaehlt.Kennzeichen)</h2>
+                <div class="pm-bs-vorschau" style="aspect-ratio: @F(gewaehlt.Breite * (double)s.TeBreiteMm) / @F((double)s.HoeheMm);">
+                    <StreifenSvg Streifen="Layout.Einzeln(s, gewaehlt)" Beschreibung="Vorschau in Originalproportion" />
+                </div>
+                <div class="pm-bs-felder2">
+                    <div class="pm-field">
+                        <label class="pm-lbl" for="bs-typ">Art</label>
+                        <select id="bs-typ" class="pm-input" value="@puffer.Typ" @onchange="e => SetzenAsync(() => puffer.Typ = Enum.Parse<Geraetetyp>((string)e.Value!))">
+                            @foreach (var art in Geraetearten.Alle)
+                            {
+                                <option value="@art.Typ">@art.Name</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="pm-field">
+                        <label class="pm-lbl" for="bs-breite">Breite (TE)</label>
+                        <input id="bs-breite" class="pm-input" type="number" min="1" max="@s.TeProReihe" value="@puffer.Breite"
+                               @onchange="e => SetzenAsync(() => puffer.Breite = int.TryParse(e.Value as string, out var b) ? b : puffer.Breite)" />
+                    </div>
+                    <div class="pm-field">
+                        <label class="pm-lbl" for="bs-kz">Kennzeichen</label>
+                        <input id="bs-kz" class="pm-input" @ref="kennzeichenFeld" value="@puffer.Kennzeichen" maxlength="@Geraet.KennzeichenMaxLaenge" autocomplete="off"
+                               placeholder="@(Geraetearten.Von(puffer.Typ).Praefix is { Length: > 0 } kb ? $"z. B. -{kb}3 (Stromlaufplan)" : "aus dem Stromlaufplan")"
+                               @onchange="e => SetzenAsync(() => puffer.Kennzeichen = e.Value as string)" />
+                    </div>
+                    <div class="pm-field pm-field-weit">
+                        <label class="pm-lbl" for="bs-text">Text</label>
+                        <input id="bs-text" class="pm-input" value="@puffer.Text" maxlength="@Geraet.TextMaxLaenge" autocomplete="off" placeholder="z. B. Küche Steckdosen"
+                               @onchange="e => SetzenAsync(() => puffer.Text = e.Value as string)" />
+                        <span class="pm-hilfe">Wird automatisch umbrochen und verkleinert; <kbd>|</kbd> erzwingt einen Zeilenumbruch.</span>
+                    </div>
+                    <div class="pm-field pm-field-weit">
+                        <label class="pm-lbl" for="bs-zusatz">Zusatz (klein)</label>
+                        <input id="bs-zusatz" class="pm-input" value="@puffer.Zusatz" maxlength="@Geraet.TextMaxLaenge" autocomplete="off" placeholder="z. B. B16 oder 40 A / 30 mA"
+                               @onchange="e => SetzenAsync(() => puffer.Zusatz = e.Value as string)" />
+                    </div>
+                </div>
+
+                <span class="pm-lbl">Symbol</span>
+                <div class="pm-bs-symbole" role="group" aria-label="Symbol">
+                    @foreach (var sym in Enum.GetValues<Symbol>())
+                    {
+                        var x = sym;
+                        <button type="button" class="@($"pm-bs-symbolwahl{(puffer.Symbol == x ? " pm-bs-aktiv" : "")}")" title="@Symbolzeichnung.Name(x)"
+                                aria-label="@Symbolzeichnung.Name(x)" aria-pressed="@(puffer.Symbol == x ? "true" : "false")" @onclick="() => SetzenAsync(() => puffer.Symbol = x)">
+                            @if (x == Symbol.Keins)
+                            {
+                                <span class="pm-small">ohne</span>
+                            }
+                            else
+                            {
+                                <SymbolSvg Symbol="x" Eigenstaendig="true" />
+                            }
+                        </button>
+                    }
+                </div>
+
+                <span class="pm-lbl">Hintergrund</span>
+                <div class="pm-bs-farben" role="group" aria-label="Hintergrundfarbe">
+                    @foreach (var (farbe, name) in Hintergruende)
+                    {
+                        <button type="button" class="@($"pm-bs-farbe{(Gleich(puffer.Hintergrund, farbe) ? " pm-bs-aktiv" : "")}")" style="background:@farbe" title="@name" aria-label="@name"
+                                @onclick="() => SetzenAsync(() => puffer.Hintergrund = farbe)"></button>
+                    }
+                    <input type="color" class="pm-bs-farbwahl" value="@puffer.Hintergrund.ToLowerInvariant()" aria-label="Eigene Hintergrundfarbe"
+                           @onchange="e => SetzenAsync(() => puffer.Hintergrund = (string)e.Value!)" />
+                </div>
+                <span class="pm-lbl">Schrift und Symbol</span>
+                <div class="pm-bs-farben" role="group" aria-label="Schriftfarbe">
+                    @foreach (var (farbe, name) in Schriftfarben)
+                    {
+                        <button type="button" class="@($"pm-bs-farbe{(Gleich(puffer.Schrift, farbe) ? " pm-bs-aktiv" : "")}")" style="background:@farbe" title="@name" aria-label="@name"
+                                @onclick="() => SetzenAsync(() => puffer.Schrift = farbe)"></button>
+                    }
+                    <input type="color" class="pm-bs-farbwahl" value="@puffer.Schrift.ToLowerInvariant()" aria-label="Eigene Schriftfarbe"
+                           @onchange="e => SetzenAsync(() => puffer.Schrift = (string)e.Value!)" />
+                </div>
+
+                <div class="pm-row pm-bs-aktionen">
+                    <button type="button" class="pm-btn" title="1 TE nach links (←)" aria-label="Nach links" @onclick="() => SchiebenAsync(-1, 0)">←</button>
+                    <button type="button" class="pm-btn" title="1 TE nach rechts (→)" aria-label="Nach rechts" @onclick="() => SchiebenAsync(1, 0)">→</button>
+                    <button type="button" class="pm-btn" @onclick="KopierenAsync">Kopie daneben</button>
+                    <button type="button" class="pm-btn pm-btn-gefahr" @onclick="EntfernenAsync">Entfernen</button>
+                </div>
+            }
+        </aside>
+    </div>
+
+    <section class="pm-card" id="pdf">
+        <h2>Beschriftungsstreifen drucken</h2>
+        <p class="pm-muted">DIN A4 quer, ein Streifen je Reihe (@Mm(s.ReiheBreiteMm) × @Mm(s.HoeheMm) mm), Schnittmarken an den Ecken, 100-mm-Kontrollmaß.
+            In Originalgröße drucken („Tatsächliche Größe“ bzw. 100 %).</p>
+        <div class="pm-bs-auswahl">
+            @foreach (var f in s.FelderSortiert)
+            {
+                @for (var r = 1; r <= f.Reihen; r++)
+                {
+                    var w = new ReiheWahl(f.Id, r);
+                    var n = f.InReihe(r).Count();
+                    <label class="pm-check">
+                        <input type="checkbox" checked="@Auswahl.Contains(w)" @onchange="e => Umschalten(w, e.Value is true)" />
+                        @FeldName(f.Id) · Reihe @r <span class="pm-muted">(@(n == 0 ? "leer" : $"{n} Geräte"))</span>
+                    </label>
+                }
+            }
+        </div>
+        @{ var druck = BeschriftungDienst.Drucken(s, Auswahl); }
+        <div class="pm-row">
+            @if (druck.Erlaubt)
+            {
+                <a class="pm-btn pm-btn-haupt" href="@PdfAdresse" target="_blank" rel="noopener">PDF erstellen (@Auswahl.Count @(Auswahl.Count == 1 ? "Streifen" : "Streifen"))</a>
+            }
+            else
+            {
+                <BegruendeterButton Text="PDF erstellen" Haupt="true" Freigabe="druck" />
+            }
+        </div>
+    </section>
+
+    @if (s.AlleGeraete.Any())
+    {
+        <NaechsteSchritte Schritte="@([
+            new NaechsterSchritt("Streifen drucken", "#pdf", "PDF mit Schnittmarken", Hauptschritt: true),
+            new NaechsterSchritt("Weiteren Schrank anlegen", "beschriftung", "Zur Übersicht"),
+        ])" />
+    }
+
+
+    <section class="pm-card">
+        <h2>Schaltschrank löschen</h2>
+        @if (!loeschenBestaetigen)
+        {
+            <button type="button" class="pm-btn" @onclick="() => loeschenBestaetigen = true">Schaltschrank löschen …</button>
+        }
+        else
+        {
+            <p>„@s.Bezeichnung“ mit @s.AlleGeraete.Count() Geräten wird endgültig gelöscht.</p>
+            <div class="pm-row">
+                <button type="button" class="pm-btn pm-btn-gefahr" @onclick="LoeschenAsync">Ja, endgültig löschen</button>
+                <button type="button" class="pm-btn" @onclick="() => loeschenBestaetigen = false">Abbrechen</button>
+            </div>
+        }
+    </section>
+}
+
+@code {
+    private static readonly System.Globalization.CultureInfo Deutsch = System.Globalization.CultureInfo.GetCultureInfo("de-DE");
+
+    private static readonly (string Farbe, string Name)[] Hintergruende =
+    [
+        ("#FFFFFF", "Weiß"), ("#FFF3B0", "Gelb"), ("#FFE4C2", "Orange"), ("#FFD6D6", "Rot"), ("#DDF5E3", "Grün"),
+        ("#DDEBFF", "Blau"), ("#E7DDFF", "Violett"), ("#D7F3F5", "Türkis"), ("#F0F0F0", "Grau"), ("#333333", "Dunkel"),
+    ];
+
+    private static readonly (string Farbe, string Name)[] Schriftfarben =
+        [("#000000", "Schwarz"), ("#FFFFFF", "Weiß"), ("#C00000", "Rot"), ("#0047AB", "Blau"), ("#1B6E20", "Grün")];
+
+    [Parameter]
+    public Guid Id { get; set; }
+
+    private Schaltschrank? schrank;
+    private string? ladefehler, fehler;
+    private Guid? geraetId, feldLoeschen;
+    private (Guid FeldId, int Reihe, int Start)? platz;
+    private (Geraetetyp? Neu, Guid? Geraet)? ziehe;
+    private HashSet<ReiheWahl>? auswahl;
+    private bool loeschenBestaetigen, eingerichtet, fokusFolgt, kennzeichenFokus;
+    private ElementReference kennzeichenFeld;
+    private readonly Puffer puffer = new();
+    private readonly Einstellung einstellung = new();
+    private ElementReference wurzel;
+    private IJSObjectReference? modul;
+
+    private sealed class Puffer
+    {
+        public Geraetetyp Typ { get; set; }
+
+        public int Breite { get; set; }
+
+        public string? Kennzeichen { get; set; }
+
+        public string? Text { get; set; }
+
+        public string? Zusatz { get; set; }
+
+        public Symbol Symbol { get; set; }
+
+        public string Hintergrund { get; set; } = "#FFFFFF";
+
+        public string Schrift { get; set; } = "#000000";
+    }
+
+    private sealed class Einstellung
+    {
+        public string? Bezeichnung { get; set; }
+
+        public int Te { get; set; }
+
+        public string? TeMm { get; set; }
+
+        public string? HoeheMm { get; set; }
+    }
+
+    private Geraet? Gewaehlt => geraetId is { } id ? schrank?.AlleGeraete.FirstOrDefault(g => g.Id == id) : null;
+
+    /// <summary>Druckauswahl: solange nichts angeklickt wurde, alle Reihen mit Geräten.</summary>
+    private HashSet<ReiheWahl> Auswahl => auswahl ?? schrank!.FelderSortiert
+        .SelectMany(f => Enumerable.Range(1, f.Reihen).Where(r => f.InReihe(r).Any()).Select(r => new ReiheWahl(f.Id, r))).ToHashSet();
+
+    private string PdfAdresse => $"beschriftung/{Id}/streifen.pdf?r={string.Join(',', Auswahl.Select(w => $"{w.FeldId:N}-{w.Reihe}"))}";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        try
+        {
+            Uebernehmen(await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<BeschriftungDienst>().LadenAsync(Id)));
+            einstellung.Bezeichnung = schrank!.Bezeichnung;
+            einstellung.Te = schrank.TeProReihe;
+            einstellung.TeMm = Mm(schrank.TeBreiteMm);
+            einstellung.HoeheMm = Mm(schrank.HoeheMm);
+        }
+        catch (FachlicherFehler ex)
+        {
+            ladefehler = ex.Message;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (kennzeichenFokus && Gewaehlt is not null)
+        {
+            kennzeichenFokus = false;
+            await kennzeichenFeld.FocusAsync();   // neues Gerät: Kennzeichen aus dem Stromlaufplan gleich eintippen
+        }
+
+        if (fokusFolgt && modul is not null && Gewaehlt is { } gewaehlt)
+        {
+            fokusFolgt = false;
+            try
+            {
+                await modul.InvokeVoidAsync("fokus", wurzel, gewaehlt.Id.ToString());
+            }
+            catch (JSException)
+            {
+            }
+        }
+
+        if (schrank is null || eingerichtet)
+        {
+            return;
+        }
+
+        try
+        {
+            modul ??= await JS.InvokeAsync<IJSObjectReference>("import", Navigation.ToAbsoluteUri("beschriftung.js").ToString());
+            await modul.InvokeVoidAsync("einrichten", wurzel);
+            eingerichtet = true;
+        }
+        catch (JSException ex)
+        {
+            fehler = $"Ziehen und Tastatur konnten nicht eingerichtet werden ({ex.Message}). Klicken funktioniert weiterhin.";
+            eingerichtet = true;
+            StateHasChanged();
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (modul is not null)
+        {
+            try
+            {
+                await modul.InvokeVoidAsync("abbauen", wurzel);
+                await modul.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+            }
+        }
+    }
+
+    private void Uebernehmen(Schaltschrank s)
+    {
+        schrank = s;
+        if (Gewaehlt is { } g)
+        {
+            (puffer.Typ, puffer.Breite, puffer.Kennzeichen, puffer.Text, puffer.Zusatz, puffer.Symbol, puffer.Hintergrund, puffer.Schrift)
+                = (g.Typ, g.Breite, g.Kennzeichen, g.Text, g.Zusatz, g.Symbol, g.Hintergrund, g.Schrift);
+        }
+        else
+        {
+            geraetId = null;
+        }
+    }
+
+    /// <summary>Führt eine Änderung aus; bei einem fachlichen Fehler bleibt der gespeicherte Stand sichtbar.</summary>
+    private async Task AusfuehrenAsync(Func<BeschriftungDienst, Task<Schaltschrank>> aenderung)
+    {
+        try
+        {
+            Uebernehmen(await Vorgang.AusfuehrenAsync(d => aenderung(d.GetRequiredService<BeschriftungDienst>())));
+            fehler = null;
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+            Uebernehmen(await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<BeschriftungDienst>().LadenAsync(Id)));
+        }
+    }
+
+    // ---------------------------------------------------------------- Einsetzen, Wählen, Ziehen
+    private void PlatzWaehlen(Guid feldId, int reihe, int start)
+    {
+        platz = (feldId, reihe, start);
+        geraetId = null;
+        fehler = null;
+    }
+
+    private void Waehlen(Geraet g)
+    {
+        geraetId = g.Id;
+        platz = null;
+        fehler = null;
+        Uebernehmen(schrank!);
+    }
+
+    private async Task EinsetzenAsync(Geraetetyp typ)
+    {
+        if (platz is not { } p)
+        {
+            fehler = "Bitte zuerst einen freien Platz (+) im Schrank anklicken – oder das Gerät dorthin ziehen.";
+            return;
+        }
+
+        await EinsetzenAsync(typ, p.FeldId, p.Reihe, p.Start);
+    }
+
+    private async Task EinsetzenAsync(Geraetetyp typ, Guid feldId, int reihe, int start)
+    {
+        Guid neu = default;
+        await AusfuehrenAsync(async d =>
+        {
+            var (s, id) = await d.GeraetEinsetzenAsync(Id, feldId, reihe, start, typ);
+            neu = id;
+            return s;
+        });
+        if (neu != default)
+        {
+            platz = null;
+            geraetId = neu;
+            kennzeichenFokus = true;
+            Uebernehmen(schrank!);
+        }
+    }
+
+    private async Task AblegenAsync(Guid feldId, int reihe, int start)
+    {
+        var z = ziehe;
+        ziehe = null;
+        if (z is { Neu: { } typ })
+        {
+            await EinsetzenAsync(typ, feldId, reihe, start);
+        }
+        else if (z is { Geraet: { } g })
+        {
+            await AusfuehrenAsync(d => d.GeraetVerschiebenAsync(Id, g, feldId, reihe, start));
+            geraetId = g;
+            Uebernehmen(schrank!);
+        }
+    }
+
+    private async Task TasteAsync(KeyboardEventArgs e)
+    {
+        if (Gewaehlt is null)
+        {
+            return;
+        }
+
+        switch (e.Key)
+        {
+            case "ArrowLeft":
+                await SchiebenAsync(-1, 0);
+                break;
+            case "ArrowRight":
+                await SchiebenAsync(1, 0);
+                break;
+            case "ArrowUp":
+                await SchiebenAsync(0, -1);
+                break;
+            case "ArrowDown":
+                await SchiebenAsync(0, 1);
+                break;
+            case "Delete":
+                await EntfernenAsync();
+                break;
+        }
+    }
+
+    private async Task SchiebenAsync(int te, int reihen)
+    {
+        if (Gewaehlt is not { } g)
+        {
+            return;
+        }
+
+        await AusfuehrenAsync(d => d.GeraetVerschiebenAsync(Id, g.Id, g.FeldId, g.Reihe + reihen, g.Start + te));
+        fokusFolgt = true;
+    }
+
+    private async Task KopierenAsync()
+    {
+        if (Gewaehlt is not { } g)
+        {
+            return;
+        }
+
+        Guid neu = default;
+        await AusfuehrenAsync(async d =>
+        {
+            var (s, id) = await d.GeraetKopierenAsync(Id, g.Id);
+            neu = id;
+            return s;
+        });
+        if (neu != default)
+        {
+            geraetId = neu;
+            Uebernehmen(schrank!);
+        }
+    }
+
+    private async Task EntfernenAsync()
+    {
+        if (Gewaehlt is not { } g)
+        {
+            return;
+        }
+
+        await AusfuehrenAsync(d => d.GeraetEntfernenAsync(Id, g.Id));
+        geraetId = null;
+    }
+
+    // ---------------------------------------------------------------- Beschriftung
+    private async Task SetzenAsync(Action aenderung)
+    {
+        if (Gewaehlt is not { } g)
+        {
+            return;
+        }
+
+        aenderung();
+        var a = new GeraetAngaben(puffer.Typ, puffer.Breite, puffer.Kennzeichen, puffer.Text, puffer.Zusatz, puffer.Symbol, puffer.Hintergrund, puffer.Schrift);
+        await AusfuehrenAsync(d => d.GeraetBeschriftenAsync(Id, g.Id, a));
+    }
+
+    // ---------------------------------------------------------------- Felder und Schrank
+    private Task FeldHinzufuegenAsync() => AusfuehrenAsync(d => d.FeldHinzufuegenAsync(Id, schrank!.FelderSortiert.Last().Reihen));
+
+    private Task FeldAendernAsync(Feld f, string? bezeichnung, int reihen) => AusfuehrenAsync(d => d.FeldAendernAsync(Id, f.Id, bezeichnung, reihen));
+
+    private async Task FeldEntfernenAsync(Feld f)
+    {
+        if (f.Geraete.Count > 0 && feldLoeschen != f.Id)
+        {
+            feldLoeschen = f.Id;
+            return;
+        }
+
+        feldLoeschen = null;
+        await AusfuehrenAsync(d => d.FeldEntfernenAsync(Id, f.Id));
+        platz = null;
+    }
+
+    private Freigabe EinstellungFreigabe() => Zahl(einstellung.TeMm) is null || Zahl(einstellung.HoeheMm) is null
+        ? Freigabe.Nein("Breite und Höhe bitte als Zahl in mm angeben (z. B. 17,5).")
+        : Freigabe.Ja;
+
+    private Task EinstellenAsync() => AusfuehrenAsync(d => d.EinstellenAsync(Id, einstellung.Bezeichnung ?? "", einstellung.Te,
+        Zahl(einstellung.TeMm)!.Value, Zahl(einstellung.HoeheMm)!.Value));
+
+    private void Umschalten(ReiheWahl w, bool an)
+    {
+        auswahl ??= Auswahl;
+        if (an)
+        {
+            auswahl.Add(w);
+        }
+        else
+        {
+            auswahl.Remove(w);
+        }
+    }
+
+    private async Task LoeschenAsync()
+    {
+        try
+        {
+            await Vorgang.AusfuehrenAsync(async d =>
+            {
+                await d.GetRequiredService<BeschriftungDienst>().LoeschenAsync(Id);
+                return true;
+            });
+            Navigation.NavigateTo("beschriftung");
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+        }
+    }
+
+    // ---------------------------------------------------------------- Darstellung
+    private string FeldName(Guid feldId) => BeschriftungDienst.FeldName(schrank!, schrank!.Felder.First(f => f.Id == feldId));
+
+    private static string Beschreibung(Geraet g)
+        => string.Join(", ", new[] { Geraetearten.Von(g.Typ).Kurz, g.Kennzeichen, g.Text, g.Zusatz, $"{g.Breite} TE" }.Where(t => !string.IsNullOrEmpty(t)));
+
+    private static bool Gleich(string a, string b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
+
+    private static string Mm(decimal d) => d.ToString("0.##", Deutsch);
+
+    private static string F(double d) => d.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+
+    private static decimal? Zahl(string? s) => decimal.TryParse(s?.Trim().Replace(',', '.'), System.Globalization.NumberStyles.AllowDecimalPoint,
+        System.Globalization.CultureInfo.InvariantCulture, out var d) ? d : null;
+}
