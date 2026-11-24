@@ -5,17 +5,25 @@ using ProfOMat.Domain.Klausuren;
 namespace ProfOMat.Application.Klausuren;
 
 /// <summary>Eingelesene Prüfungsliste (CSV-Export aus dem Hochschulsystem).</summary>
-public sealed record Pruefungsliste(string? Pruefungsnummer, string? Pruefungsname, string? Pruefer, IReadOnlyList<Listenzeile> Zeilen, IReadOnlyList<string> Hinweise);
+public sealed record Pruefungsliste(string? Pruefungsnummer, string? Pruefungsname, string? Pruefer, IReadOnlyList<Listenzeile> Zeilen, IReadOnlyList<string> Hinweise,
+    string Format = PruefungslisteLeser.FormatOsnabrueck);
 
 /// <summary>
 /// Liest die CSV-Prüfungsliste des Hochschulsystems. Spalten über die Kopfzeile (Reihenfolge egal):
 /// <c>pruefer, exam_name, pruefungsname, pruefungsnummer, row, matriculation_number1, first_name1, first_name, hochschulmail</c>.
 /// Achtung: <c>first_name1</c> ist der Nachname, <c>first_name</c> der Vorname. Deutsche Spaltennamen werden ebenfalls erkannt.
 /// Trennzeichen (Komma, Semikolon, Tab) und Kodierung (UTF-8, sonst Windows-1252) werden erkannt.
+/// <para>Zweites Format „GA-Master“ (erkannt an der Spalte <c>Kohorte</c> bzw. <c>FH Münster E-Mail Adresse</c>):
+/// <c>Kohorte;Vorname;Name;FH Münster E-Mail Adresse;Pers_email1;Pers_email2</c>. Es enthält keine Matrikelnummer; als solche dient
+/// der Teil der FH-Mailadresse vor dem @ (z. B. <c>eb123456</c>). Private Mailadressen werden nicht übernommen.</para>
 /// </summary>
 public static class PruefungslisteLeser
 {
     public const int MaxBytes = 2 * 1024 * 1024;
+
+    public const string FormatOsnabrueck = "Hochschule Osnabrück";
+
+    public const string FormatGaMaster = "GA-Master";
 
     private static readonly Dictionary<string, string[]> Spalten = new()
     {
@@ -50,6 +58,11 @@ public static class PruefungslisteLeser
         }
 
         var kopf = zeilen[0].Select(h => h.Trim().ToLowerInvariant()).ToList();
+        if (kopf.Contains("kohorte") || kopf.Any(h => h.Contains("münster", StringComparison.Ordinal)))
+        {
+            return GaMasterLesen(kopf, zeilen);
+        }
+
         int Spalte(string schluessel) => Spalten[schluessel].Select(n => kopf.IndexOf(n)).FirstOrDefault(i => i >= 0, -1);
         var (iMatrikel, iNach, iVor) = (Spalte("matrikel"), Spalte("nachname"), Spalte("vorname"));
         if (iMatrikel < 0 || iNach < 0 || iVor < 0)
@@ -90,6 +103,37 @@ public static class PruefungslisteLeser
         var erste = zeilen[1];
         return new Pruefungsliste(nummern.FirstOrDefault(), Feld(erste, iName) is { Length: > 0 } pn ? pn : null,
             Feld(erste, iPruefer) is { Length: > 0 } pr ? pr : null, ergebnis, hinweise);
+    }
+
+    private static Pruefungsliste GaMasterLesen(List<string> kopf, List<string[]> zeilen)
+    {
+        var iVor = kopf.IndexOf("vorname");
+        var iNach = new[] { "name", "nachname" }.Select(h => kopf.IndexOf(h)).FirstOrDefault(i => i >= 0, -1);
+        var iMail = kopf.FindIndex(h => h.StartsWith("fh", StringComparison.Ordinal) && h.Contains("mail", StringComparison.Ordinal));
+        if (iVor < 0 || iNach < 0 || iMail < 0)
+        {
+            throw new FachlicherFehler($"Spalten nicht erkannt (Format {FormatGaMaster}). Erwartet werden Vorname, Name und FH Münster E-Mail Adresse; gefunden: {string.Join(", ", kopf)}.");
+        }
+
+        string Feld(string[] z, int i) => i < z.Length ? z[i].Trim() : string.Empty;
+        var hinweise = new List<string>();
+        var ergebnis = new List<Listenzeile>();
+        for (var n = 1; n < zeilen.Count; n++)
+        {
+            var z = zeilen[n];
+            var mail = Feld(z, iMail);
+            var at = mail.IndexOf('@', StringComparison.Ordinal);
+            var kennung = at > 0 ? mail[..at].ToLowerInvariant() : string.Empty;
+            if (kennung.Length is < 3 or > 20 || !kennung.All(char.IsAsciiLetterOrDigit))
+            {
+                hinweise.Add($"Zeile {n + 1} übersprungen: FH-Mailadresse „{mail}“ ergibt keine gültige Kennung.");
+                continue;
+            }
+
+            ergebnis.Add(new Listenzeile(n, kennung, Feld(z, iNach), Feld(z, iVor), mail));
+        }
+
+        return new Pruefungsliste(null, null, null, ergebnis, hinweise, FormatGaMaster);
     }
 
     private static string Dekodieren(byte[] inhalt)

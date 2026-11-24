@@ -24,11 +24,11 @@
     <h2>Neue Klausur aus Prüfungsliste</h2>
     <div class="pm-fields">
         <div class="pm-field pm-field-weit">
-            <label class="pm-lbl" for="liste">Prüfungsliste (CSV-Export aus dem Hochschulsystem)</label>
+            <label class="pm-lbl" for="liste">Prüfungsliste (CSV: Hochschule Osnabrück oder GA-Master)</label>
             <InputFile id="liste" OnChange="DateiGewaehltAsync" accept=".csv,text/csv" class="pm-input" />
             @if (vorschau is not null)
             {
-                <span class="pm-hilfe">@vorschau.Zeilen.Count Teilnehmende · @(vorschau.Pruefungsname ?? "ohne Prüfungsname") · @(vorschau.Pruefungsnummer ?? "")
+                <span class="pm-hilfe">Format @vorschau.Format · @vorschau.Zeilen.Count Teilnehmende · @(vorschau.Pruefungsname ?? "ohne Prüfungsname") · @(vorschau.Pruefungsnummer ?? "")
                     @foreach (var h in vorschau.Hinweise) { <br />@h }</span>
             }
         </div>

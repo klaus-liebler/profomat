@@ -51,6 +51,30 @@ public sealed class PruefungslisteTests
         Should.Throw<FachlicherFehler>(() => PruefungslisteLeser.Lesen(Encoding.UTF8.GetBytes($"{Kopf}\nP,E,N,X,1,1234567,A,B,\nP,E,N,Y,2,7654321,C,D,\n")))
             .Message.ShouldContain("mehrere Prüfungen");
     }
+
+    [Fact]
+    public void GA_Master_Kennung_aus_der_FH_Mailadresse_wird_Matrikelnummer()
+    {
+        var text = "Kohorte;Vorname;Name;FH Münster E-Mail Adresse;Pers_email1;Pers_email2\r\n"
+            + "10;Erika;Beispiel;EB123456@fh-muenster.de;erika.beispiel@example.org;\r\n"
+            + "10;Ohne;Mail;;privat@example.org;\r\n";
+        var l = PruefungslisteLeser.Lesen(Encoding.UTF8.GetBytes(text));
+        l.Format.ShouldBe(PruefungslisteLeser.FormatGaMaster);
+        l.Pruefungsnummer.ShouldBeNull();
+        l.Zeilen.Single().ShouldBe(new Listenzeile(1, "eb123456", "Beispiel", "Erika", "EB123456@fh-muenster.de"));
+        l.Hinweise.Single().ShouldContain("Zeile 3");
+    }
+
+    [Fact]
+    public void GA_Master_in_Windows1252_wird_erkannt_Osnabrueck_bleibt_Standard()
+    {
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+        var text = "Kohorte;Vorname;Name;FH Münster E-Mail Adresse;Pers_email1;Pers_email2\r\n11;Jörg;Müller;jm123456@fh-muenster.de;;\r\n";
+        var l = PruefungslisteLeser.Lesen(Encoding.GetEncoding(1252).GetBytes(text));
+        l.Zeilen.Single().Nachname.ShouldBe("Müller");
+        l.Zeilen.Single().Matrikelnummer.ShouldBe("jm123456");
+        PruefungslisteLeser.Lesen(Liste(("1103876", "Schäfer", "Martin"))).Format.ShouldBe(PruefungslisteLeser.FormatOsnabrueck);
+    }
 }
 
 public sealed class KlausurTests
