@@ -30,4 +30,4 @@ Klaus' laufende Instanz nie beenden.
 - CSP ohne `unsafe-inline` für Skripte: kein Inline-JavaScript.
 - Datenbank: EnsureCreated + `Schemaversion` (bei Modelländerung erhöhen); vor dem Produktivbetrieb EF-Migrationen einführen.
 - Build ohne Warnungen, alle Tests grün; neue Funktionen mit Tests (Rechte, Grenzfälle) und bei Oberfläche Browserprüfung (auch 390 px).
-- Commits nur lokal, nie pushen.
+- Committen und pushen nur auf Aufforderung; vor dem Push Aktuelles von GitHub holen und mergen.
