@@ -128,8 +128,8 @@ else
                 <section class="pm-card">
                     <div class="pm-head">
                         <div class="pm-field" style="max-width:320px">
-                            <label class="pm-lbl" for="suche">Klausur-ID oder Name</label>
-                            <input id="suche" class="pm-input" @bind="suche" @bind:event="oninput" placeholder="z. B. 7KQ3X" autocomplete="off" />
+                            <label class="pm-lbl" for="suche">Matrikelnummer (Ende) oder Name</label>
+                            <input id="suche" class="pm-input" @bind="suche" @bind:event="oninput" placeholder="z. B. 4711" autocomplete="off" />
                         </div>
                         <div class="pm-row">
                             <span class="pm-small pm-muted">@k.Angemeldete.Count(t => t.Anwesend is not null) von @k.Angemeldete.Count() erfasst</span>
@@ -137,13 +137,14 @@ else
                                                 Freigabe="@(k.Angemeldete.Any(t => t.Anwesend is null) ? Freigabe.Ja : Freigabe.Nein("Alle sind erfasst."))" />
                         </div>
                     </div>
-                    <p class="pm-small pm-muted">Punkte mit Komma oder Punkt eingeben, Tab springt weiter; jede Eingabe wird sofort gespeichert. Ein Eintrag setzt „anwesend“.</p>
+                    <p class="pm-small pm-muted">Punkte mit Komma oder Punkt eingeben, Tab springt weiter; jede Eingabe wird sofort gespeichert. Ein Eintrag setzt „anwesend“.
+                        Spaltenkopf anklicken sortiert (nochmals: umgekehrt); beim Eintragen bleibt die Reihenfolge stehen.</p>
                     <div class="pm-tbl">
                         <table>
                             <thead>
-                                <tr><th>Klausur-ID</th><th>Name</th><th>Anw.</th>
-                                    @foreach (var a in k.AufgabenSortiert) { <th title="@a.Titel">@(a.Sonderpunkte ? "Sonder" : $"A{a.Nr}")<br /><span class="pm-small">max @Zahl(a.MaxPunkte)</span></th> }
-                                    <th>Summe</th><th>Note</th></tr>
+                                <tr>@Kopf("code", "Matr.-Ende")@Kopf("name", "Name")@Kopf("anw", "Anw.")
+                                    @foreach (var a in k.AufgabenSortiert) { @Kopf($"a:{a.Id}", a.Sonderpunkte ? "Sonder" : $"A{a.Nr}", $"max {Zahl(a.MaxPunkte)}", a.Titel) }
+                                    @Kopf("summe", "Summe")@Kopf("note", "Note")</tr>
                             </thead>
                             <tbody>
                                 @foreach (var t in Gefiltert(k))
@@ -207,7 +208,7 @@ else
                 </section>
             </div>
             <NaechsteSchritte Titel="Veröffentlichen und melden" Schritte="@([
-                new NaechsterSchritt("Veröffentlichung (PDF)", $"klausuren/{Id}/ergebnis.pdf", "Aushang bzw. Lernplattform: nur Klausur-IDs, keine Namen", Hauptschritt: true),
+                new NaechsterSchritt("Veröffentlichung (PDF)", $"klausuren/{Id}/ergebnis.pdf", "Aushang bzw. Lernplattform: nur die letzten vier Stellen der Matrikelnummer, keine Namen", Hauptschritt: true),
                 new NaechsterSchritt("Veröffentlichung (XLSX)", $"klausuren/{Id}/ergebnis.xlsx"),
                 new NaechsterSchritt("Notenliste für das Hochschulsystem (CSV)", $"klausuren/{Id}/noten.csv", "Matrikelnummer, Name, Note – vertraulich"),
             ])" />
@@ -219,14 +220,14 @@ else
                     <h2>Angaben</h2>
                     <div class="pm-fields">
                         <div class="pm-field"><label class="pm-lbl" for="kt">Titel</label><input id="kt" class="pm-input" @bind="titel" /></div>
-                        <div class="pm-field"><label class="pm-lbl" for="kk">Kürzel</label><input id="kk" class="pm-input" @bind="kuerzel" disabled="@(k.Teilnahmen.Count > 0)" title="steckt in den Klausur-IDs" /></div>
+                        <div class="pm-field"><label class="pm-lbl" for="kk">Kürzel</label><input id="kk" class="pm-input" @bind="kuerzel" title="für Dateinamen" /></div>
                         <div class="pm-field"><label class="pm-lbl" for="kn">Prüfungsnummer</label><input id="kn" class="pm-input" @bind="nummer" /></div>
                         <div class="pm-field"><label class="pm-lbl">Termin</label>
                             <RadzenDatePicker TValue="DateTime?" @bind-Value="termin" ShowTime="true" HourFormat="24" DateFormat="dd.MM.yyyy HH:mm" Style="width:100%" /></div>
                     </div>
                     <div><BegruendeterButton Text="Speichern" Click="AngabenSpeichernAsync" /></div>
                     <h3>Prüfungsliste aktualisieren</h3>
-                    <p class="pm-small pm-muted">Neue Liste hochladen (Format Hochschule Osnabrück oder GA-Master, wird erkannt): Nachmeldungen kommen dazu, Abgemeldete bleiben sichtbar, IDs bleiben gleich.</p>
+                    <p class="pm-small pm-muted">Neue Liste hochladen (Format Hochschule Osnabrück oder GA-Master, wird erkannt): Nachmeldungen kommen dazu, Abgemeldete bleiben sichtbar.</p>
                     <InputFile OnChange="ListeAbgleichenAsync" accept=".csv,text/csv" class="pm-input" />
                 </section>
                 <section class="pm-card">
@@ -257,7 +258,7 @@ else
             </div>
 
             <NaechsteSchritte Titel="Klausurdruck vorbereiten" Schritte="@([
-                new NaechsterSchritt("Serienbrief-Daten (CSV)", $"klausuren/{Id}/serienbrief.csv", "Datenquelle für den Word-Serienbrief: Klausur-ID, Name, Matrikelnummer, Raum, Platz …", Hauptschritt: true),
+                new NaechsterSchritt("Serienbrief-Daten (CSV)", $"klausuren/{Id}/serienbrief.csv", "Datenquelle für den Word-Serienbrief: Schlüssel (Feld KlausurID = Matrikel-Ende), Name, Matrikelnummer, Raum, Platz …", Hauptschritt: true),
                 new NaechsterSchritt("Sitzlisten je Raum (PDF)", $"klausuren/{Id}/sitzlisten.pdf", Freigabe: k.Verteilt is null ? Freigabe.Nein("Bitte zuerst Plätze verteilen.") : null),
                 new NaechsterSchritt("Aushang Raumaufteilung (PDF)", $"klausuren/{Id}/aushang.pdf", Freigabe: k.Verteilt is null ? Freigabe.Nein("Bitte zuerst Plätze verteilen.") : null),
                 new NaechsterSchritt("Aufgaben und Notenschlüssel", $"klausuren/{Id}?bereich=bewertung"),
@@ -283,7 +284,7 @@ else
                 <h2>Teilnehmende</h2>
                 <div class="pm-tbl">
                     <table>
-                        <thead><tr><th>Nr.</th><th>Klausur-ID</th><th>Name</th><th>Matrikelnr.</th><th>Mail</th><th>Raum</th><th>Platz</th></tr></thead>
+                        <thead><tr><th>Nr.</th><th>Matr.-Ende</th><th>Name</th><th>Matrikelnr.</th><th>Mail</th><th>Raum</th><th>Platz</th></tr></thead>
                         <tbody>
                             @foreach (var t in k.Teilnahmen.OrderBy(x => !x.Angemeldet).ThenBy(x => x.Zeile))
                             {
@@ -317,6 +318,9 @@ else
     private Dictionary<Guid, bool> raumAuswahl = [];
     private bool zufaellig;
     private string? ladefehler, fehler, titel, kuerzel, nummer, suche;
+    private string sortSpalte = "name";
+    private bool sortAbsteigend;
+    private Dictionary<Guid, int>? reihenfolge;
     private DateTime? termin;
     private List<AufgabeEntwurf> aufgabenEntwurf = [];
     private List<StufeEntwurf> notenEntwurf = [];
@@ -403,9 +407,53 @@ else
         return decimal.TryParse(s, NumberStyles.Number, CultureInfo.InvariantCulture, out var d) ? d : null;
     }
 
+    private RenderFragment Kopf(string spalte, string text, string? unter = null, string? titel = null) =>
+        @<th aria-sort="@(sortSpalte == spalte ? (sortAbsteigend ? "descending" : "ascending") : "none")" title="@titel">
+            <button type="button" class="pm-sortkopf" @onclick="() => Sortieren(spalte)">@text<span class="pm-sortpfeil" aria-hidden="true">@(sortSpalte != spalte ? "↕" : sortAbsteigend ? "▼" : "▲")</span>@if (unter is not null)
+                {<br /><span class="pm-small">@unter</span>}</button>
+        </th>;
+
+    private void Sortieren(string spalte)
+    {
+        (sortSpalte, sortAbsteigend) = (spalte, sortSpalte == spalte && !sortAbsteigend);
+        reihenfolge = null;
+    }
+
+    /// <summary>
+    /// Reihenfolge wird beim Sortieren festgehalten und nicht nach jeder Eingabe neu berechnet – sonst sprängen Zeilen beim Eintragen
+    /// (z. B. Sortierung nach Summe). Leere Werte stehen immer hinten.
+    /// </summary>
+    private IEnumerable<Teilnahme> Geordnet(Klausur k)
+    {
+        if (reihenfolge is null || k.Angemeldete.Any(t => !reihenfolge.ContainsKey(t.Id)))
+        {
+            reihenfolge = Ordnen(k).Select((t, i) => (t.Id, i)).ToDictionary(x => x.Id, x => x.i);
+        }
+
+        return k.Angemeldete.OrderBy(t => reihenfolge[t.Id]);
+    }
+
+    private IEnumerable<Teilnahme> Ordnen(Klausur k)
+    {
+        var texte = StringComparer.Create(Deutsch, true);
+        var basis = k.Angemeldete.OrderBy(t => t.Nachname, texte).ThenBy(t => t.Vorname, texte).ThenBy(t => t.Code, StringComparer.Ordinal).ToList();
+        IEnumerable<Teilnahme> NachZahl(Func<Teilnahme, decimal?> wert) => sortAbsteigend
+            ? basis.OrderBy(t => wert(t) is null).ThenByDescending(wert)
+            : basis.OrderBy(t => wert(t) is null).ThenBy(wert);
+        return sortSpalte switch
+        {
+            "code" => sortAbsteigend ? basis.OrderByDescending(t => t.Code, StringComparer.Ordinal) : basis.OrderBy(t => t.Code, StringComparer.Ordinal),
+            "anw" => NachZahl(t => t.Anwesend switch { true => 1, false => 0, null => null }),
+            "summe" => NachZahl(t => t.Anwesend == true ? t.Summe : null),
+            "note" => NachZahl(k.NoteVon),
+            ['a', ':', .. var id] when Guid.TryParse(id, out var aufgabe) => NachZahl(t => t.PunkteIn(aufgabe)),
+            _ => sortAbsteigend ? Enumerable.Reverse(basis) : basis,
+        };
+    }
+
     private IEnumerable<Teilnahme> Gefiltert(Klausur k)
     {
-        var alle = k.Angemeldete.OrderBy(t => t.Code, StringComparer.Ordinal);
+        var alle = Geordnet(k);
         if (string.IsNullOrWhiteSpace(suche))
         {
             return alle;

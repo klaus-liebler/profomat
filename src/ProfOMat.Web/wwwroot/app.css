@@ -96,6 +96,11 @@ p { margin: 0; }
 .pm-tbl { overflow-x: auto; }
 .pm-tbl table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
 .pm-tbl th { text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--pm-muted); font-weight: 600; padding: 8px 10px; border-bottom: 1px solid var(--pm-line); white-space: nowrap; }
+.pm-sortkopf { all: unset; cursor: pointer; display: inline-block; }
+.pm-sortkopf:hover { color: var(--pm-fg); }
+.pm-sortkopf:focus-visible { outline: 2px solid var(--pm-accent); outline-offset: 2px; border-radius: 2px; }
+.pm-sortpfeil { margin-left: 4px; opacity: 0.6; }
+th[aria-sort="none"] .pm-sortpfeil { opacity: 0.3; }
 .pm-tbl td { padding: 8px 10px; border-bottom: 1px solid var(--pm-line); vertical-align: top; }
 .pm-tbl tr.pm-hervor td { background: var(--pm-accent-weak); }
 .pm-card.pm-hervor { border-color: var(--pm-accent); box-shadow: 0 0 0 2px var(--pm-accent-weak); }

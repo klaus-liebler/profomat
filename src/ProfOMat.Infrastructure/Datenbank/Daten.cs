@@ -67,6 +67,12 @@ public static class DatenbankInitialisierung
             version = 8;
         }
 
+        if (version == 8)
+        {
+            await AufVersion9Async(db, abbruch);
+            version = 9;
+        }
+
         if (version != ProfOMatDbContext.Schemaversion)
         {
             throw new InvalidOperationException(
@@ -92,6 +98,21 @@ public static class DatenbankInitialisierung
 
         var info = await db.Set<Schemainfo>().SingleAsync(abbruch);
         info.Version = 8;
+        await db.SaveChangesAsync(abbruch);
+        await transaktion.CommitAsync(abbruch);
+    }
+
+    /// <summary>8 → 9 ohne Datenverlust: Schlüssel der Teilnahmen = letzte Stellen der Matrikelnummer statt zufälliger Klausur-ID.</summary>
+    private static async Task AufVersion9Async(ProfOMatDbContext db, CancellationToken abbruch)
+    {
+        await using var transaktion = await db.Database.BeginTransactionAsync(abbruch);
+        foreach (var k in await db.Set<ProfOMat.Domain.Klausuren.Klausur>().ToListAsync(abbruch))
+        {
+            k.SchluesselVergeben();
+        }
+
+        var info = await db.Set<Schemainfo>().SingleAsync(abbruch);
+        info.Version = 9;
         await db.SaveChangesAsync(abbruch);
         await transaktion.CommitAsync(abbruch);
     }

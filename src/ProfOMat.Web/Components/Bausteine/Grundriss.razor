@@ -1,7 +1,7 @@
 @using ProfOMat.Domain.Klausuren
 @*
     Grundriss als SVG: Raster, Wandelemente, Tische mit Nummer. Im Editor sind die Zellen anklickbar; im Sitzplan zeigt
-    <see cref="Belegung"/> je Tischnummer eine Beschriftung (z. B. Klausur-ID).
+    <see cref="Belegung"/> je Tischnummer eine Beschriftung (z. B. Schlüssel und Name).
 *@
 <svg class="pm-grundriss" viewBox="@($"-2 -2 {Spalten * Z + 4} {Zeilen * Z + 4}")" role="img" aria-label="@Beschreibung"
      style="max-width:@(Spalten * Z * Massstab)px">

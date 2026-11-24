@@ -100,14 +100,16 @@ Für die echte Quelle kommt infrage (mit dem IT-Service zu klären, welches Camp
 
 - **Import** der CSV-Prüfungsliste: Spaltenzuordnung über Kopfzeile, Abgleich je Matrikelnummer (neu, unverändert, entfallen = nicht
   mehr angemeldet, bleibt sichtbar). Achtung: In der Datei ist `first_name1` der Nachname.
-- **Klausur-ID:** zufällig, kurz, mit Prüfzeichen (Crockford-Base32), nicht aus der Matrikelnummer ableitbar. Die Veröffentlichung
-  enthält nur sie; die letzten vier Stellen der Matrikelnummer sind weder eindeutig noch ausreichend pseudonym.
+- **Schlüssel (FA-202):** die letzten vier Stellen der Matrikelnummer, bei gleichen Endziffern in der Klausur so viele Stellen wie nötig
+  (`Klausur.SchluesselVergeben`, nach jedem Abgleich neu). Entscheidung von Klaus (24.11.2026) statt der früheren zufälligen Klausur-ID:
+  vertraut aus der Excel-Vorlage, für Studierende ohne Deckblatt nachvollziehbar. Bewusst in Kauf genommen: Die Endziffern sind nur
+  schwach pseudonym (wer die Matrikelnummer kennt, erkennt die Person); deshalb enthält die Veröffentlichung keine Nicht-Anwesenden.
 - **Räume:** Stammdaten mit Platzzahl oder Grundriss (Raster in Zellen, eine Zelle ≈ ein Tisch; Elemente als Rechtecke, Tische 1 × 1).
   Die Nummerierung wird nicht gespeichert, sondern aus Muster und Tischpositionen berechnet (`Raum.Nummerieren`). Eine Reihe sind
   alle Tische derselben Rasterzeile (bzw. -spalte). Wird der Grundriss nach dem Verteilen geändert, die Plätze neu verteilen.
 - **Verteilung:** deterministisch (alphabetisch oder zufällig über Hash), Räume anteilig nach Kapazität; innerhalb des Raums
   `Raum.Streuen`: Person i bekommt den Platz an Position ⌊(i + ½) · Plätze / Personen⌋ der Nummernfolge.
 - **Word-Serienbrief:** Der ProfOMat liefert die Datenquelle (XLSX über ClosedXML bzw. CSV), die Word-Vorlage bleibt bei den Lehrenden.
-  Optional später ein fertiges Deckblatt-PDF je Klausur mit QR-Code (Klausur-ID) für das schnelle Punkte-Eintragen.
+  Optional später ein fertiges Deckblatt-PDF je Klausur mit QR-Code (Schlüssel) für das schnelle Punkte-Eintragen.
 - **Bewertung:** Aufgaben mit Höchstpunkten, Notenschlüssel als Tabelle (Untergrenzen), Berechnung im Fachmodell, Statistik wie in der
   bisherigen Excel-Vorlage; Ausgabe PDF (MigraDoc mit Balkendiagramm) und XLSX.

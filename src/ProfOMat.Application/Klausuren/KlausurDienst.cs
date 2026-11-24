@@ -228,7 +228,7 @@ public sealed class KlausurDienst(IDaten daten, IAktuellerBenutzer aktuell, IKla
         var a = await AnsichtMitProtokollAsync(id, "Serienbrief", abbruch);
         var k = a.Klausur;
         var datum = k.Termin is { } t ? ortszeit.Lokal(t).ToString("dd.MM.yyyy", Deutsch) : "";
-        var zeit = k.Termin is { } t2 ? ortszeit.Lokal(t2).ToString("HH:mm", Deutsch) : "";
+        var zeit = k.Termin is { } t2 ? ortszeit.Klausuruhrzeit(t2) : "";
         var raumfolge = a.GewaehlteRaeume.Select((r, i) => (r.Id, i)).ToDictionary(x => x.Id, x => x.i);
         var plaetze = a.GewaehlteRaeume.ToDictionary(r => r.Id, r => r.Sitzplaetze().ToDictionary(p => p.Nummer));
         var zeilen = k.Angemeldete
@@ -324,6 +324,6 @@ public sealed class KlausurDienst(IDaten daten, IAktuellerBenutzer aktuell, IKla
         var alle = (await RaeumeAsync(true, abbruch)).ToDictionary(r => r.Id);
         var gewaehlt = k.Raeume.OrderBy(r => r.Reihenfolge).Where(r => alle.ContainsKey(r.RaumId)).Select(r => alle[r.RaumId]).ToList();
         var verantwortlich = (await daten.FindenAsync<Konto>(k.VerantwortlichKontoId, abbruch))?.Anzeigename ?? "";
-        return new KlausurAnsicht(k, gewaehlt, alle, k.Termin is { } t ? ortszeit.Termin(t) : null, verantwortlich, KlausurAuswertung.Berechnen(k));
+        return new KlausurAnsicht(k, gewaehlt, alle, k.Termin is { } t ? ortszeit.Klausurtermin(t) : null, verantwortlich, KlausurAuswertung.Berechnen(k));
     }
 }

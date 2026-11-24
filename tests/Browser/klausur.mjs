@@ -69,6 +69,37 @@ try {
     }
     await seite.warteAuf(`document.querySelectorAll('tbody tr')[0].innerText.includes('95')`);
     await foto('punkte');
+
+    schritt('Sortieren: Standard Nachname, Summe, Matr.-Ende');
+    const spalte = (i) => seite.eval(`[...document.querySelectorAll('tbody tr')].map(r => r.cells[${i}].textContent.trim())`);
+    const kopf = (text) => seite.eval(`[...document.querySelectorAll('th .pm-sortkopf')].find(b => b.textContent.startsWith(${JSON.stringify(text)})).click()`);
+    const sortierung = (text) => seite.eval(`[...document.querySelectorAll('th')].find(th => th.textContent.startsWith(${JSON.stringify(text)}))?.getAttribute('aria-sort')`);
+    const istSortiert = (liste, vergleich) => liste.every((x, i) => i === 0 || vergleich(liste[i - 1], x) <= 0);
+    await seite.oeffnen(basis + klausur.replace(/^\//, '') + '?bereich=punkte');
+    const namen = await spalte(1);
+    if (!istSortiert(namen.map((n) => n.split(',')[0]), (a, b) => a.localeCompare(b, 'de', { sensitivity: 'base' }))) { throw new Error('Standard nicht nach Nachname'); }
+    if (await sortierung('Name') !== 'ascending') { throw new Error('aria-sort Name'); }
+    await kopf('Summe');
+    await kopf('Summe');
+    await seite.warteAuf(`document.querySelector('th[aria-sort=descending]')?.textContent.startsWith('Summe')`);
+    const summen = (await spalte(7)).filter((s) => s !== '').map((s) => Number(s.replace(',', '.')));
+    if (summen.length < 4 || summen[0] !== 95 || !istSortiert(summen, (a, b) => b - a)) { throw new Error(`Summe absteigend: ${summen}`); }
+    if ((await spalte(7)).slice(summen.length).some((s) => s !== '')) { throw new Error('leere Summen nicht hinten'); }
+    // Eintragen ändert die Reihenfolge nicht (Zeile 1 bekommt mehr Punkte, bleibt aber an ihrem Platz)
+    const vorher = await spalte(0);
+    await seite.eval(`(() => { const el = document.querySelectorAll('tbody tr')[1].querySelectorAll('input.pm-input')[3];
+        el.value = '25'; el.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+    await new Promise((r) => setTimeout(r, 600));
+    if ((await spalte(0)).join() !== vorher.join()) { throw new Error('Reihenfolge sprang beim Eintragen'); }
+    await kopf('Matr.-Ende');
+    await seite.warteAuf(`document.querySelector('th[aria-sort=ascending]')?.textContent.startsWith('Matr.-Ende')`);
+    if (!istSortiert(await spalte(0), (a, b) => (a < b ? -1 : a > b ? 1 : 0))) { throw new Error('Matr.-Ende'); }
+    await foto('sortiert');
+    await seite.breite(390, 844);
+    await foto('punkte-390px');
+    const quer = await seite.eval('document.documentElement.scrollWidth');
+    if (quer > 392) { throw new Error(`390 px: Seite rollt waagerecht (${quer})`); }
+    await seite.breite(1280, 1000);
     await seite.klickText('button', 'Rest als nicht erschienen');
     await seite.warteAuf(`document.body.innerText.includes('57 von 57 erfasst')`);
 

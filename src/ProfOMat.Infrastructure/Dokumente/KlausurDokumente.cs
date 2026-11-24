@@ -1,7 +1,6 @@
 using System.Globalization;
 using ClosedXML.Excel;
 using MigraDoc.DocumentObjectModel;
-using MigraDoc.DocumentObjectModel.Shapes.Charts;
 using MigraDoc.DocumentObjectModel.Tables;
 using MigraDoc.Rendering;
 using ProfOMat.Application.Klausuren;
@@ -9,10 +8,20 @@ using ProfOMat.Domain.Klausuren;
 
 namespace ProfOMat.Infrastructure.Dokumente;
 
-/// <summary>Sitzlisten, Aushang und Ergebnisveröffentlichung (PDF, XLSX). Die Veröffentlichung enthält nur Klausur-IDs.</summary>
+/// <summary>Sitzlisten, Aushang und Ergebnisveröffentlichung (PDF, XLSX). Die Veröffentlichung enthält nur Anwesende und von der Matrikelnummer nur die letzten Stellen.</summary>
 internal sealed class KlausurDokumente : IKlausurDokumente
 {
     private static readonly CultureInfo Deutsch = CultureInfo.GetCultureInfo("de-DE");
+    private static readonly Color Blau = new(0, 79, 140);
+    private static readonly Color BlauHell = new(200, 222, 240);
+    private static readonly Color Flaeche = new(238, 244, 250);
+    private static readonly Color Zebra = new(246, 248, 251);
+    private static readonly Color Linie = new(218, 224, 231);
+    private static readonly Color Grau = new(105, 112, 120);
+    private static readonly Color Rot = new(180, 35, 35);
+
+    /// <summary>Satzspiegel A4 mit 2 cm Rand.</summary>
+    private const double Breite = 17.0;
 
     static KlausurDokumente() => Schriften.Einrichten();
 
@@ -25,10 +34,10 @@ internal sealed class KlausurDokumente : IKlausurDokumente
             var s = Abschnitt(dok, a);
             Titel(s, $"Sitzliste {raum.Kuerzel}", $"{a.Klausur.Titel} · {a.TerminText ?? "Termin offen"} · {raum.Bezeichnung}");
             var personen = a.Klausur.Angemeldete.Where(t => t.RaumId == raum.Id).OrderBy(t => t.Platz).ToList();
-            var t = Tabelle(s, [1.4, 3.0, 5.6, 2.6, 4.2], "Platz", "Klausur-ID", "Name", "Matrikelnr.", "Unterschrift");
+            var t = Tabelle(s, [1.4, 7.0, 3.2, 5.2], "Platz", "Name", "Matrikelnr.", "Unterschrift");
             foreach (var p in personen)
             {
-                var r = Zeile(t, p.Platz?.ToString(Deutsch) ?? "", p.Code, p.Name, p.Matrikelnummer, "");
+                var r = Zeile(t, p.Platz?.ToString(Deutsch) ?? "", p.Name, p.Matrikelnummer, "");
                 r.Height = Unit.FromCentimeter(0.75);
                 r.VerticalAlignment = VerticalAlignment.Center;
             }
@@ -84,64 +93,186 @@ internal sealed class KlausurDokumente : IKlausurDokumente
         var w = a.Auswertung;
         var dok = Dokument($"Ergebnisse {k.Titel}");
         var s = Abschnitt(dok, a);
-        Titel(s, $"Ergebnisse der Klausur {k.Titel}", $"{a.TerminText ?? ""} · Höchstpunktzahl {Zahl(k.Hoechstpunktzahl)} · Aushang nur mit Klausur-ID");
 
-        var oben = s.AddTable();
-        oben.AddColumn(Unit.FromCentimeter(8.2));
-        oben.AddColumn(Unit.FromCentimeter(8.6));
-        var r = oben.AddRow();
-        var kz = new Table();
-        kz.Borders.Width = 0.4;
-        kz.Borders.Color = Colors.LightGray;
-        kz.AddColumn(Unit.FromCentimeter(5.4));
-        kz.AddColumn(Unit.FromCentimeter(2.4));
-        foreach (var (feld, wert) in Kennzahlen(a))
+        // Kopfband
+        var band = s.AddTable();
+        band.AddColumn(Unit.FromCentimeter(Breite));
+        Buendig(band);
+        var br = band.AddRow();
+        br.Format.LeftIndent = Unit.FromPoint(10);
+        br.Format.RightIndent = Unit.FromPoint(10);
+        br.Shading.Color = Blau;
+        br.TopPadding = Unit.FromPoint(10);
+        br.BottomPadding = Unit.FromPoint(12);
+        var dach = br.Cells[0].AddParagraph("KLAUSURERGEBNISSE");
+        dach.Format.Font.Size = 8;
+        dach.Format.Font.Color = BlauHell;
+        dach.Format.Font.Bold = true;
+        var titel = br.Cells[0].AddParagraph(k.Titel);
+        titel.Format.Font.Size = 19;
+        titel.Format.Font.Bold = true;
+        titel.Format.Font.Color = Colors.White;
+        titel.Format.SpaceBefore = Unit.FromPoint(2);
+        var angaben = new[] { a.TerminText, k.Pruefer ?? a.Verantwortlich, k.Pruefungsnummer, $"Höchstpunktzahl {Zahl(k.Hoechstpunktzahl)}" }
+            .Where(x => !string.IsNullOrWhiteSpace(x));
+        var unter = br.Cells[0].AddParagraph(string.Join("  ·  ", angaben));
+        unter.Format.Font.Size = 9;
+        unter.Format.Font.Color = BlauHell;
+        unter.Format.SpaceBefore = Unit.FromPoint(4);
+        Abstand(s, 6);
+
+        // Kennzahlen als Kacheln
+        var kacheln = new (string Wert, string Was, string Hinweis)[]
         {
-            var z = kz.AddRow();
-            z.Cells[0].AddParagraph(feld);
-            var p = z.Cells[1].AddParagraph(wert);
-            p.Format.Alignment = ParagraphAlignment.Right;
+            (w.Anwesend.ToString(Deutsch), "anwesend", $"von {w.Angemeldet} angemeldet"),
+            (w.Aktiv.ToString(Deutsch), "aktiv teilnehmend", $"mehr als {Zahl(k.AktivSchwelle)} Punkte"),
+            (w.Durchschnittsnote?.ToString("0.00", Deutsch) ?? "–", "Durchschnittsnote*", "der aktiv Teilnehmenden"),
+            (w.Durchfallquote?.ToString("P1", Deutsch) ?? "–", "Durchfallquote*", "Anteil Note 5,0"),
+            (w.Maximalpunktzahl is { } mx ? Zahl(mx) : "–", "beste Punktzahl*", w.Minimalpunktzahl is { } mn ? $"niedrigste: {Zahl(mn)}" : ""),
+        };
+        var kt = s.AddTable();
+        kt.Borders.Color = Colors.White;
+        kt.Borders.Width = 6;
+        Buendig(kt);
+        foreach (var _ in kacheln)
+        {
+            kt.AddColumn(Unit.FromCentimeter(Breite / kacheln.Length));
         }
 
-        r.Cells[0].Elements.Add(kz);
-        var fuss = r.Cells[0].AddParagraph($"* bezogen auf aktiv Teilnehmende (mehr als {Zahl(k.AktivSchwelle)} Punkte)");
-        fuss.Format.Font.Size = 8;
+        var kr = kt.AddRow();
+        kr.Shading.Color = Flaeche;
+        kr.TopPadding = Unit.FromPoint(7);
+        kr.BottomPadding = Unit.FromPoint(7);
+        for (var i = 0; i < kacheln.Length; i++)
+        {
+            var c = kr.Cells[i];
+            var wert = c.AddParagraph(kacheln[i].Wert);
+            wert.Format.Font.Size = 20;
+            wert.Format.Font.Bold = true;
+            wert.Format.Font.Color = Blau;
+            var was = c.AddParagraph(kacheln[i].Was);
+            was.Format.Font.Size = 8.5;
+            was.Format.Font.Bold = true;
+            var hin = c.AddParagraph(kacheln[i].Hinweis);
+            hin.Format.Font.Size = 7.5;
+            hin.Format.Font.Color = Grau;
+        }
 
-        var chart = new Chart(ChartType.Column2D) { Width = Unit.FromCentimeter(8.4), Height = Unit.FromCentimeter(6.2) };
-        var reihe = chart.SeriesCollection.AddSeries();
-        reihe.Add(Enumerable.Range(1, 5).Select(n => (double)w.AnzahlGanzeNote[n]).ToArray());
-        reihe.HasDataLabel = true;
-        reihe.FillFormat.Color = new Color(0, 79, 140);
-        chart.XValues.AddXSeries().Add("1", "2", "3", "4", "5");
-        chart.XAxis.MajorTickMark = TickMarkType.Outside;
-        chart.YAxis.MajorTickMark = TickMarkType.Outside;
-        chart.YAxis.HasMajorGridlines = true;
-        chart.YAxis.MajorTick = Math.Max(1, Math.Ceiling(w.AnzahlGanzeNote.Values.DefaultIfEmpty(0).Max() / 5.0));   // ganze Personen
-        chart.YAxis.MinimumScale = 0;
-        chart.HeaderArea.AddParagraph("Notenverteilung");
-        r.Cells[1].Elements.Add(chart);
+        // Notenverteilung neben dem Notenschlüssel
+        Ueberschrift(s, "Notenverteilung und Notenschlüssel");
+        var mindest = k.Notenstufen.ToDictionary(n => n.Note, n => n.Mindestpunkte);
+        var groesste = Math.Max(1, w.AnzahlNote.Values.DefaultIfEmpty(0).Max());
+        const double balkenBreite = 9.4;
+        var vt = s.AddTable();
+        vt.Borders.Bottom.Width = 0.4;
+        vt.Borders.Bottom.Color = Linie;
+        Buendig(vt);
+        foreach (var b in new[] { 1.4, 2.6, balkenBreite + 0.6, 1.5, 1.5 })
+        {
+            vt.AddColumn(Unit.FromCentimeter(b));
+        }
 
-        s.AddParagraph().Format.SpaceAfter = Unit.FromPoint(8);
+        Kopfzeile(vt, ["Note", "ab Punkten", "", "Anzahl*", "Anteil*"], [1, 3, 4]);
+        foreach (var (note, anzahl) in w.AnzahlNote.OrderBy(x => x.Key))
+        {
+            var r = vt.AddRow();
+            r.VerticalAlignment = VerticalAlignment.Center;
+            r.TopPadding = Unit.FromPoint(1.5);
+            r.BottomPadding = Unit.FromPoint(1.5);
+            if (KlausurAuswertung.Ganz(note) % 2 == 0)
+            {
+                r.Shading.Color = Zebra;
+            }
+
+            var n = r.Cells[0].AddParagraph(note.ToString("0.0", Deutsch));
+            n.Format.Font.Bold = true;
+            n.Format.Font.Color = note >= 5 ? Rot : Colors.Black;
+            Rechts(r.Cells[1].AddParagraph(mindest.TryGetValue(note, out var m) ? Zahl(m) : "–"));
+            if (anzahl > 0)
+            {
+                var balken = new Table();
+                balken.AddColumn(Unit.FromCentimeter(Math.Max(0.15, balkenBreite * anzahl / groesste)));
+                var bz = balken.AddRow();
+                bz.Height = Unit.FromPoint(9);
+                bz.HeightRule = RowHeightRule.Exactly;
+                bz.Shading.Color = note >= 5 ? Rot : Blau;
+                r.Cells[2].Elements.Add(balken);
+            }
+
+            Rechts(r.Cells[3].AddParagraph(anzahl == 0 ? "–" : anzahl.ToString(Deutsch)));
+            var anteil = r.Cells[4].AddParagraph(anzahl == 0 || w.Aktiv == 0 ? "" : ((decimal)anzahl / w.Aktiv).ToString("P0", Deutsch));
+            anteil.Format.Font.Color = Grau;
+            Rechts(anteil);
+        }
+
+        // Ergebnisliste: nur Anwesende
+        var anwesend = w.Zeilen.Where(z => z.Anwesend).ToList();
+        Ueberschrift(s, $"Ergebnisse ({anwesend.Count} Anwesende)");
         var aufgaben = k.AufgabenSortiert.ToList();
-        var breiteAufgabe = Math.Min(1.6, 9.0 / Math.Max(1, aufgaben.Count));
-        var spalten = new List<double> { 2.6, 1.3 };
-        spalten.AddRange(aufgaben.Select(_ => breiteAufgabe));
-        spalten.AddRange([1.5, 1.2]);
-        var kopf = new List<string> { "Klausur-ID", "Anw." };
-        kopf.AddRange(aufgaben.Select(x => x.Sonderpunkte ? "Sonder" : $"A{x.Nr}"));
-        kopf.AddRange(["Summe", "Note"]);
-        var tab = Tabelle(s, [.. spalten], [.. kopf]);
-        tab.Format.Font.Size = 8.5;
-        foreach (var z in w.Zeilen)
+        if (anwesend.Count == 0)
         {
-            var werte = new List<string> { z.Teilnahme.Code, z.Anwesend ? "j" : "n" };
-            werte.AddRange(z.Punkte.Select(p => z.Anwesend ? Zahl(p ?? 0) : ""));
-            werte.AddRange([z.Anwesend ? Zahl(z.Summe) : "", z.Note?.ToString("0.0", Deutsch) ?? "NE"]);
-            Zeile(tab, [.. werte]);
+            s.AddParagraph("Noch keine Ergebnisse.");
+        }
+        else
+        {
+            var breiteAufgabe = Math.Min(2.4, (Breite - 2.6 - 1.8 - 1.5) / Math.Max(1, aufgaben.Count));
+            var et = s.AddTable();
+            et.Format.Font.Size = 8.5;
+            et.Borders.Bottom.Width = 0.3;
+            et.Borders.Bottom.Color = Linie;
+            Buendig(et);
+            et.AddColumn(Unit.FromCentimeter(2.6));
+            foreach (var _ in aufgaben)
+            {
+                et.AddColumn(Unit.FromCentimeter(breiteAufgabe));
+            }
+
+            et.AddColumn(Unit.FromCentimeter(1.8));
+            et.AddColumn(Unit.FromCentimeter(1.5));
+            var kopf = new List<string> { "Matr.-Ende" };
+            kopf.AddRange(aufgaben.Select(x => x.Sonderpunkte ? "Sonder" : $"A{x.Nr}"));
+            kopf.AddRange(["Summe", "Note"]);
+            var kz = Kopfzeile(et, [.. kopf], [.. Enumerable.Range(1, aufgaben.Count + 2)]);
+            for (var i = 0; i < aufgaben.Count; i++)
+            {
+                var max = kz.Cells[i + 1].AddParagraph($"max {Zahl(aufgaben[i].MaxPunkte)}");
+                max.Format.Font.Size = 6.5;
+                max.Format.Font.Bold = false;
+                Rechts(max);
+            }
+
+            var gerade = false;
+            foreach (var z in anwesend)
+            {
+                var r = et.AddRow();
+                r.TopPadding = Unit.FromPoint(1.5);
+                r.BottomPadding = Unit.FromPoint(1.5);
+                if (gerade)
+                {
+                    r.Shading.Color = Zebra;
+                }
+
+                gerade = !gerade;
+                var code = r.Cells[0].AddParagraph(z.Teilnahme.Code);
+                code.Format.Font.Name = "Courier New";
+                code.Format.Font.Bold = true;
+                for (var i = 0; i < z.Punkte.Count; i++)
+                {
+                    Rechts(r.Cells[i + 1].AddParagraph(Zahl(z.Punkte[i] ?? 0)));
+                }
+
+                var summe = r.Cells[aufgaben.Count + 1].AddParagraph(Zahl(z.Summe));
+                summe.Format.Font.Bold = true;
+                Rechts(summe);
+                var note = r.Cells[aufgaben.Count + 2].AddParagraph(z.Note?.ToString("0.0", Deutsch) ?? "–");
+                note.Format.Font.Bold = true;
+                note.Format.Font.Color = z.Note >= 5 ? Rot : Colors.Black;
+                Rechts(note);
+            }
         }
 
-        Klein(s, $"Max. Punkte je Aufgabe: {string.Join(" · ", aufgaben.Select(x => $"{(x.Sonderpunkte ? "Sonder" : $"A{x.Nr}")} {Zahl(x.MaxPunkte)}"))}. NE = nicht erschienen.");
-        Klein(s, $"Notenschlüssel: {string.Join(" · ", k.Notenstufen.Select(n => $"ab {Zahl(n.Mindestpunkte)} → {n.Note.ToString("0.0", Deutsch)}"))}.");
+        Klein(s, $"* bezogen auf die aktiv Teilnehmenden (mehr als {Zahl(k.AktivSchwelle)} Punkte). Aufgeführt sind nur Anwesende, "
+            + "gekennzeichnet mit den letzten vier Stellen der Matrikelnummer (bei gleichen Endziffern mit so vielen Stellen wie nötig).");
         return Rendern(dok);
     }
 
@@ -169,7 +300,7 @@ internal sealed class KlausurDokumente : IKlausurDokumente
         blatt.Cell(zeile, 1).Value = $"* bezogen auf aktiv Teilnehmende (mehr als {Zahl(k.AktivSchwelle)} Punkte)";
         zeile += 2;
         var aufgaben = k.AufgabenSortiert.ToList();
-        var kopf = new List<string> { "Klausur-ID", "Anwesend" };
+        var kopf = new List<string> { "Matrikelnr. (Ende)", "Anwesend" };
         kopf.AddRange(aufgaben.Select(x => x.Sonderpunkte ? x.Titel : $"Aufgabe {x.Nr}"));
         kopf.AddRange(["Summe", "Note"]);
         for (var i = 0; i < kopf.Count; i++)
@@ -179,7 +310,7 @@ internal sealed class KlausurDokumente : IKlausurDokumente
 
         blatt.Row(zeile).Style.Font.Bold = true;
         var kopfzeile = zeile;
-        foreach (var z in w.Zeilen)
+        foreach (var z in w.Zeilen.Where(z => z.Anwesend))
         {
             zeile++;
             blatt.Cell(zeile, 1).Value = z.Teilnahme.Code;
@@ -285,6 +416,46 @@ internal sealed class KlausurDokumente : IKlausurDokumente
         u.Format.Font.Color = Colors.DimGray;
         u.Format.SpaceAfter = Unit.FromPoint(10);
     }
+
+    private static void Abstand(Section s, double punkte) => s.AddParagraph().Format.SpaceAfter = Unit.FromPoint(punkte);
+
+    private static void Ueberschrift(Section s, string text)
+    {
+        var p = s.AddParagraph(text);
+        p.Format.Font.Size = 11.5;
+        p.Format.Font.Bold = true;
+        p.Format.Font.Color = Blau;
+        p.Format.SpaceBefore = Unit.FromPoint(16);
+        p.Format.SpaceAfter = Unit.FromPoint(5);
+        p.Format.KeepWithNext = true;
+    }
+
+    private static Row Kopfzeile(Table t, string[] kopf, int[] rechts)
+    {
+        var r = t.AddRow();
+        r.HeadingFormat = true;
+        r.Shading.Color = Blau;
+        r.TopPadding = Unit.FromPoint(3);
+        r.BottomPadding = Unit.FromPoint(3);
+        r.Format.Font.Bold = true;
+        r.Format.Font.Size = 8;
+        r.Format.Font.Color = Colors.White;
+        for (var i = 0; i < kopf.Length; i++)
+        {
+            var p = r.Cells[i].AddParagraph(kopf[i]);
+            if (rechts.Contains(i))
+            {
+                Rechts(p);
+            }
+        }
+
+        return r;
+    }
+
+    /// <summary>MigraDoc rückt Zellen um den Innenabstand nach links aus; so schließt die Tabelle bündig mit dem Text ab.</summary>
+    private static void Buendig(Table t) => t.Rows.LeftIndent = Unit.FromPoint((t.LeftPadding.IsEmpty ? Unit.FromMillimeter(1.2) : t.LeftPadding).Point / 2);
+
+    private static void Rechts(Paragraph p) => p.Format.Alignment = ParagraphAlignment.Right;
 
     private static void Klein(Section s, string text)
     {

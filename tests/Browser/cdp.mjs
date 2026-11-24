@@ -114,6 +114,11 @@ export async function browserStarten({ port = 9333, breite = 1280, hoehe = 900 }
             }
         },
         text: () => seite.eval('document.body.innerText'),
+        /** Fensterbreite ändern (z. B. 390 für die Telefonansicht). */
+        async breite(px, hoehePx = hoehe) {
+            await s('Emulation.setDeviceMetricsOverride', { width: px, height: hoehePx, deviceScaleFactor: 1, mobile: px < 600 });
+            await warte(400);
+        },
     };
     return {
         seite,

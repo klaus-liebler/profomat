@@ -160,8 +160,11 @@ public sealed class Teilnahme
 
     public Guid KlausurId { get; private set; }
 
-    /// <summary>Eindeutige Klausur-ID (steht auf dem Deckblatt und in der Veröffentlichung).</summary>
-    public string Code { get; private set; } = string.Empty;
+    /// <summary>
+    /// Schlüssel für Deckblatt und Veröffentlichung: die letzten vier Stellen der Matrikelnummer; haben mehrere Personen derselben
+    /// Klausur dieselben Endziffern, so viele Stellen wie nötig (siehe <see cref="Klausur.SchluesselVergeben"/>).
+    /// </summary>
+    public string Code { get; internal set; } = string.Empty;
 
     public string Matrikelnummer { get; private set; } = string.Empty;
 
@@ -239,8 +242,6 @@ public sealed class Teilnahme
 /// </summary>
 public sealed class Klausur
 {
-    private const string Crockford = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
-
     private readonly List<Teilnahme> teilnahmen = [];
     private readonly List<Aufgabe> aufgaben = [];
     private readonly List<KlausurRaum> raeume = [];
@@ -266,7 +267,7 @@ public sealed class Klausur
 
     public string Titel { get; private set; } = string.Empty;
 
-    /// <summary>Kurzzeichen für die Klausur-IDs, z. B. „RT“ (2–6 Zeichen, A–Z/0–9).</summary>
+    /// <summary>Kurzzeichen der Klausur für Dateinamen, z. B. „RT“ (2–6 Zeichen, A–Z/0–9).</summary>
     public string Kuerzel { get; private set; } = string.Empty;
 
     public string? Pruefungsnummer { get; private set; }
@@ -317,11 +318,6 @@ public sealed class Klausur
             throw new FachlicherFehler("Die Schwelle für „aktiv teilnehmend“ darf nicht negativ sein.");
         }
 
-        if (Kuerzel.Length > 0 && Kuerzel != k && teilnahmen.Count > 0)
-        {
-            throw new FachlicherFehler("Das Kürzel steckt in den Klausur-IDs und lässt sich nach dem Import nicht mehr ändern.");
-        }
-
         Titel = titel.Trim();
         Kuerzel = k;
         Pruefungsnummer = string.IsNullOrWhiteSpace(pruefungsnummer) ? null : pruefungsnummer.Trim();
@@ -348,7 +344,7 @@ public sealed class Klausur
             var t = teilnahmen.FirstOrDefault(x => x.Matrikelnummer == z.Matrikelnummer);
             if (t is null)
             {
-                teilnahmen.Add(new Teilnahme(Id, NeuerCode(), z.Matrikelnummer, z.Nachname, z.Vorname, z.Email, z.Zeile));
+                teilnahmen.Add(new Teilnahme(Id, z.Matrikelnummer, z.Matrikelnummer, z.Nachname, z.Vorname, z.Email, z.Zeile));
                 neu++;
                 continue;
             }
@@ -378,40 +374,32 @@ public sealed class Klausur
             Verteilt = null;   // Sitzplätze neu verteilen
         }
 
+        SchluesselVergeben();
         return new ImportErgebnis(neu, geaendert, abgemeldet, wieder);
     }
 
-    private string NeuerCode()
+    /// <summary>
+    /// Vergibt die Schlüssel: letzte vier Stellen der Matrikelnummer, bei gleichen Endziffern in dieser Klausur (auch Abgemeldete)
+    /// für die Betroffenen so viele Stellen, bis sie sich unterscheiden. Eine Nachmeldung kann so einen Schlüssel verlängern.
+    /// </summary>
+    public void SchluesselVergeben()
     {
-        while (true)
+        foreach (var t in teilnahmen)
         {
-            var zufall = RandomNumberGenerator.GetBytes(4);
-            var zeichen = new char[4];
-            for (var i = 0; i < 4; i++)
+            var m = t.Matrikelnummer;
+            var n = Math.Min(4, m.Length);
+            while (n < m.Length && teilnahmen.Any(x => x != t && Ende(x.Matrikelnummer, n) == m[^n..]))
             {
-                zeichen[i] = Crockford[zufall[i] % 32];
+                n++;
             }
 
-            var code = $"{Kuerzel}-{new string(zeichen)}{Pruefzeichen(new string(zeichen))}";
-            if (teilnahmen.All(t => t.Code != code))
-            {
-                return code;
-            }
-        }
-    }
-
-    private static char Pruefzeichen(string teil)
-    {
-        var summe = 0;
-        for (var i = 0; i < teil.Length; i++)
-        {
-            summe += Crockford.IndexOf(teil[i], StringComparison.Ordinal) * (i + 2);
+            t.Code = m[^n..];
         }
 
-        return Crockford[summe % 32];
+        static string Ende(string s, int n) => s.Length <= n ? s : s[^n..];
     }
 
-    /// <summary>Klausur-ID tolerant vergleichen (Groß/klein, O→0, I/L→1, Leer- und Bindestriche egal).</summary>
+    /// <summary>Teilnahme per Schlüssel oder ganzer Matrikelnummer finden (Groß/klein, O→0, I/L→1, Leer- und Bindestriche egal).</summary>
     public Teilnahme? NachCode(string eingabe)
     {
         static string Norm(string s) => new(s.ToUpperInvariant().Replace('O', '0').Replace('I', '1').Replace('L', '1')
@@ -423,14 +411,7 @@ public sealed class Klausur
         }
 
         var n = Norm(eingabe);
-        return teilnahmen.FirstOrDefault(t => Norm(t.Code) == n || Norm(t.Code)[Kuerzel.Length..] == n);
-    }
-
-    /// <summary>Prüft eine Klausur-ID auf Tippfehler (Prüfzeichen).</summary>
-    public static bool CodeGueltig(string code)
-    {
-        var teil = code.Split('-').LastOrDefault() ?? "";
-        return teil.Length == 5 && teil.All(c => Crockford.Contains(c, StringComparison.Ordinal)) && Pruefzeichen(teil[..4]) == teil[4];
+        return teilnahmen.FirstOrDefault(t => Norm(t.Code) == n) ?? teilnahmen.FirstOrDefault(t => Norm(t.Matrikelnummer) == n);
     }
 
     // ------------------------------------------------------------------ Räume und Sitzplätze

@@ -37,9 +37,9 @@
             <input id="titel" class="pm-input" @bind="titel" placeholder="aus der Liste" />
         </div>
         <div class="pm-field">
-            <label class="pm-lbl" for="kuerzel">Kürzel für die Klausur-IDs</label>
+            <label class="pm-lbl" for="kuerzel">Kürzel</label>
             <input id="kuerzel" class="pm-input" @bind="kuerzel" maxlength="6" placeholder="z. B. RT" />
-            <span class="pm-hilfe">2–6 Zeichen, erscheint vorn in jeder ID (z. B. RT-7KQ3X).</span>
+            <span class="pm-hilfe">2–6 Zeichen, für die Dateinamen (z. B. Ergebnis-RT.pdf).</span>
         </div>
         <div class="pm-field">
             <label class="pm-lbl">Termin</label>
@@ -68,7 +68,7 @@
                     {
                         <tr>
                             <td><a href="klausuren/@k.Id">@k.Titel</a><br /><span class="pm-small pm-muted">@k.Kuerzel · @k.Pruefungsnummer</span></td>
-                            <td>@(k.Termin is { } t ? Zeit.Kurz(t) : "–")</td>
+                            <td>@(k.Termin is { } t ? Zeit.KlausurterminKurz(t) : "–")</td>
                             <td>@k.Angemeldete.Count()</td>
                             <td>@Stand(k)</td>
                         </tr>

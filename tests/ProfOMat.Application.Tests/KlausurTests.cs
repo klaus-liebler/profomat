@@ -1,8 +1,10 @@
 using System.Text;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using ProfOMat.Application.Klausuren;
 using ProfOMat.Domain.Gemeinsam;
 using ProfOMat.Domain.Klausuren;
+using ProfOMat.Infrastructure.Datenbank;
 
 namespace ProfOMat.Application.Tests;
 
@@ -90,16 +92,17 @@ public sealed class KlausurTests
     }
 
     [Fact]
-    public async Task Import_vergibt_eindeutige_pruefbare_IDs_und_Abgleich_meldet_Abmeldungen()
+    public async Task Import_Schluessel_sind_die_letzten_vier_Stellen_und_Abgleich_meldet_Abmeldungen()
     {
         await using var u = await TestUmgebung.StartenAsync();
         var id = await AnlegenAsync(u, 50);
         var a = await u.InBereichAsync(d => d.GetRequiredService<KlausurDienst>().AnsichtAsync(id));
         a.Klausur.Titel.ShouldBe("Software Engineering für Elektrotechnik (Vorlesung)");
-        a.Klausur.Teilnahmen.Select(t => t.Code).Distinct().Count().ShouldBe(50);
-        a.Klausur.Teilnahmen.ShouldAllBe(t => t.Code.StartsWith("SE-") && Klausur.CodeGueltig(t.Code));
+        a.Klausur.Teilnahmen.ShouldAllBe(t => t.Code == t.Matrikelnummer.Substring(t.Matrikelnummer.Length - 4));
         var code = a.Klausur.Teilnahmen.Single(t => t.Matrikelnummer == "1100000").Code;
-        a.Klausur.NachCode(code.ToLowerInvariant().Replace("-", " ", StringComparison.Ordinal))!.Code.ShouldBe(code);
+        code.ShouldBe("0000");
+        a.Klausur.NachCode("OOOO")!.Code.ShouldBe(code);            // O statt 0 getippt
+        a.Klausur.NachCode("1100049")!.Code.ShouldBe("0049");       // ganze Matrikelnummer
 
         // neue Liste: Person 0 fehlt, eine neue ist dazugekommen
         var neu = Enumerable.Range(1, 49).Select(i => ($"{1100000 + i}", $"Name{i:000}", $"Vorname{i}")).Append(("1199999", "Neu", "Nora")).ToArray();
@@ -109,6 +112,64 @@ public sealed class KlausurTests
         b.Klausur.Teilnahmen.Count.ShouldBe(51);
         b.Klausur.Teilnahmen.Single(t => t.Matrikelnummer == "1100000").Code.ShouldBe(code);   // bleibt, nur abgemeldet
         b.Klausur.Angemeldete.Count().ShouldBe(50);
+    }
+
+    [Fact]
+    public async Task Datenbank_von_Version_8_ersetzt_alte_Klausur_IDs_durch_Schluessel()
+    {
+        await using var u = await TestUmgebung.StartenAsync();
+        var id = await AnlegenAsync(u, 3);
+        await u.InBereichAsync(async d =>
+        {
+            var db = d.GetRequiredService<ProfOMatDbContext>();
+            var teilnahmen = db.Model.FindEntityType(typeof(Teilnahme))!;
+            var spalte = teilnahmen.FindProperty(nameof(Teilnahme.Code))!.GetColumnName();
+            // Stand von Version 8 nachstellen: alte zufällige Klausur-IDs, Versionsnummer 8
+            var sqlCodes = "UPDATE \"" + teilnahmen.GetTableName() + "\" SET \"" + spalte + "\" = 'SE-' || substr(\"Matrikelnummer\", 5) || 'X';";
+            await db.Database.ExecuteSqlRawAsync(sqlCodes);
+            var sqlVersion = "UPDATE \"" + db.Model.FindEntityType(typeof(Schemainfo))!.GetTableName() + "\" SET \"Version\" = 8;";
+            await db.Database.ExecuteSqlRawAsync(sqlVersion);
+        });
+
+        await DatenbankInitialisierung.InitialisierenAsync(u.Dienste, TestContext.Current.CancellationToken);
+
+        var a = await u.InBereichAsync(d => d.GetRequiredService<KlausurDienst>().AnsichtAsync(id));
+        a.Klausur.Teilnahmen.Select(t => t.Code).Order().ShouldBe(["0000", "0001", "0002"]);
+    }
+
+    [Fact]
+    public void Klausurtermin_ohne_Uhrzeit_zeigt_nur_das_Datum()
+    {
+        var zeit = new ProfOMat.Application.Ortszeit(Microsoft.Extensions.Options.Options.Create(new ProfOMat.Application.ProfOMatOptionen()));
+        var mitternacht = zeit.AlsUtc(new DateTime(2026, 12, 3, 0, 0, 0));
+        zeit.Klausurtermin(mitternacht).ShouldBe("Donnerstag, 03.12.2026");
+        zeit.KlausurterminKurz(mitternacht).ShouldBe("03.12.2026");
+        zeit.Klausuruhrzeit(mitternacht).ShouldBe("");
+        var zehn = zeit.AlsUtc(new DateTime(2026, 12, 3, 10, 0, 0));
+        zeit.Klausurtermin(zehn).ShouldBe("Donnerstag, 03.12.2026, 10:00 Uhr");
+        zeit.Klausuruhrzeit(zehn).ShouldBe("10:00");
+    }
+
+    [Fact]
+    public async Task Gleiche_Endziffern_bekommen_so_viele_Stellen_wie_noetig_auch_bei_Nachmeldung()
+    {
+        await using var u = await TestUmgebung.StartenAsync();
+        await u.AlsAsync("mustermann");
+        var dienst = (Func<IServiceProvider, KlausurDienst>)(d => d.GetRequiredService<KlausurDienst>());
+        var (k, _, _) = await u.InBereichAsync(d => dienst(d).AusListeAnlegenAsync(
+            PruefungslisteTests.Liste(("1231234", "A", "A"), ("9871234", "B", "B"), ("1115555", "C", "C")), null, "SE", null));
+        string Schluessel(Klausur x, string m) => x.Teilnahmen.Single(t => t.Matrikelnummer == m).Code;
+        Schluessel(k, "1231234").ShouldBe("31234");
+        Schluessel(k, "9871234").ShouldBe("71234");
+        Schluessel(k, "1115555").ShouldBe("5555");
+
+        // Nachmeldung mit gleichen Endziffern: der bisherige Schlüssel 5555 wird verlängert
+        await u.InBereichAsync(d => dienst(d).ListeAbgleichenAsync(k.Id,
+            PruefungslisteTests.Liste(("1231234", "A", "A"), ("9871234", "B", "B"), ("1115555", "C", "C"), ("2225555", "D", "D"))));
+        var b = await u.InBereichAsync(d => dienst(d).AnsichtAsync(k.Id));
+        Schluessel(b.Klausur, "1115555").ShouldBe("15555");
+        Schluessel(b.Klausur, "2225555").ShouldBe("25555");
+        Schluessel(b.Klausur, "1231234").ShouldBe("31234");
     }
 
     [Fact]
@@ -200,6 +261,15 @@ public sealed class KlausurTests
         await File.WriteAllBytesAsync(Path.Combine(Path.GetTempPath(), "profomat-test-ergebnis.pdf"), pdf.Inhalt, TestContext.Current.CancellationToken);
         var xlsx = await u.InBereichAsync(d => d.GetRequiredService<KlausurDienst>().ErgebnisXlsxAsync(id));
         xlsx.Inhalt.AsSpan(0, 2).ToArray().ShouldBe("PK"u8.ToArray());
+        using (var zip = new System.IO.Compression.ZipArchive(new MemoryStream(xlsx.Inhalt)))
+        {
+            // Veröffentlichung: nur Anwesende, gekennzeichnet mit dem Ende der Matrikelnummer
+            var texte = new StreamReader(zip.GetEntry("xl/sharedStrings.xml")!.Open()).ReadToEnd();
+            texte.ShouldContain($">{t[0].Code}<");
+            texte.ShouldNotContain($">{t[5].Code}<");
+            texte.ShouldNotContain(t[0].Nachname);
+        }
+
         var noten = Encoding.UTF8.GetString((await u.InBereichAsync(d => d.GetRequiredService<KlausurDienst>().NotenCsvAsync(id))).Inhalt);
         noten.ShouldContain($"{t[0].Matrikelnummer};{t[0].Nachname};{t[0].Vorname};1,0;;94,5");
         noten.ShouldContain("nicht erschienen");
