@@ -105,6 +105,15 @@ public sealed class KatalogDienst(IDaten daten, IAktuellerBenutzer aktuell, IHoc
         await daten.SpeichernAsync(abbruch);
     }
 
+    /// <summary>
+    /// Beim Start: Ist der Katalog noch leer (neue Installation), sofort abgleichen statt bis zum nächtlichen Lauf zu warten –
+    /// sonst bleiben alle Studiengang-Auswahlen bis dahin leer. Liefert <c>null</c>, wenn schon Einträge da sind.
+    /// </summary>
+    public async Task<AbgleichErgebnis?> ErstabgleichAsync(CancellationToken abbruch = default)
+        => (await daten.ListeAsync(daten.Menge<Studiengang>().Take(1), abbruch)).Count > 0
+            ? null
+            : await AbgleichenAsync(alsAutomatik: true, abbruch);
+
     /// <summary>Abgleich mit dem Hochschulsystem (Hintergrundjob nachts oder „Jetzt abgleichen“).</summary>
     public async Task<AbgleichErgebnis> AbgleichenAsync(bool alsAutomatik = false, CancellationToken abbruch = default)
     {

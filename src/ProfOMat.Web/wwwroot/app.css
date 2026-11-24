@@ -272,3 +272,10 @@ kbd { font-family: var(--pm-mono); font-size: 11.5px; border: 1px solid var(--pm
     .pm-bs { grid-template-columns: minmax(0, 1fr); }
     .pm-bs-seite { position: static; }
 }
+
+/* Mülleimer in Tabellen (Löschen mit Rückfrage in derselben Zeile) */
+.pm-zelle-aktion { text-align: right; white-space: nowrap; width: 1%; }
+.pm-muell { display: inline-flex; align-items: center; justify-content: center; min-width: 34px; min-height: 34px; padding: 0; border: 1px solid transparent; border-radius: 7px; background: none; color: var(--pm-muted); cursor: pointer; }
+.pm-muell:hover, .pm-muell:focus-visible { color: var(--pm-crit); border-color: var(--pm-crit); background: var(--pm-crit-weak); }
+.pm-row-eng { gap: 6px; flex-wrap: nowrap; }
+.pm-btn-klein { padding: 4px 10px; font-size: 13px; }

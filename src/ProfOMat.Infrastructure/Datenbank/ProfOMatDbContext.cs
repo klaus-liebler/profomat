@@ -17,7 +17,7 @@ namespace ProfOMat.Infrastructure.Datenbank;
 public sealed class ProfOMatDbContext(DbContextOptions<ProfOMatDbContext> optionen) : DbContext(optionen)
 {
     /// <summary>Erhöhen, wenn sich das Modell ändert: eine ältere Datei wird dann beim Start abgelehnt (statt still falsch zu laufen).</summary>
-    public const int Schemaversion = 7;
+    public const int Schemaversion = 8;
 
     protected override void ConfigureConventions(ModelConfigurationBuilder konventionen)
     {
@@ -188,6 +188,9 @@ public sealed class ProfOMatDbContext(DbContextOptions<ProfOMatDbContext> option
             e.Property(p => p.Pruefling).HasMaxLength(MuendlichePruefung.NameMaxLaenge);
             e.Property(p => p.Matrikelnummer).HasMaxLength(MuendlichePruefung.MatrikelnummerMaxLaenge);
             e.Property(p => p.Studiengang).HasMaxLength(MuendlichePruefung.NameMaxLaenge);
+            e.Property(p => p.ErstpruefendeName).HasMaxLength(MuendlichePruefung.NameMaxLaenge);
+            e.Property(p => p.ZweitpruefendeName).HasMaxLength(MuendlichePruefung.NameMaxLaenge);
+            e.Ignore(p => p.HatErstpruefung);
             e.HasOne<Konto>().WithMany().HasForeignKey(p => p.ErstpruefendeId).OnDelete(DeleteBehavior.Restrict);
             e.HasOne<Konto>().WithMany().HasForeignKey(p => p.ZweitpruefendeId).OnDelete(DeleteBehavior.Restrict);
             e.Property(p => p.Abweichungsbegruendung).HasMaxLength(MuendlichePruefung.BegruendungMaxLaenge);

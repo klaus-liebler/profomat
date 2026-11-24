@@ -148,6 +148,14 @@ public sealed class MuendlichePruefung
     /// <summary>Konto der Zweitprüferin/des Zweitprüfers (Rolle Prüfende).</summary>
     public Guid? ZweitpruefendeId { get; private set; }
 
+    /// <summary>Erstprüfer/in ohne Konto (noch nicht angemeldet): Name als Text; <c>null</c>, wenn ein Konto gewählt ist.</summary>
+    public string? ErstpruefendeName { get; private set; }
+
+    /// <summary>Zweitprüfer/in ohne Konto: Name als Text; <c>null</c>, wenn ein Konto gewählt ist.</summary>
+    public string? ZweitpruefendeName { get; private set; }
+
+    public bool HatErstpruefung => ErstpruefendeId is not null || ErstpruefendeName is not null;
+
     /// <summary>Festgelegte Note (Vorschlag übernommen oder angepasst); <c>null</c>, solange nicht festgelegt.</summary>
     /// <remarks>Ändern sich danach Fragen oder Punkte, wird die Festlegung aufgehoben (der Vorschlag kann sich geändert haben).</remarks>
     public decimal? Endnote { get; private set; }
@@ -192,16 +200,17 @@ public sealed class MuendlichePruefung
 
     /// <summary>
     /// Angaben fürs Protokoll: Prüfling (leer = weglassen, im PDF bleibt das Feld zum Ausfüllen) und die beiden Prüfenden.
-    /// Ob die Konten Prüfende sind, prüft der Dienst.
+    /// Werden schon während der Prüfung gespeichert und dürfen dann noch unvollständig sein; die Erstprüfung verlangt erst
+    /// <see cref="NoteFestlegen"/>. Prüfende ohne Konto (noch nicht angemeldet) stehen als Name darin; ist ein Konto gewählt,
+    /// zählt das Konto und der Name entfällt. Ob die Konten Prüfende sind, prüft der Dienst.
     /// </summary>
-    public void AngabenSetzen(string? pruefling, string? matrikelnummer, string? studiengang, Guid? erstpruefende, Guid? zweitpruefende)
+    public void AngabenSetzen(string? pruefling, string? matrikelnummer, string? studiengang, Guid? erstpruefende, Guid? zweitpruefende,
+        string? erstName = null, string? zweitName = null)
     {
-        if (erstpruefende is null)
-        {
-            throw new FachlicherFehler("Bitte die Erstprüferin bzw. den Erstprüfer wählen.");
-        }
-
-        if (erstpruefende == zweitpruefende)
+        erstName = erstpruefende is null ? Kuerzen(erstName, NameMaxLaenge) : null;
+        zweitName = zweitpruefende is null ? Kuerzen(zweitName, NameMaxLaenge) : null;
+        if ((erstpruefende is not null && erstpruefende == zweitpruefende)
+            || (erstName is not null && string.Equals(erstName, zweitName, StringComparison.CurrentCultureIgnoreCase)))
         {
             throw new FachlicherFehler("Erst- und Zweitprüfung müssen verschiedene Personen sein.");
         }
@@ -209,7 +218,7 @@ public sealed class MuendlichePruefung
         Pruefling = Kuerzen(pruefling, NameMaxLaenge);
         Matrikelnummer = Kuerzen(matrikelnummer, MatrikelnummerMaxLaenge);
         Studiengang = Kuerzen(studiengang, NameMaxLaenge);
-        (ErstpruefendeId, ZweitpruefendeId) = (erstpruefende, zweitpruefende);
+        (ErstpruefendeId, ZweitpruefendeId, ErstpruefendeName, ZweitpruefendeName) = (erstpruefende, zweitpruefende, erstName, zweitName);
     }
 
     /// <summary>Note fürs Protokoll festlegen: den Vorschlag übernehmen oder eine andere zulässige Note wählen.</summary>
@@ -218,6 +227,11 @@ public sealed class MuendlichePruefung
         if (fragen.Count == 0)
         {
             throw new FachlicherFehler("Noch keine Fragen protokolliert – ohne Fragen gibt es keine Note.");
+        }
+
+        if (!HatErstpruefung)
+        {
+            throw new FachlicherFehler("Bitte die Erstprüferin bzw. den Erstprüfer wählen.");
         }
 
         if (!Notenschluessel.ErlaubteNoten.Contains(note))

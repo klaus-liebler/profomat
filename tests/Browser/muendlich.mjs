@@ -1,5 +1,6 @@
 // Browserprüfung „Mündliche Prüfung live“: nur Tastatur, schnelles Tippen, Zurückstellen, Wiederaufnehmen, Note, Bemerkung,
-// Protokoll (Prüfende, Studiengang, Note anpassen, PDF), 390 px.
+// Angaben oben (Prüfling, Prüfende mit und ohne Konto, Studiengang – sofort gespeichert), Protokoll (Note anpassen, PDF),
+// Löschen per Mülleimer in der Übersicht, 390 px.
 // Aufruf: node tests/Browser/muendlich.mjs http://localhost:5310 <Ordner>
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -83,16 +84,31 @@ try {
     pruefe(z.length === 5 && z[4].startsWith('12|4|3|Bode-Diagramm sicher|'), `Bemerkung gespeichert (${z[4]})`);
     pruefe(await fokus() === 'neu:nummer', 'Fokus wieder in der neuen Zeile');
 
-    console.log('• Protokoll: Angaben, Prüfende, Note anpassen, PDF');
+    console.log('• Angaben oben: Prüfling, Prüfende (mit und ohne Konto), Studiengang');
     const wahl = (id, text) => seite.eval(`(() => { const s = document.getElementById('${id}'); const o = [...s.options].find(o => o.textContent.includes('${text}'));
         s.value = o.value; s.dispatchEvent(new Event('change', { bubbles: true })); return o.textContent; })()`);
-    pruefe((await seite.eval(`document.getElementById('erst').selectedOptions[0].textContent`)).includes('Liebler'), 'Erstprüfer vorbelegt: Liebler');
+    const hilfe = (id) => seite.eval(`document.getElementById('${id}').parentElement.querySelector('.pm-hilfe').textContent`);
+    pruefe(await seite.eval(`!!(document.getElementById('angaben').compareDocumentPosition(document.querySelector('.pm-live-tabelle')) & Node.DOCUMENT_POSITION_FOLLOWING)`),
+        'Angaben stehen über den Fragen');
+    pruefe((await seite.eval(`document.getElementById('erst').value`)).includes('Liebler'), 'Erstprüfer vorbelegt: Liebler');
+    pruefe(await seite.eval(`[...document.querySelectorAll('#pm-pruefende option')].some(o => o.value.includes('Niemeyer'))`), 'Niemeyer (Konto) in der Vorschlagsliste');
     await seite.eingeben('#pruefling', 'Mia Muster');
     await seite.eingeben('#matrikel', '1234567');
     pruefe(await seite.eval(`document.querySelectorAll('#pm-studiengaenge option').length`) > 0, 'Studiengänge aus dem Katalog zur Auswahl');
     await seite.eingeben('#studiengang', 'Mechatronik (B.Sc., eigene Eingabe)');
-    await wahl('zweit', 'Niemeyer');
+    await seite.eingeben('#zweit', 'Dr. Erika Extern');
     await warte(300);
+    pruefe((await hilfe('zweit')).includes('ohne Konto'), 'Zweitprüferin ohne Konto per Namen');
+    await seite.oeffnen(await seite.eval('location.href'));
+    await warte(600);
+    pruefe(await seite.eval(`document.getElementById('pruefling').value === 'Mia Muster' && document.getElementById('zweit').value === 'Dr. Erika Extern'`),
+        'Angaben nach dem Neuladen noch da (sofort gespeichert)');
+    await seite.eingeben('#zweit', 'Prof. Dr. Philip Niemeyer');
+    await warte(300);
+    pruefe((await hilfe('zweit')).includes('mit Konto'), 'Niemeyer mit Konto verknüpft');
+    await seite.bild(join(bilder, 'm0-angaben.png'));
+
+    console.log('• Protokoll: Note anpassen, PDF');
     const vorschlag = await seite.eval(`document.querySelector('.pm-live-vorschlag b').textContent.trim()`);
     pruefe((await seite.eval(`document.getElementById('note').selectedOptions[0].textContent`)).includes('(Vorschlag)'), `Note steht auf dem Vorschlag ${vorschlag}`);
     await wahl('note', '1,7');
@@ -116,13 +132,28 @@ try {
     await warte(900);
     pruefe((await seite.text()).includes('bitte die Note erneut festlegen'), 'Hinweis: Note erneut festlegen');
 
+    console.log('• Übersicht: Löschen per Mülleimer mit Rückfrage');
+    await seite.oeffnen(basis + 'muendlich');
+    await warte(600);
+    const anzahl = () => seite.eval(`document.querySelectorAll('.pm-card table tbody tr').length`);
+    const vorher = await anzahl();
+    await seite.klick('button.pm-muell');
+    await warte(300);
+    pruefe(await anzahl() === vorher, 'erst die Rückfrage, noch nichts gelöscht');
+    await seite.bild(join(bilder, 'm5-loeschen-rueckfrage.png'));
+    await seite.klickText('button', 'Endgültig löschen');
+    await warte(600);
+    pruefe(await anzahl() === vorher - 1 || (vorher === 1 && (await seite.text()).includes('Noch keine')), 'Protokoll gelöscht');
+
     console.log('• 390 px');
     const { seite: schmal, beenden: beenden2 } = await browserStarten({ port: 9338, breite: 390, hoehe: 844 });
     try {
         await schmal.oeffnen(basis + 'anmelden');
         await schmal.eval(`[...document.querySelectorAll('.pm-list > div')].find(d => d.textContent.includes('Klaus Liebler')).querySelector('button').click()`);
         await schmal.warteAuf(`!location.pathname.endsWith('/anmelden')`);
-        await schmal.oeffnen(await seite.eval('location.href'));
+        await schmal.oeffnen(basis + 'muendlich');
+        await schmal.tippen('390 px Test⏎');
+        await schmal.warteAuf(`location.pathname.includes('/muendlich/') && document.querySelector('.pm-live-tabelle')`);
         await warte(600);
         const breit = await schmal.eval(`document.documentElement.scrollWidth`);
         pruefe(breit <= 392, `keine waagerechte Rollleiste (scrollWidth ${breit})`);

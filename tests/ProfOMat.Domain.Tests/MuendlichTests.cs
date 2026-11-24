@@ -128,6 +128,7 @@ public sealed class MuendlichProtokollTests
         var f2 = p.FrageHinzufuegen("7", 10m);
         p.FrageBewerten(f1.Id, 8m, false);
         p.FrageBewerten(f2.Id, null, true);
+        p.AngabenSetzen(null, null, null, Guid.NewGuid(), null);
         return (p, f1, f2);
     }
 
@@ -206,13 +207,35 @@ public sealed class MuendlichProtokollTests
     }
 
     [Fact]
-    public void Angaben_brauchen_Erstpruefung_und_zwei_verschiedene_Personen()
+    public void Angaben_duerfen_unvollstaendig_sein_aber_nie_zweimal_dieselbe_Person()
     {
         var (p, _, _) = Pruefung();
         var a = Guid.NewGuid();
-        Should.Throw<FachlicherFehler>(() => p.AngabenSetzen("Mia Muster", "123", "ET", null, a));
+        p.AngabenSetzen("Mia Muster", "123", "ET", null, a);   // während der Prüfung: Erstprüfung noch offen
+        Should.Throw<FachlicherFehler>(() => p.NoteFestlegen(2.0m, null, Jetzt)).Message.ShouldContain("Erstprüf");
         Should.Throw<FachlicherFehler>(() => p.AngabenSetzen("Mia Muster", "123", "ET", a, a));
         p.AngabenSetzen("  Mia Muster ", " ", "Elektrotechnik (B.Sc., PO 2023)", a, null);
         (p.Pruefling, p.Matrikelnummer, p.Studiengang, p.ErstpruefendeId, p.ZweitpruefendeId).ShouldBe(("Mia Muster", null, "Elektrotechnik (B.Sc., PO 2023)", a, null));
+    }
+
+    [Fact]
+    public void Pruefende_ohne_Konto_mit_Namen()
+    {
+        var (p, _, _) = Pruefung();
+        var konto = Guid.NewGuid();
+
+        // ohne Konto: Name zählt als Erstprüfung
+        p.AngabenSetzen(null, null, null, null, null, "  Prof. Dr. Philip Niemeyer ", null);
+        (p.ErstpruefendeId, p.ErstpruefendeName, p.HatErstpruefung).ShouldBe(((Guid?)null, "Prof. Dr. Philip Niemeyer", true));
+        p.NoteFestlegen(4.0m, null, Jetzt);
+
+        // Konto gewählt: Name entfällt
+        p.AngabenSetzen(null, null, null, konto, null, "wird ignoriert", "Dr. Extern");
+        (p.ErstpruefendeId, p.ErstpruefendeName, p.ZweitpruefendeName).ShouldBe(((Guid?)konto, (string?)null, "Dr. Extern"));
+
+        // derselbe Name zweimal geht nicht, leer heißt offen
+        Should.Throw<FachlicherFehler>(() => p.AngabenSetzen(null, null, null, null, null, "Dr. Extern", "dr. extern"));
+        p.AngabenSetzen(null, null, null, null, null, "   ", null);
+        p.HatErstpruefung.ShouldBeFalse();
     }
 }

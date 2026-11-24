@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.DataProtection;
 using ProfOMat.Adapters.Mocks;
 using ProfOMat.Application;
 using ProfOMat.Application.Drittpruefung;
+using ProfOMat.Application.Katalog;
 using ProfOMat.Application.Konten;
 using ProfOMat.Domain.Gemeinsam;
 using ProfOMat.Infrastructure;
@@ -103,6 +104,11 @@ await using (var bereich = app.Services.CreateAsyncScope())
     {
         // Wie Podium: kein Passwort in Konfiguration oder Umgebung – das erste Konto legt man auf der Anmeldeseite an.
         app.Logger.LogWarning("Noch kein Konto vorhanden – das erste Konto der Systemverwaltung bitte JETZT auf der Anmeldeseite anlegen (Ersteinrichtung).");
+    }
+
+    if (await bereich.ServiceProvider.GetRequiredService<KatalogDienst>().ErstabgleichAsync() is { } erstabgleich)
+    {
+        app.Logger.LogInformation("Katalog war leer – erster Abgleich: {Ergebnis}", erstabgleich);
     }
 }
 

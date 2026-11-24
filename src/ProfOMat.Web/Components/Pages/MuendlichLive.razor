@@ -33,6 +33,61 @@ else
         </div>
     </div>
 
+    <section class="pm-card" id="angaben" aria-label="Prüfling und Prüfende">
+        <div class="pm-fields">
+            <div class="pm-field">
+                <label class="pm-lbl" for="bezeichnung">Bezeichnung</label>
+                <input id="bezeichnung" class="pm-input" value="@pruefung.Bezeichnung" maxlength="@MuendlichePruefung.BezeichnungMaxLaenge"
+                       @onchange="e => UmbenennenAsync(e.Value as string)" autocomplete="off" />
+            </div>
+            <div class="pm-field">
+                <label class="pm-lbl" for="pruefling">Studierende/r</label>
+                <input id="pruefling" class="pm-input" @bind="pruefling" @bind:after="AngabenSpeichernAsync" maxlength="@MuendlichePruefung.NameMaxLaenge"
+                       autocomplete="off" placeholder="Vorname Nachname" />
+            </div>
+            <div class="pm-field">
+                <label class="pm-lbl" for="matrikel">Matrikelnummer</label>
+                <input id="matrikel" class="pm-input" @bind="matrikelnummer" @bind:after="AngabenSpeichernAsync" maxlength="@MuendlichePruefung.MatrikelnummerMaxLaenge"
+                       autocomplete="off" inputmode="numeric" />
+            </div>
+            <div class="pm-field">
+                <label class="pm-lbl" for="studiengang">Studiengang</label>
+                <input id="studiengang" class="pm-input" @bind="studiengang" @bind:after="AngabenSpeichernAsync" list="pm-studiengaenge"
+                       maxlength="@MuendlichePruefung.NameMaxLaenge" autocomplete="off" placeholder="aus der Liste wählen oder eintippen" />
+                <datalist id="pm-studiengaenge">
+                    @foreach (var s in studiengaenge)
+                    {
+                        <option value="@s"></option>
+                    }
+                </datalist>
+            </div>
+            <div class="pm-field">
+                <label class="pm-lbl" for="erst">Erstprüfer/in</label>
+                <input id="erst" class="pm-input" @bind="erstText" @bind:after="AngabenSpeichernAsync" list="pm-pruefende"
+                       maxlength="@MuendlichePruefung.NameMaxLaenge" autocomplete="off" placeholder="aus der Liste wählen oder Namen eintippen" />
+                <span class="pm-hilfe">@Zuordnung(erstText)</span>
+            </div>
+            <div class="pm-field">
+                <label class="pm-lbl" for="zweit">Zweitprüfer/in</label>
+                <input id="zweit" class="pm-input" @bind="zweitText" @bind:after="AngabenSpeichernAsync" list="pm-pruefende"
+                       maxlength="@MuendlichePruefung.NameMaxLaenge" autocomplete="off" placeholder="leer = im PDF zum Ausfüllen" />
+                <span class="pm-hilfe">@Zuordnung(zweitText)</span>
+            </div>
+            <datalist id="pm-pruefende">
+                @foreach (var k in pruefende)
+                {
+                    <option value="@k.Name"></option>
+                }
+            </datalist>
+        </div>
+        @if (angabenFehler is not null)
+        {
+            <div class="pm-alert pm-crit" role="alert">@angabenFehler</div>
+        }
+        <p class="pm-small pm-muted">Wird sofort gespeichert. Leer gelassene Angaben bleiben im PDF zum Ausfüllen frei.
+            Prüfer/innen mit Konto (Rolle Prüfende) stehen in der Liste; wer noch kein Konto hat, wird einfach mit Namen eingetragen.</p>
+    </section>
+
     <div class="pm-live">
         <section class="pm-card pm-live-note" aria-live="polite" aria-label="Aktuelle Note">
             <div class="pm-live-gross">
@@ -59,12 +114,6 @@ else
         </section>
 
         <section class="pm-card pm-live-fragen">
-            <div class="pm-field">
-                <label class="pm-lbl" for="bezeichnung">Bezeichnung</label>
-                <input id="bezeichnung" class="pm-input" value="@pruefung.Bezeichnung" maxlength="@MuendlichePruefung.BezeichnungMaxLaenge"
-                       @onchange="e => UmbenennenAsync(e.Value as string)" autocomplete="off" />
-            </div>
-
             @if (fehler is not null)
             {
                 <div class="pm-alert pm-crit" role="alert">@fehler</div>
@@ -152,49 +201,8 @@ else
     var gewaehlt = noteWahl ?? vorschlag;
     <section class="pm-card pm-live-protokoll" id="protokoll">
         <h2>Protokoll erstellen</h2>
-        <p class="pm-muted">Angaben ergänzen, Note festlegen (Vorschlag übernehmen oder anpassen) und das Protokoll als PDF mit Unterschriftsfeldern erstellen.
-            Leer gelassene Angaben bleiben im PDF zum Ausfüllen frei.</p>
-        <div class="pm-fields">
-            <div class="pm-field">
-                <label class="pm-lbl" for="pruefling">Studierende/r</label>
-                <input id="pruefling" class="pm-input" @bind="pruefling" maxlength="@MuendlichePruefung.NameMaxLaenge" autocomplete="off" placeholder="Vorname Nachname" />
-            </div>
-            <div class="pm-field">
-                <label class="pm-lbl" for="matrikel">Matrikelnummer</label>
-                <input id="matrikel" class="pm-input" @bind="matrikelnummer" maxlength="@MuendlichePruefung.MatrikelnummerMaxLaenge" autocomplete="off" inputmode="numeric" />
-            </div>
-            <div class="pm-field">
-                <label class="pm-lbl" for="studiengang">Studiengang</label>
-                <input id="studiengang" class="pm-input" @bind="studiengang" list="pm-studiengaenge" maxlength="@MuendlichePruefung.NameMaxLaenge" autocomplete="off"
-                       placeholder="aus der Liste wählen oder eintippen" />
-                <datalist id="pm-studiengaenge">
-                    @foreach (var s in studiengaenge)
-                    {
-                        <option value="@s"></option>
-                    }
-                </datalist>
-            </div>
-            <div class="pm-field">
-                <label class="pm-lbl" for="erst">Erstprüfer/in</label>
-                <select id="erst" class="pm-input" @bind="erstId">
-                    <option value="">– bitte wählen –</option>
-                    @foreach (var k in pruefende)
-                    {
-                        <option value="@k.KontoId">@k.Sortiername</option>
-                    }
-                </select>
-            </div>
-            <div class="pm-field">
-                <label class="pm-lbl" for="zweit">Zweitprüfer/in</label>
-                <select id="zweit" class="pm-input" @bind="zweitId">
-                    <option value="">– noch offen (im PDF zum Ausfüllen) –</option>
-                    @foreach (var k in pruefende.Where(k => k.KontoId != erstId))
-                    {
-                        <option value="@k.KontoId">@k.Sortiername</option>
-                    }
-                </select>
-            </div>
-        </div>
+        <p class="pm-muted">Note festlegen (Vorschlag übernehmen oder anpassen) und das Protokoll als PDF mit Unterschriftsfeldern erstellen.
+            Studierende/r und Prüfende kommen aus den <a href="@($"muendlich/{Id}#angaben")">Angaben oben</a>.</p>
 
         <div class="pm-live-vorschlag">
             <div>
@@ -257,22 +265,6 @@ else
         new NaechsterSchritt("Protokoll öffnen", $"muendlich/{Id}/protokoll.pdf", "PDF zum Unterschreiben", Hauptschritt: true),
         new NaechsterSchritt("Nächste Prüfung protokollieren", "muendlich", "Neues Protokoll anlegen"),
     ])" />
-
-    <section class="pm-card">
-        <h2>Protokoll löschen</h2>
-        @if (!loeschenBestaetigen)
-        {
-            <div class="pm-row"><button type="button" class="pm-btn" @onclick="() => loeschenBestaetigen = true">Protokoll löschen …</button></div>
-        }
-        else
-        {
-            <p>Das Protokoll mit @pruefung.Fragen.Count Fragen wird endgültig gelöscht.</p>
-            <div class="pm-row">
-                <button type="button" class="pm-btn pm-btn-gefahr" @onclick="LoeschenAsync">Ja, endgültig löschen</button>
-                <button type="button" class="pm-btn" @onclick="() => loeschenBestaetigen = false">Abbrechen</button>
-            </div>
-        }
-    </section>
 }
 
 @code {
@@ -284,9 +276,9 @@ else
     private MuendlichePruefung? pruefung;
     private readonly List<Zeile> zeilen = [];
     private string? ladefehler, fehler;
-    private bool loeschenBestaetigen, eingerichtet, protokollLaeuft, festgelegtGewesen;
-    private string? pruefling, matrikelnummer, studiengang, begruendung, protokollFehler;
-    private Guid? erstId, zweitId;
+    private bool eingerichtet, protokollLaeuft, festgelegtGewesen;
+    private string? pruefling, matrikelnummer, studiengang, begruendung, protokollFehler, angabenFehler;
+    private string? erstText, zweitText;
     private decimal? noteWahl;
     private IReadOnlyList<PruefendeWahl> pruefende = [];
     private IReadOnlyList<string> studiengaenge = [];
@@ -332,8 +324,9 @@ else
                 return z;
             }));
             (pruefling, matrikelnummer, studiengang) = (pruefung.Pruefling, pruefung.Matrikelnummer, pruefung.Studiengang);
-            erstId = pruefung.ErstpruefendeId ?? (pruefende.Any(k => k.KontoId == pruefung.KontoId) ? pruefung.KontoId : null);
-            zweitId = pruefung.ZweitpruefendeId;
+            erstText = Anzeige(pruefung.ErstpruefendeId, pruefung.ErstpruefendeName)
+                       ?? (pruefung.HatErstpruefung ? null : pruefende.FirstOrDefault(k => k.KontoId == pruefung.KontoId)?.Name);
+            zweitText = Anzeige(pruefung.ZweitpruefendeId, pruefung.ZweitpruefendeName);
             noteWahl = pruefung.Endnote is { } e && e != pruefung.Notenvorschlag ? e : null;
             begruendung = pruefung.Abweichungsbegruendung;
             festgelegtGewesen = pruefung.Endnote is not null;
@@ -613,8 +606,8 @@ else
 
     private Freigabe ProtokollFreigabe(decimal? note) => MuendlichDienst.ProtokollErstellen(pruefung!)
         .Und(() => note is null ? Freigabe.Nein("Bitte eine Note wählen.") : Freigabe.Ja)
-        .Und(() => erstId is null ? Freigabe.Nein("Bitte die Erstprüferin bzw. den Erstprüfer wählen.") : Freigabe.Ja)
-        .Und(() => erstId == zweitId ? Freigabe.Nein("Erst- und Zweitprüfung müssen verschiedene Personen sein.") : Freigabe.Ja);
+        .Und(() => string.IsNullOrWhiteSpace(erstText) ? Freigabe.Nein("Bitte oben die Erstprüferin bzw. den Erstprüfer eintragen.") : Freigabe.Ja)
+        .Und(() => Pruefer(erstText) == Pruefer(zweitText) ? Freigabe.Nein("Erst- und Zweitprüfung müssen verschiedene Personen sein.") : Freigabe.Ja);
 
     private void NoteGewaehlt(ChangeEventArgs e)
         => noteWahl = decimal.TryParse(e.Value as string, System.Globalization.NumberStyles.AllowDecimalPoint, System.Globalization.CultureInfo.InvariantCulture, out var n)
@@ -630,7 +623,10 @@ else
         protokollLaeuft = true;
         try
         {
-            var angaben = new ProtokollAngaben(pruefling, matrikelnummer, studiengang, erstId, zweitId, noteWahl ?? pruefung!.Notenvorschlag!.Value, begruendung);
+            var (erstId, erstName) = Pruefer(erstText);
+            var (zweitId, zweitName) = Pruefer(zweitText);
+            var angaben = new ProtokollAngaben(pruefling, matrikelnummer, studiengang, erstId, zweitId, noteWahl ?? pruefung!.Notenvorschlag!.Value, begruendung,
+                erstName, zweitName);
             pruefung = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<MuendlichDienst>().ProtokollErstellenAsync(Id, angaben));
             protokollFehler = null;
             festgelegtGewesen = true;
@@ -642,6 +638,50 @@ else
         finally
         {
             protokollLaeuft = false;
+        }
+    }
+
+    /// <summary>Eingetippter Name → Konto, wenn er zu einem Prüfende-Konto passt (mit oder ohne Titel), sonst Name ohne Konto.</summary>
+    private (Guid? Konto, string? Name) Pruefer(string? text)
+    {
+        var t = text?.Trim();
+        if (string.IsNullOrEmpty(t))
+        {
+            return (null, null);
+        }
+
+        var k = pruefende.FirstOrDefault(k => string.Equals(k.Name, t, StringComparison.CurrentCultureIgnoreCase)
+                                              || string.Equals(k.Sortiername, t, StringComparison.CurrentCultureIgnoreCase));
+        return k is null ? (null, t) : (k.KontoId, null);
+    }
+
+    private string? Anzeige(Guid? konto, string? name) => konto is { } id ? pruefende.FirstOrDefault(k => k.KontoId == id)?.Name ?? name : name;
+
+    private string Zuordnung(string? text) => Pruefer(text) switch
+    {
+        (not null, _) => "mit Konto",
+        (_, not null) => "ohne Konto – der Name erscheint so im Protokoll",
+        _ => "",
+    };
+
+    private async Task AngabenSpeichernAsync()
+    {
+        await sperre.WaitAsync();   // nicht zugleich mit dem Speichern einer Tabellenzeile
+        try
+        {
+            var (erstId, erstName) = Pruefer(erstText);
+            var (zweitId, zweitName) = Pruefer(zweitText);
+            var angaben = new PruefungsAngaben(pruefling, matrikelnummer, studiengang, erstId, zweitId, erstName, zweitName);
+            pruefung = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<MuendlichDienst>().AngabenSpeichernAsync(Id, angaben));
+            angabenFehler = null;
+        }
+        catch (FachlicherFehler ex)
+        {
+            angabenFehler = ex.Message;
+        }
+        finally
+        {
+            sperre.Release();
         }
     }
 
@@ -658,18 +698,6 @@ else
         }
     }
 
-    private async Task LoeschenAsync()
-    {
-        try
-        {
-            await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<MuendlichDienst>().LoeschenAsync(Id));
-            Navigation.NavigateTo("muendlich");
-        }
-        catch (FachlicherFehler ex)
-        {
-            fehler = ex.Message;
-        }
-    }
 
     // ---------------------------------------------------------------- Darstellung
     private static string ZeilenKlasse(GestellteFrage? f) => f?.Stand switch

@@ -61,11 +61,38 @@ public static class DatenbankInitialisierung
             version = null;
         }
 
+        if (version == 7)
+        {
+            await AufVersion8Async(db, abbruch);
+            version = 8;
+        }
+
         if (version != ProfOMatDbContext.Schemaversion)
         {
             throw new InvalidOperationException(
                 $"Datenbankschema veraltet (Datei: {version?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "unbekannt"}, erwartet: {ProfOMatDbContext.Schemaversion}) – "
                 + "Datei löschen oder beiseitelegen (Entwicklungsphase ohne Migrationen).");
         }
+    }
+
+    /// <summary>
+    /// 7 → 8 ohne Datenverlust: Prüfende ohne Konto (Name als Text) in mündlichen Prüfungen. Kleine Aufwertungen dieser Art,
+    /// bis vor dem Produktivbetrieb EF-Migrationen kommen; alles oder nichts (eine Transaktion).
+    /// </summary>
+    private static async Task AufVersion8Async(ProfOMatDbContext db, CancellationToken abbruch)
+    {
+        var typ = db.Model.FindEntityType(typeof(ProfOMat.Domain.Muendlich.MuendlichePruefung))!;
+        var tabelle = typ.GetTableName()!;
+        await using var transaktion = await db.Database.BeginTransactionAsync(abbruch);
+        foreach (var name in new[] { nameof(ProfOMat.Domain.Muendlich.MuendlichePruefung.ErstpruefendeName), nameof(ProfOMat.Domain.Muendlich.MuendlichePruefung.ZweitpruefendeName) })
+        {
+            var sql = "ALTER TABLE \"" + tabelle + "\" ADD COLUMN \"" + typ.FindProperty(name)!.GetColumnName() + "\" TEXT NULL;";
+            await db.Database.ExecuteSqlRawAsync(sql, abbruch);
+        }
+
+        var info = await db.Set<Schemainfo>().SingleAsync(abbruch);
+        info.Version = 8;
+        await db.SaveChangesAsync(abbruch);
+        await transaktion.CommitAsync(abbruch);
     }
 }
