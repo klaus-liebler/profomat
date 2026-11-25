@@ -447,7 +447,7 @@ else if (team is not null && cockpit is not null)
     {
         Topfart.Kostenstelle => $"{t.Bezeichnung} · frei verwendbar, Rest wird vorgetragen",
         Topfart.Sqm => $"{t.Bezeichnung} · SQM bis {t.Stichtag:dd.MM.yyyy}",
-        _ => $"{t.Bezeichnung} · Investition, Bestellschluss {t.Stichtag:dd.MM.yyyy}",
+        _ => $"{t.Bezeichnung} · Investition{(t.Innenauftrag is { } ia ? $" (Innenauftrag {ia})" : "")}, Bestellschluss {t.Stichtag:dd.MM.yyyy}",
     };
 
     private async Task AusfuehrenAsync(Func<FinanzDienst, Task> aktion, string? erfolg = null)

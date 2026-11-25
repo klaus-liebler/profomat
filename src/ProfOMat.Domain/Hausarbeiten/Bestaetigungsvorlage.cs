@@ -18,7 +18,7 @@ public static partial class Bestaetigungsplatzhalter
         ["Beschreibung"] = "Beschreibung des Themas (leer, wenn keine)",
         ["Link"] = "persönlicher Bestätigungslink (Pflicht)",
         ["Frist"] = "Datum der Bestätigungsfrist (oder „–“)",
-        ["BisFrist"] = "„ bis zum TT.MM.JJJJ“ bzw. leer ohne Frist",
+        ["BisFrist"] = "„bis zum TT.MM.JJJJ“ bzw. leer ohne Frist",
         ["Modul"] = "Titel der Hausarbeit",
         ["Absender"] = "Ihr Name",
     };
@@ -26,9 +26,23 @@ public static partial class Bestaetigungsplatzhalter
     public static IReadOnlyList<string> Unbekannte(string? text)
         => [.. Platzhalter().Matches(text ?? "").Select(m => m.Groups[1].Value).Where(n => !Beschreibung.ContainsKey(n)).Distinct()];
 
-    /// <summary>Ersetzt die Platzhalter; mehr als eine Leerzeile (z. B. bei leerer {Beschreibung}) wird zu einer.</summary>
+    /// <summary>
+    /// Ersetzt die Platzhalter. Leere Platzhalter hinterlassen keine Lücken: doppelte Leerzeichen werden zu einem, Leerzeichen vor Satzzeichen
+    /// entfallen, mehr als eine Leerzeile (z. B. bei leerer {Beschreibung}) wird zu einer.
+    /// </summary>
     public static string Ersetzen(string text, IReadOnlyDictionary<string, string> werte)
-        => MehrfacheLeerzeilen().Replace(Terminplatzhalter.Ersetzen(text.ReplaceLineEndings("\n"), werte), "\n\n");
+    {
+        var t = Terminplatzhalter.Ersetzen(text.ReplaceLineEndings("\n"), werte);
+        t = DoppelteLeerzeichen().Replace(t, " ");
+        t = LeerzeichenVorSatzzeichen().Replace(t, "");
+        return MehrfacheLeerzeilen().Replace(t, "\n\n");
+    }
+
+    [GeneratedRegex(@"(?<=\S)[ \t]{2,}(?=\S)")]
+    private static partial Regex DoppelteLeerzeichen();
+
+    [GeneratedRegex(@"(?<=\S)[ \t]+(?=[,.;:!?])")]
+    private static partial Regex LeerzeichenVorSatzzeichen();
 
     [GeneratedRegex(@"\{([A-Za-zÄÖÜäöüß]+)\}")]
     private static partial Regex Platzhalter();
@@ -40,7 +54,7 @@ public static partial class Bestaetigungsplatzhalter
 /// <summary>Vorlage der Mail zur Themenbestätigung (FA-613).</summary>
 public sealed partial class Hausarbeit
 {
-    public const string StandardBestaetigungBetreff = "Hausarbeit {Modul}: Ihr Thema – bitte{BisFrist} bestätigen";
+    public const string StandardBestaetigungBetreff = "Hausarbeit {Modul}: Ihr Thema – bitte {BisFrist} bestätigen";
 
     public const string StandardBestaetigungVorlage = """
         Guten Tag {Name},
@@ -51,7 +65,7 @@ public sealed partial class Hausarbeit
 
         {Beschreibung}
 
-        Bitte bestätigen Sie die Annahme des Themas{BisFrist} über Ihren persönlichen Link:
+        Bitte bestätigen Sie die Annahme des Themas {BisFrist} über Ihren persönlichen Link:
         {Link}
 
         Bei der Bestätigung können Sie auch Ihre terminlichen Einschränkungen für das Erörterungsgespräch angeben (zum Beispiel Tage oder Zeiten, an denen Sie nicht können). Das hilft bei der Terminplanung; die Angabe lässt sich später über denselben Link ändern.
@@ -110,7 +124,7 @@ public sealed partial class Hausarbeit
             ["Beschreibung"] = thema.Beschreibung ?? "",
             ["Link"] = link,
             ["Frist"] = frist ?? "–",
-            ["BisFrist"] = frist is null ? "" : $" bis zum {frist}",
+            ["BisFrist"] = frist is null ? "" : $"bis zum {frist}",
             ["Modul"] = Titel,
             ["Absender"] = absender,
         };

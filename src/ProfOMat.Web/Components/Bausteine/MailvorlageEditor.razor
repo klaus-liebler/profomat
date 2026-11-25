@@ -13,12 +13,13 @@
         <textarea id="@($"{Kennung}-text")" class="pm-textarea" rows="14" @bind="text" @bind:event="oninput"></textarea>
     </div>
 </div>
-<p class="pm-small">Platzhalter:
+<div class="pm-platzhalter" aria-label="Platzhalter">
+    <span class="pm-small">Platzhalter:</span>
     @foreach (var (name, beschreibung) in Platzhalter)
     {
-        <span class="pm-chip pm-mono" title="@beschreibung">{@name}</span>
+        <span class="pm-chip pm-mono pm-small" title="@beschreibung">{@name}</span>
     }
-</p>
+</div>
 @if (Unbekannt.Count > 0)
 {
     <div class="pm-alert pm-warn" role="status">Unbekannte Platzhalter: @string.Join(", ", Unbekannt.Select(u => "{" + u + "}"))</div>

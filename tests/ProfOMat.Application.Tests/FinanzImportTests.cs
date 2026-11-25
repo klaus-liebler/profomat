@@ -95,6 +95,88 @@ public sealed class FinanzImportTests
         await Should.ThrowAsync<FachlicherFehler>(() => Mit(u, d => d.SqmVorschauAsync(team, SqmListe())));
     }
 
+    private const string Antraege = """
+        ```json
+        {
+          "format": "profomat-investitionsantraege-v1",
+          "beschluss": "2026-05-19",
+          "antraege": [
+            { "antragsnummer": "AUT-01-26", "innenauftrag": "71211631", "laborbereich": "Automatisierungstechnik", "antragsteller": "Andere",
+              "investition": "Laborausstattung Raum X", "sachkosten": 7500, "art": "Ersatz", "begruendung": "fremder Antrag" },
+            { "antragsnummer": "AUT-05-26", "innenauftrag": "71211635", "laborbereich": "Automatisierungstechnik", "antragsteller": "Liebler / Niemeyer / Rehm",
+              "investition": "Laborausstattung Raum SB0311: Gestell für den gespendeten Pick & Place-Roboter", "sachkosten": 13000, "art": "Neu",
+              "begruendung": "Neues Modul Automatisierungstechnik im Curriculum MB" },
+            { "antragsnummer": "AUT-07-26", "innenauftrag": "71211637", "laborbereich": "Automatisierungstechnik", "antragsteller": "Kollege",
+              "investition": "Erstellung von Lehraufbauten für das Fach Embedded Systems: 4× STEMlab 125-14", "sachkosten": "3200.00", "art": "Neu",
+              "begruendung": "Sonst nur Computersimulationen." }
+          ]
+        }
+        ```
+        """;
+
+    [Fact]
+    public async Task Beschlussliste_der_Investitionsantraege_ordnet_zu_und_speichert_Zweck_und_Begruendung()
+    {
+        await using var u = await TestUmgebung.StartenAsync();
+        await u.AlsAsync("liebler");
+        var team = (await Mit(u, d => d.TeamAnlegenAsync("Nur Liebler"))).Id;   // Niemeyer ist hier nicht im Team
+        var aut07 = await Mit(u, d => d.InvestitionAnlegenAsync(team, "AUT-07-26", "Investition Automatisierungstechnik", 3000m));   // z. B. vom Stand-Import
+
+        InvestitionsantraegeJson.Prompt("Automatisierungstechnik").ShouldContain("„AUT-07-26 71211637“");
+        var v = await Mit(u, d => d.AntraegeVorschauAsync(team, Antraege));
+        v.Beschluss.ShouldBe(new DateOnly(2026, 5, 19));
+        v.Uebrige.ShouldBe(1);                                                                     // fremder Antrag nur gezählt
+        v.Antraege.Select(a => (a.Antragsnummer, a.TopfId is not null)).ShouldBe([("AUT-05-26", false), ("AUT-07-26", true)]);   // einer von drei Antragstellern genügt
+        v.Antraege[1].Aenderungen.ShouldContain("bewilligt 3.000,00 € → 3.200,00 €");
+        v.Antraege[1].Aenderungen.ShouldContain("Innenauftrag – → 71211637");
+
+        (await Mit(u, d => d.AntraegeUebernehmenAsync(team, Antraege, ["AUT-05-26"]))).ShouldBe(2);
+        var toepfe = await Mit(u, d => d.ToepfeAsync(team));
+        var t07 = toepfe.Single(t => t.Id == aut07.Id);
+        (t07.Bezeichnung, t07.Innenauftrag, t07.Bewilligt, t07.Anschaffung, t07.Laborbereich, t07.Beschluss, t07.Verantwortlich)
+            .ShouldBe(("Erstellung von Lehraufbauten für das Fach Embedded Systems", "71211637", 3200m, (Anschaffungsart?)Anschaffungsart.Neu, "Automatisierungstechnik",
+                (DateOnly?)new DateOnly(2026, 5, 19), "Kollege"));
+        t07.Zweck.ShouldBe("Erstellung von Lehraufbauten für das Fach Embedded Systems: 4× STEMlab 125-14");
+        t07.Begruendung.ShouldBe("Sonst nur Computersimulationen.");
+        var t05 = toepfe.Single(t => t.Kennung == "AUT-05-26");
+        (t05.Bezeichnung, t05.Innenauftrag, t05.Bewilligt, t05.Bestellschluss, t05.Verantwortlich)
+            .ShouldBe(("Laborausstattung Raum SB0311", "71211635", 13000m, (DateOnly?)new DateOnly(2027, 8, 31), "Liebler / Niemeyer / Rehm"));
+        toepfe.ShouldNotContain(t => t.Kennung == "AUT-01-26");
+
+        // Eigene Bezeichnung bleibt bei erneuter Übernahme
+        await Mit(u, d => d.TopfAendernAsync(team, t07.Id, t07.Angaben with { Bezeichnung = "Embedded-Aufbauten" }));
+        await Mit(u, d => d.AntraegeUebernehmenAsync(team, Antraege, []));
+        (await Mit(u, d => d.TopfAsync(team, t07.Id))).Bezeichnung.ShouldBe("Embedded-Aufbauten");
+
+        (await Should.ThrowAsync<FachlicherFehler>(() => Mit(u, d => d.AntraegeVorschauAsync(team, Json)))).Message.ShouldContain("Format");
+        await Should.ThrowAsync<FachlicherFehler>(() => Mit(u, d => d.AntraegeVorschauAsync(team, Antraege.Replace("\"71211637\"", "\"7121\"", StringComparison.Ordinal))));
+        await u.AlsAsync("mustermann");
+        await Should.ThrowAsync<FachlicherFehler>(() => Mit(u, d => d.AntraegeVorschauAsync(team, Antraege)));
+    }
+
+    [Fact]
+    public async Task Datenbank_von_Version_16_bekommt_die_Antragsfelder_ohne_Datenverlust()
+    {
+        await using var u = await TestUmgebung.StartenAsync();
+        await u.AlsAsync("liebler");
+        var team = (await Mit(u, d => d.TeamAnlegenAsync("Labor"))).Id;
+        var topf = await Mit(u, d => d.InvestitionAnlegenAsync(team, "AUT-07-26", "Vorher", 3200m));
+        await u.InBereichAsync(async d =>
+        {
+            var db = d.GetRequiredService<ProfOMat.Infrastructure.Datenbank.ProfOMatDbContext>();
+            await Microsoft.EntityFrameworkCore.RelationalDatabaseFacadeExtensions.ExecuteSqlRawAsync(db.Database,
+                "ALTER TABLE \"FinanzToepfe\" DROP COLUMN \"Zweck\"; ALTER TABLE \"FinanzToepfe\" DROP COLUMN \"Begruendung\"; ALTER TABLE \"FinanzToepfe\" DROP COLUMN \"Anschaffung\"; "
+                + "ALTER TABLE \"FinanzToepfe\" DROP COLUMN \"Laborbereich\"; ALTER TABLE \"FinanzToepfe\" DROP COLUMN \"Beschluss\"; UPDATE \"Schemainfo\" SET \"Version\" = 16;");
+            return true;
+        });
+
+        await ProfOMat.Infrastructure.Datenbank.DatenbankInitialisierung.InitialisierenAsync(u.Dienste, TestContext.Current.CancellationToken);
+
+        (await Mit(u, d => d.TopfAsync(team, topf.Id))).Bezeichnung.ShouldBe("Vorher");
+        (await Mit(u, d => d.AntraegeUebernehmenAsync(team, Antraege, []))).ShouldBe(1);
+        (await Mit(u, d => d.TopfAsync(team, topf.Id))).Zweck.ShouldNotBeNull();
+    }
+
     private const string Json = """
         Hier ist das JSON:
         ```json

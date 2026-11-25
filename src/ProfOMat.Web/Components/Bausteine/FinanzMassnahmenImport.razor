@@ -32,6 +32,79 @@
 </section>
 
 <section class="pm-card">
+    <h2>Investitionsanträge (Beschlussliste) per KI-Chat</h2>
+    <p class="pm-small pm-muted">Grunddaten der Investitionsmaßnahmen aus der „Liste der Investitionsanträge“ des Fakultätsrats: Antragsnummer, Innenauftrag, Antragsteller,
+        Verwendungszweck, Sachkosten, Neu/Ersatz und Begründung. Zuerst diese Liste übernehmen, danach den Stand. Wie beim Stand: Prompt kopieren, mit dem PDF in einen
+        KI-Chat geben, JSON hier einfügen. Übernommen werden nur Anträge dieses Teams – vorhandene Töpfe oder Anträge, bei denen eine Person aus dem Team unter den
+        Antragstellern ist; alle anderen werden nur gezählt.</p>
+    <div class="pm-fields">
+        <div class="pm-field">
+            <label class="pm-lbl" for="an-bereich">Laborbereich (optional)</label>
+            <input id="an-bereich" class="pm-input" @bind="laborbereich" @bind:event="oninput" placeholder="z. B. Automatisierungstechnik" />
+        </div>
+    </div>
+    <details class="pm-za-tabelle">
+        <summary>Prompt anzeigen</summary>
+        <pre class="pm-signiertext">@InvestitionsantraegeJson.Prompt(laborbereich)</pre>
+    </details>
+    <div class="pm-row">
+        <button type="button" class="pm-btn" @onclick="() => KopierenAsync(true)">Prompt kopieren</button>
+        @if (kopiertAntraege is { } ka)
+        {
+            <span class="pm-small @(ka ? "pm-muted" : "pm-za-krit")">@(ka ? "In der Zwischenablage." : "Kopieren nicht möglich – den Prompt oben markieren und kopieren.")</span>
+        }
+    </div>
+    <div class="pm-field">
+        <label class="pm-lbl" for="an-json">Antwort des KI-Chats (JSON)</label>
+        <textarea id="an-json" class="pm-textarea pm-mono" rows="8" @bind="antraegeJson" placeholder="{ &quot;format&quot;: &quot;profomat-investitionsantraege-v1&quot;, … }"></textarea>
+    </div>
+    <div class="pm-row">
+        <BegruendeterButton Text="Prüfen" Click="AntraegePruefenAsync" Beschaeftigt="@beschaeftigt"
+                            Freigabe="@(string.IsNullOrWhiteSpace(antraegeJson) ? Freigabe.Nein("Erst das JSON einfügen.") : Freigabe.Ja)" />
+    </div>
+    @if (antraege is not null)
+    {
+        <p class="pm-small pm-muted">Beschluss vom @(antraege.Beschluss?.ToString("dd.MM.yyyy") ?? "–")@(antraege.Uebrige > 0 ? $" · {antraege.Uebrige} Anträge anderer Personen übergangen" : "")</p>
+        @if (antraege.Antraege.Count == 0)
+        {
+            <p class="pm-alert pm-warn">Kein Antrag dieses Teams in der Liste.</p>
+        }
+        else
+        {
+            <div class="pm-tbl">
+                <table>
+                    <thead><tr><th>Antrag</th><th>Verwendungszweck</th><th class="pm-geld">Sachkosten</th><th>Änderungen</th><th></th></tr></thead>
+                    <tbody>
+                        @foreach (var a in antraege.Antraege)
+                        {
+                            var nr = a.Antragsnummer;
+                            <tr>
+                                <td class="pm-nowrap"><b>@nr</b><br /><span class="pm-small pm-muted">@a.Innenauftrag<br />@a.Antragsteller</span></td>
+                                <td class="pm-small">@a.Investition@(a.Anschaffung is { } art ? $" ({art})" : "")</td>
+                                <td class="pm-geld">@Geld.Text(a.Sachkosten)</td>
+                                <td class="pm-small">@(a.TopfId is null ? "neu" : a.Aenderungen.Count == 0 ? "unverändert" : string.Join("; ", a.Aenderungen))</td>
+                                <td>
+                                    @if (a.TopfId is null)
+                                    {
+                                        <label class="pm-check pm-small"><input type="checkbox" checked="@antraegeAnlegen.Contains(nr)" @onchange="e => AntragUmschalten(nr, e)" /> anlegen</label>
+                                    }
+                                    else
+                                    {
+                                        <span class="pm-small pm-muted">aktualisieren</span>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+            <BegruendeterButton Text="Übernehmen" Haupt="true" Click="AntraegeUebernehmenAsync" Beschaeftigt="@beschaeftigt"
+                                Freigabe="@(antraege.Antraege.Any(a => a.TopfId is not null || antraegeAnlegen.Contains(a.Antragsnummer)) ? Freigabe.Ja : Freigabe.Nein("Kein Antrag ausgewählt – neue bei „anlegen“ ankreuzen."))" />
+        }
+    }
+</section>
+
+<section class="pm-card">
     <h2>Investitionsstand per KI-Chat</h2>
     <p class="pm-small pm-muted">Den Stand der Investitionen gibt es nur als PDF. ProfOMat liest kein PDF – das übernimmt ein KI-Chat Ihrer Wahl:
         1. Prompt kopieren, 2. zusammen mit dem PDF „Stand Investitionen“ in den KI-Chat geben, 3. das JSON aus der Antwort hier einfügen und prüfen.
@@ -47,7 +120,7 @@
         <pre class="pm-signiertext">@InvestitionenJson.Prompt(laborbereich)</pre>
     </details>
     <div class="pm-row">
-        <button type="button" class="pm-btn" @onclick="KopierenAsync">Prompt kopieren</button>
+        <button type="button" class="pm-btn" @onclick="() => KopierenAsync(false)">Prompt kopieren</button>
         @if (kopiert is { } k)
         {
             <span class="pm-small @(k ? "pm-muted" : "pm-za-krit")">@(k ? "In der Zwischenablage." : "Kopieren nicht möglich – den Prompt oben markieren und kopieren.")</span>
@@ -87,7 +160,10 @@
     private readonly HashSet<string> sqmAnlegen = new(StringComparer.Ordinal), kiAnlegen = new(StringComparer.Ordinal);
     private string? json, laborbereich = "Automatisierungstechnik", fehler;
     private bool beschaeftigt;
-    private bool? kopiert;
+    private bool? kopiert, kopiertAntraege;
+    private string? antraegeJson;
+    private Antragsimport? antraege;
+    private readonly HashSet<string> antraegeAnlegen = new(StringComparer.Ordinal);
     private IJSObjectReference? modul;
 
     private async Task SqmGewaehltAsync(InputFileChangeEventArgs e)
@@ -173,17 +249,60 @@
         return AusfuehrenAsync(d => d.InvestitionenUebernehmenAsync(TeamId, text, anlegen), () => (ki, json) = (null, null));
     }
 
-    private async Task KopierenAsync()
+    private async Task KopierenAsync(bool fuerAntraege)
     {
+        bool ok;
         try
         {
             modul ??= await JS.InvokeAsync<IJSObjectReference>("import", Navigation.ToAbsoluteUri("finanzen.js").ToString());
-            kopiert = await modul.InvokeAsync<bool>("kopieren", InvestitionenJson.Prompt(laborbereich));
+            ok = await modul.InvokeAsync<bool>("kopieren", fuerAntraege ? InvestitionsantraegeJson.Prompt(laborbereich) : InvestitionenJson.Prompt(laborbereich));
         }
         catch (JSException)
         {
-            kopiert = false;
+            ok = false;
         }
+
+        if (fuerAntraege)
+        {
+            kopiertAntraege = ok;
+        }
+        else
+        {
+            kopiert = ok;
+        }
+    }
+
+    private async Task AntraegePruefenAsync()
+    {
+        fehler = null;
+        antraegeAnlegen.Clear();
+        try
+        {
+            var text = antraegeJson!;
+            antraege = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<FinanzDienst>().AntraegeVorschauAsync(TeamId, text));
+        }
+        catch (FachlicherFehler ex)
+        {
+            (fehler, antraege) = (ex.Message, null);
+        }
+    }
+
+    private void AntragUmschalten(string nr, ChangeEventArgs e)
+    {
+        if (e.Value is true)
+        {
+            antraegeAnlegen.Add(nr);
+        }
+        else
+        {
+            antraegeAnlegen.Remove(nr);
+        }
+    }
+
+    private Task AntraegeUebernehmenAsync()
+    {
+        var (text, anlegen) = (antraegeJson!, antraegeAnlegen.ToList());
+        return AusfuehrenAsync(d => d.AntraegeUebernehmenAsync(TeamId, text, anlegen), () => (antraege, antraegeJson) = (null, null));
     }
 
     public async ValueTask DisposeAsync()

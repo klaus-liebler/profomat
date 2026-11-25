@@ -109,11 +109,15 @@ public sealed class HausarbeitGespraechTests
         text.ShouldContain("bis zum 05.12.2026 über Ihren persönlichen Link:\nhttps://x.test/hausarbeit/bestaetigen/1/abc");
         text.ShouldContain("terminlichen Einschränkungen für das Erörterungsgespräch");
         text.ShouldNotContain("\n\n\n");
-        h.Bestaetigungsmail(team, m, "l", null, "x").Betreff.ShouldBe("Hausarbeit Informatik für Maschinenbau: Ihr Thema – bitte bestätigen");
+        var ohneFrist = h.Bestaetigungsmail(team, m, "l", null, "x");
+        ohneFrist.Betreff.ShouldBe("Hausarbeit Informatik für Maschinenbau: Ihr Thema – bitte bestätigen");
+        ohneFrist.Text.ShouldContain("Annahme des Themas über Ihren persönlichen Link:");   // leerer Platzhalter ohne doppeltes Leerzeichen
+        Hausarbeit.StandardBestaetigungVorlage.ShouldContain("des Themas {BisFrist} über");
+        Bestaetigungsplatzhalter.Ersetzen("Bitte {BisFrist}. Danke", new Dictionary<string, string> { ["BisFrist"] = "" }).ShouldBe("Bitte. Danke");
 
         Should.Throw<FachlicherFehler>(() => h.BestaetigungsvorlageSetzen("x", "Hallo {Name}, ohne Link")).Message.ShouldContain("{Link}");
         Should.Throw<FachlicherFehler>(() => h.BestaetigungsvorlageSetzen("x {Termin}", "{Link}")).Message.ShouldContain("{Termin}");
-        h.BestaetigungsvorlageSetzen("Thema für {Vorname}", "Hallo {Vorname}: {Thema}{Beschreibung}\n{Link}{BisFrist}");
+        h.BestaetigungsvorlageSetzen("Thema für {Vorname}", "Hallo {Vorname}: {Thema}{Beschreibung}\n{Link} {BisFrist}");
         h.Bestaetigungsmail(team, m, "L", null, "A").ShouldBe(("Thema für Vorname1", "Hallo Vorname1: 1. Zahnrad-Generator (Software)Aus Modul und Zähnezahl entsteht ein Zahnradpaar.\nL"));
         h.BestaetigungsvorlageSetzen(Hausarbeit.StandardBestaetigungBetreff, Hausarbeit.StandardBestaetigungVorlage);
         (h.BestaetigungBetreff, h.BestaetigungVorlage).ShouldBe((null, null));

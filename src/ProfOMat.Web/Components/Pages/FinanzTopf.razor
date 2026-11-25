@@ -17,7 +17,11 @@ else if (topf is not null)
     <div class="pm-head">
         <div>
             <h1>@(topf.Art == Topfart.Kostenstelle ? $"Kostenstelle {topf.Kennung}" : topf.Kennung)</h1>
-            <p>@FinanzTeam.Artname(topf.Art) · @topf.Bezeichnung@(topf.Archiviert ? " · archiviert" : "")</p>
+            <p>@FinanzTeam.Artname(topf.Art) · @topf.Bezeichnung@(topf.Innenauftrag is { } ia ? $" · Innenauftrag {ia}" : "")@(topf.Archiviert ? " · archiviert" : "")</p>
+            @if (topf.Zweck is { } zweck)
+            {
+                <p class="pm-small pm-muted">Zweck: @zweck</p>
+            }
         </div>
         <div class="pm-row">
             <BegruendeterButton Text="@(topf.Archiviert ? "Wieder aktivieren" : "Archivieren")" Click="ArchivierenAsync" Beschaeftigt="@beschaeftigt" />
@@ -206,6 +210,36 @@ else if (topf is not null)
                     <span class="pm-hilfe">Budgetierungsrichtlinie 2026, Ziffer 5.4: Überträge über 12 % können zentral eingezogen werden.</span>
                 </div>
             }
+            @if (topf.Zweckgebunden)
+            {
+                <div class="pm-field pm-field-weit">
+                    <label class="pm-lbl" for="zweck">Verwendungszweck (laut Antrag)</label>
+                    <textarea id="zweck" class="pm-textarea" rows="2" @bind="a.Zweck" maxlength="@Topf.ZweckMaxLaenge"></textarea>
+                </div>
+                <div class="pm-field pm-field-weit">
+                    <label class="pm-lbl" for="begruendung">Begründung (laut Antrag)</label>
+                    <textarea id="begruendung" class="pm-textarea" rows="4" @bind="a.Begruendung" maxlength="@Topf.BegruendungMaxLaenge"></textarea>
+                </div>
+                @if (topf.Art == Topfart.Investition)
+                {
+                    <div class="pm-field">
+                        <label class="pm-lbl" for="anschaffung">Neu oder Ersatz</label>
+                        <select id="anschaffung" class="pm-select" @bind="a.Anschaffung">
+                            <option value="">–</option>
+                            <option value="@Anschaffungsart.Neu">Neu</option>
+                            <option value="@Anschaffungsart.Ersatz">Ersatz</option>
+                        </select>
+                    </div>
+                }
+                <div class="pm-field">
+                    <label class="pm-lbl" for="laborbereich">Laborbereich</label>
+                    <input id="laborbereich" class="pm-input" @bind="a.Laborbereich" maxlength="100" />
+                </div>
+                <div class="pm-field">
+                    <label class="pm-lbl" for="beschluss">Beschluss vom</label>
+                    <input id="beschluss" type="date" class="pm-input" @bind="a.Beschluss" />
+                </div>
+            }
             <div class="pm-field">
                 <label class="pm-lbl" for="verantwortlich">Verantwortlich</label>
                 <input id="verantwortlich" class="pm-input" @bind="a.Verantwortlich" maxlength="@Topf.TextMaxLaenge" />
@@ -265,6 +299,16 @@ else if (topf is not null)
         public string? Grenze { get; set; }
 
         public string? Notiz { get; set; }
+
+        public string? Zweck { get; set; }
+
+        public string? Begruendung { get; set; }
+
+        public string? Anschaffung { get; set; }
+
+        public string? Laborbereich { get; set; }
+
+        public DateOnly? Beschluss { get; set; }
     }
 
     private Topf? topf;
@@ -301,6 +345,7 @@ else if (topf is not null)
             Bezeichnung = x.Bezeichnung, Personal = Geld.Eingabe(x.BewilligtPersonal), Sach = Geld.Eingabe(x.BewilligtSach), Von = x.LaufzeitVon, Bis = x.LaufzeitBis,
             Bestellschluss = x.Bestellschluss, Rechnungsschluss = x.Rechnungsschluss, Innenauftrag = x.Innenauftrag, Kategorie = x.Kategorie,
             Verantwortlich = x.Verantwortlich, Grenze = Geld.Eingabe(x.UebertragsgrenzeProzent), Notiz = x.Notiz,
+            Zweck = x.Zweck, Begruendung = x.Begruendung, Anschaffung = x.Anschaffung?.ToString(), Laborbereich = x.Laborbereich, Beschluss = x.Beschluss,
         };
         if (topf.Art == Topfart.Kostenstelle)
         {
@@ -343,7 +388,8 @@ else if (topf is not null)
         topf!.Art == Topfart.Sqm ? Geld.Lesen(a.Personal, "Personalkosten") : 0,
         topf.Zweckgebunden ? Geld.Lesen(a.Sach, "Sachkosten") : 0,
         a.Kategorie is { Length: > 0 } k ? k : null, a.Von, a.Bis, a.Bestellschluss, a.Rechnungsschluss, a.Verantwortlich,
-        topf.Zweckgebunden ? topf.UebertragsgrenzeProzent : Geld.Lesen(a.Grenze, "Übertragsgrenze"), a.Notiz)), "Gespeichert.");
+        topf.Zweckgebunden ? topf.UebertragsgrenzeProzent : Geld.Lesen(a.Grenze, "Übertragsgrenze"), a.Notiz,
+        a.Zweck, a.Begruendung, Enum.TryParse<Anschaffungsart>(a.Anschaffung, out var art) ? art : null, a.Laborbereich, a.Beschluss)), "Gespeichert.");
 
     private Task ArchivierenAsync() => AusfuehrenAsync(d => d.ArchivierenAsync(TeamId, Id, !topf!.Archiviert), topf!.Archiviert ? "Wieder aktiv." : "Archiviert – erscheint nicht mehr im Cockpit.");
 

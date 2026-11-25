@@ -20,7 +20,7 @@ namespace ProfOMat.Infrastructure.Datenbank;
 public sealed class ProfOMatDbContext(DbContextOptions<ProfOMatDbContext> optionen) : DbContext(optionen)
 {
     /// <summary>Erhöhen, wenn sich das Modell ändert: eine ältere Datei wird dann beim Start abgelehnt (statt still falsch zu laufen).</summary>
-    public const int Schemaversion = 16;
+    public const int Schemaversion = 17;
 
     /// <summary>Tabellen, die mit Version 10 dazugekommen sind (Aufwertung 9 → 10 legt nur diese an).</summary>
     internal static readonly string[] TabellenAbVersion10 = ["Hausarbeiten", "HausarbeitThemen", "HausarbeitPersonen", "HausarbeitTeams", "Teammitglieder", "Mailentwuerfe", "Mailsignaturen", "MailsignaturBilder"];
@@ -403,6 +403,8 @@ public sealed class ProfOMatDbContext(DbContextOptions<ProfOMatDbContext> option
             e.Property(t => t.Kennung).HasMaxLength(Topf.KennungMaxLaenge);
             e.Property(t => t.Bezeichnung).HasMaxLength(Topf.TextMaxLaenge);
             e.Property(t => t.Notiz).HasMaxLength(Topf.NotizMaxLaenge);
+            e.Property(t => t.Zweck).HasMaxLength(Topf.ZweckMaxLaenge);
+            e.Property(t => t.Begruendung).HasMaxLength(Topf.BegruendungMaxLaenge);
             e.HasOne<Laborteam>().WithMany().HasForeignKey(t => t.TeamId).OnDelete(DeleteBehavior.Cascade);
         });
         m.Entity<Buchung>(e =>

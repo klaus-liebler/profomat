@@ -92,6 +92,10 @@ try {
     await seite.warteAuf(`[...document.querySelectorAll('td select')].every(s => s.value !== '')`);
     await seite.eval(`document.querySelector('details.pm-vorlage').open = true`);
     await seite.warteAuf(`document.querySelector('details.pm-vorlage pre')?.textContent.includes('terminlichen Einschränkungen')`);
+    pruefen(await seite.eval(`(() => { const t = document.querySelector('#bv-text').getBoundingClientRect(); const c = document.querySelector('.pm-platzhalter .pm-chip').getBoundingClientRect();
+        return c.top >= t.bottom; })()`), 'Platzhalter überlappen das Textfeld');
+    await seite.eval(`document.querySelector('.pm-platzhalter').scrollIntoView({ block: 'center' })`);
+    await foto('vorlage');
     await seite.eingeben('#bv-text', 'Hallo {Name}, ohne Link');
     await seite.warteAuf(`document.querySelector('details.pm-vorlage pre').textContent.includes('ohne Link')`);
     await seite.klickText('button', 'Vorlage speichern');

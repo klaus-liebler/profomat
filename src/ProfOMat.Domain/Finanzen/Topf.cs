@@ -31,7 +31,19 @@ public sealed record Topfangaben(
     DateOnly? Rechnungsschluss = null,
     string? Verantwortlich = null,
     decimal UebertragsgrenzeProzent = Topf.StandardUebertragsgrenze,
-    string? Notiz = null);
+    string? Notiz = null,
+    string? Zweck = null,
+    string? Begruendung = null,
+    Anschaffungsart? Anschaffung = null,
+    string? Laborbereich = null,
+    DateOnly? Beschluss = null);
+
+/// <summary>Investition: neues Gerät oder Ersatz (laut Antrag).</summary>
+public enum Anschaffungsart
+{
+    Neu,
+    Ersatz,
+}
 
 /// <summary>Eine Mittelquelle eines Laborteams.</summary>
 public sealed partial class Topf
@@ -90,6 +102,23 @@ public sealed partial class Topf
 
     public string? Notiz { get; private set; }
 
+    public const int ZweckMaxLaenge = 1000;
+    public const int BegruendungMaxLaenge = 6000;
+
+    /// <summary>Verwendungszweck laut Antrag (bei Investitionen die Kurzbeschreibung „Investition“ der Beschlussliste).</summary>
+    public string? Zweck { get; private set; }
+
+    /// <summary>Begründung laut Antrag („Was passiert, wenn die Investition nicht getätigt werden kann?“).</summary>
+    public string? Begruendung { get; private set; }
+
+    public Anschaffungsart? Anschaffung { get; private set; }
+
+    /// <summary>Laborbereich laut Antrag, z. B. „Automatisierungstechnik“.</summary>
+    public string? Laborbereich { get; private set; }
+
+    /// <summary>Datum des Beschlusses (Fakultätsrat bzw. Präsidium).</summary>
+    public DateOnly? Beschluss { get; private set; }
+
     public bool Archiviert { get; private set; }
 
     public decimal Bewilligt => BewilligtPersonal + BewilligtSach;
@@ -99,7 +128,7 @@ public sealed partial class Topf
     public string Anzeige => Art == Topfart.Kostenstelle ? $"Kostenstelle {Kennung}" : $"{Kennung} · {Bezeichnung}";
 
     public Topfangaben Angaben => new(Bezeichnung, Innenauftrag, BewilligtPersonal, BewilligtSach, Kategorie, LaufzeitVon, LaufzeitBis,
-        Bestellschluss, Rechnungsschluss, Verantwortlich, UebertragsgrenzeProzent, Notiz);
+        Bestellschluss, Rechnungsschluss, Verantwortlich, UebertragsgrenzeProzent, Notiz, Zweck, Begruendung, Anschaffung, Laborbereich, Beschluss);
 
     /// <summary>Letzter Tag, an dem Mittel noch eingesetzt werden können (Rechnungsabgabe bzw. Bestellschluss bzw. Laufzeitende).</summary>
     public DateOnly? Stichtag => Art switch
@@ -185,6 +214,11 @@ public sealed partial class Topf
         Verantwortlich = Text(a.Verantwortlich, TextMaxLaenge);
         UebertragsgrenzeProzent = a.UebertragsgrenzeProzent;
         Notiz = Text(a.Notiz, NotizMaxLaenge);
+        Zweck = Text(a.Zweck, ZweckMaxLaenge);
+        Begruendung = Text(a.Begruendung, BegruendungMaxLaenge);
+        Anschaffung = a.Anschaffung;
+        Laborbereich = Text(a.Laborbereich, 100);
+        Beschluss = a.Beschluss;
     }
 
     public void Archivieren(bool archiviert) => Archiviert = archiviert;

@@ -238,6 +238,21 @@ try {
     await seite.eval(`[...document.querySelectorAll('section')].find(s => s.innerText.includes('Investitionsstand per KI-Chat')).querySelector('button.pm-btn-haupt').click()`);
     await seite.warteAuf(`document.body.innerText.includes('Töpfe (3)')`);
     pruefe(true, 'Investitionsmaßnahme aus dem JSON angelegt');
+
+    const antraege = JSON.stringify({ format: 'profomat-investitionsantraege-v1', beschluss: `${jahr}-05-19`, antraege: [
+        { antragsnummer: `AUT-07-${String(jahr).slice(2)}`, innenauftrag: '71211637', laborbereich: 'Automatisierungstechnik', antragsteller: 'Liebler',
+            investition: 'Erstellung von Lehraufbauten für das Fach Embedded Systems: 4× STEMlab', sachkosten: 3200, art: 'Neu', begruendung: 'Sonst nur Simulationen.' },
+        { antragsnummer: `AUT-01-${String(jahr).slice(2)}`, innenauftrag: '71211631', antragsteller: 'Andere', investition: 'Fremder Antrag', sachkosten: 7500 }] });
+    await seite.eingeben('#an-json', antraege);
+    await seite.eval(`[...[...document.querySelectorAll('section')].find(s => s.innerText.includes('Investitionsanträge (Beschlussliste)')).querySelectorAll('button')].find(b => b.textContent.trim() === 'Prüfen').click()`);
+    await seite.warteAuf(`document.body.innerText.includes('1 Anträge anderer Personen übergangen')`);
+    text = await seite.text();
+    pruefe(text.includes('Innenauftrag – → 71211637') && !text.includes('Fremder Antrag'), 'Beschlussliste: eigener Antrag aktualisiert, fremder nur gezählt');
+    await seite.eval(`[...document.querySelectorAll('section')].find(s => s.innerText.includes('Investitionsanträge (Beschlussliste)')).querySelector('button.pm-btn-haupt').click()`);
+    await seite.warteAuf(`document.body.innerText.includes('1 Maßnahme(n) übernommen')`);
+    await seite.oeffnen(basis + teamUrl.replace(/^\//, ''));
+    await seite.warteAuf(`document.body.innerText.includes('Innenauftrag 71211637')`);
+    pruefe((await seite.text()).includes('Erstellung von Lehraufbauten für das Fach Embedded Systems'), 'Verwendungszweck und Innenauftrag im Cockpit');
     await seite.bild(join(bilder, 'f8-import.png'));
 
     console.log('• Notizen, Verlauf, Prognose, Einzelbuchungen');

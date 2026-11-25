@@ -115,6 +115,19 @@ public static class DatenbankInitialisierung
             version = 16;
         }
 
+        if (version == 16)
+        {
+            await SpaltenErgaenzenAsync(db, 17,
+            [
+                (typeof(ProfOMat.Domain.Finanzen.Topf), nameof(ProfOMat.Domain.Finanzen.Topf.Zweck), "TEXT NULL"),
+                (typeof(ProfOMat.Domain.Finanzen.Topf), nameof(ProfOMat.Domain.Finanzen.Topf.Begruendung), "TEXT NULL"),
+                (typeof(ProfOMat.Domain.Finanzen.Topf), nameof(ProfOMat.Domain.Finanzen.Topf.Anschaffung), "TEXT NULL"),
+                (typeof(ProfOMat.Domain.Finanzen.Topf), nameof(ProfOMat.Domain.Finanzen.Topf.Laborbereich), "TEXT NULL"),
+                (typeof(ProfOMat.Domain.Finanzen.Topf), nameof(ProfOMat.Domain.Finanzen.Topf.Beschluss), "TEXT NULL"),
+            ], abbruch);
+            version = 17;
+        }
+
         if (version != ProfOMatDbContext.Schemaversion)
         {
             throw new InvalidOperationException(
@@ -204,6 +217,32 @@ public static class DatenbankInitialisierung
 
         var info = await db.Set<Schemainfo>().SingleAsync(abbruch);
         info.Version = 16;
+        await db.SaveChangesAsync(abbruch);
+        await transaktion.CommitAsync(abbruch);
+    }
+
+    /// <summary>
+    /// Aufwertung ohne Datenverlust, wenn nur Spalten dazukommen (16 → 17: Verwendungszweck, Begründung, Neu/Ersatz, Laborbereich und Beschluss
+    /// der Töpfe aus der Beschlussliste der Investitionsanträge). Vorhandene Spalten werden übersprungen.
+    /// </summary>
+    private static async Task SpaltenErgaenzenAsync(ProfOMatDbContext db, int neueVersion, IReadOnlyList<(Type Typ, string Eigenschaft, string Sql)> spalten, CancellationToken abbruch)
+    {
+        await using var transaktion = await db.Database.BeginTransactionAsync(abbruch);
+        foreach (var (typ, eigenschaft, sqlTyp) in spalten)
+        {
+            var et = db.Model.FindEntityType(typ)!;
+            var tabelle = et.GetTableName()!;
+            var spalte = et.FindProperty(eigenschaft)!.GetColumnName();
+            var vorhanden = await db.Database.SqlQuery<int>($"SELECT COUNT(*) AS \"Value\" FROM pragma_table_info({tabelle}) WHERE name = {spalte}").SingleAsync(abbruch);
+            if (vorhanden == 0)
+            {
+                var sql = "ALTER TABLE \"" + tabelle + "\" ADD COLUMN \"" + spalte + "\" " + sqlTyp + ";";
+                await db.Database.ExecuteSqlRawAsync(sql, abbruch);
+            }
+        }
+
+        var info = await db.Set<Schemainfo>().SingleAsync(abbruch);
+        info.Version = neueVersion;
         await db.SaveChangesAsync(abbruch);
         await transaktion.CommitAsync(abbruch);
     }

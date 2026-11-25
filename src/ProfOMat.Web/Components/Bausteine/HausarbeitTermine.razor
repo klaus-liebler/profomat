@@ -193,12 +193,13 @@
                 <textarea id="v-text" class="pm-textarea" rows="14" @bind="vorlage" @bind:event="oninput"></textarea>
             </div>
         </div>
-        <p class="pm-small">Platzhalter:
+        <div class="pm-platzhalter" aria-label="Platzhalter">
+            <span class="pm-small">Platzhalter:</span>
             @foreach (var (name, text) in Terminplatzhalter.Beschreibung)
             {
-                <span class="pm-chip pm-mono" title="@text">{@name}</span>
+                <span class="pm-chip pm-mono pm-small" title="@text">{@name}</span>
             }
-        </p>
+        </div>
         @if (Unbekannte.Count > 0)
         {
             <div class="pm-alert pm-warn" role="status">Unbekannte Platzhalter: @string.Join(", ", Unbekannte.Select(u => "{" + u + "}"))</div>

@@ -167,6 +167,119 @@ public sealed partial class FinanzDienst
         return anzahl;
     }
 
+    // ------------------------------------------------------------------ Beschlussliste der Investitionsanträge (FA-719)
+
+    /// <summary>
+    /// Vorschau: Anträge, die schon Investitionstöpfe des Teams sind, und Anträge von Teammitgliedern (Nachname unter den Antragstellern)
+    /// zum Anlegen. Alle anderen werden nur gezählt – weder angezeigt noch gespeichert.
+    /// </summary>
+    public async Task<Antragsimport> AntraegeVorschauAsync(Guid teamId, string json, CancellationToken abbruch = default)
+    {
+        var (_, team) = await TeamMitRechtAsync(teamId, abbruch);
+        var inhalt = InvestitionsantraegeJson.Lesen(json);
+        var toepfe = (await ToepfeIntern(teamId, abbruch)).Where(t => t.Art == Topfart.Investition).ToDictionary(t => t.Kennung);
+        var namen = await NachnamenAsync(team, abbruch);
+        var liste = new List<Antragsvorschau>();
+        var uebrige = 0;
+        foreach (var e in inhalt.Antraege)
+        {
+            var topf = toepfe.GetValueOrDefault(e.Antragsnummer);
+            if (topf is null && !namen.Any(n => EnthaeltWort(e.Antragsteller ?? "", n)))
+            {
+                uebrige++;
+                continue;
+            }
+
+            var aenderungen = new List<string>();
+            if (topf is not null)
+            {
+                if (topf.Bewilligt != e.Sachkosten)
+                {
+                    aenderungen.Add($"bewilligt {Geld.Text(topf.Bewilligt)} → {Geld.Text(e.Sachkosten)}");
+                }
+
+                if (e.Innenauftrag is { } ia && topf.Innenauftrag != ia)
+                {
+                    aenderungen.Add($"Innenauftrag {topf.Innenauftrag ?? "–"} → {ia}");
+                }
+
+                if (topf.Zweck != e.Investition)
+                {
+                    aenderungen.Add(topf.Zweck is null ? "Verwendungszweck neu" : "Verwendungszweck geändert");
+                }
+
+                if (e.Begruendung is not null && topf.Begruendung != e.Begruendung)
+                {
+                    aenderungen.Add(topf.Begruendung is null ? "Begründung neu" : "Begründung geändert");
+                }
+            }
+
+            liste.Add(new(e.Antragsnummer, e.Innenauftrag, e.Antragsteller, e.Investition, e.Sachkosten, e.Anschaffung, e.Laborbereich, topf?.Id, aenderungen));
+        }
+
+        return new(inhalt.Beschluss, liste, uebrige);
+    }
+
+    /// <param name="anlegen">Antragsnummern aus der Vorschau, die als neue Investitionstöpfe angelegt werden sollen.</param>
+    public async Task<int> AntraegeUebernehmenAsync(Guid teamId, string json, IReadOnlyCollection<string> anlegen, CancellationToken abbruch = default)
+    {
+        ArgumentNullException.ThrowIfNull(anlegen);
+        var vorschau = await AntraegeVorschauAsync(teamId, json, abbruch);
+        var eintraege = InvestitionsantraegeJson.Lesen(json).Antraege.ToDictionary(e => e.Antragsnummer);
+        var wer = (await TeamMitRechtAsync(teamId, abbruch)).Wer;
+        var anzahl = 0;
+        foreach (var v in vorschau.Antraege)
+        {
+            var e = eintraege[v.Antragsnummer];
+            Topf? topf;
+            if (v.TopfId is { } id)
+            {
+                topf = await daten.FindenAsync<Topf>(id, abbruch);
+                if (topf is null || topf.Archiviert)
+                {
+                    continue;
+                }
+            }
+            else if (anlegen.Contains(v.Antragsnummer, StringComparer.OrdinalIgnoreCase))
+            {
+                topf = Topf.Investition(teamId, e.Antragsnummer, Kurz(e.Investition), e.Sachkosten, e.Innenauftrag);
+                daten.Hinzufuegen(topf);
+            }
+            else
+            {
+                continue;
+            }
+
+            // Eine vom Stand-Import vorläufig vergebene Bezeichnung („Investition AUT-…“) durch die Kurzbeschreibung ersetzen, eigene bleiben
+            var bezeichnung = topf.Bezeichnung.StartsWith("Investition ", StringComparison.Ordinal) ? Kurz(e.Investition) : topf.Bezeichnung;
+            topf.Aendern(topf.Angaben with
+            {
+                Bezeichnung = bezeichnung,
+                Innenauftrag = e.Innenauftrag ?? topf.Innenauftrag,
+                BewilligtPersonal = 0,
+                BewilligtSach = e.Sachkosten,
+                Verantwortlich = e.Antragsteller ?? topf.Verantwortlich,
+                Zweck = e.Investition,
+                Begruendung = e.Begruendung ?? topf.Begruendung,
+                Anschaffung = e.Anschaffung ?? topf.Anschaffung,
+                Laborbereich = e.Laborbereich ?? topf.Laborbereich,
+                Beschluss = vorschau.Beschluss ?? topf.Beschluss,
+            });
+            anzahl++;
+        }
+
+        protokoll.Eintragen(wer, "Finanzen.Investitionsantraege", $"Beschlussliste der Investitionsanträge übernommen ({anzahl} Antrag/Anträge)", teamId);
+        await daten.SpeichernAsync(abbruch);
+        return anzahl;
+    }
+
+    /// <summary>Kurzbeschreibung als Bezeichnung: bis zum ersten Doppelpunkt bzw. höchstens 120 Zeichen.</summary>
+    private static string Kurz(string investition)
+    {
+        var t = investition.Split(':', 2)[0].Trim();
+        return t.Length <= 120 ? t : t[..117].TrimEnd() + " …";
+    }
+
     // ------------------------------------------------------------------ intern
 
     private DateOnly StichtagPruefen(DateOnly? tag)

@@ -185,6 +185,10 @@ Für die echte Quelle kommt infrage (mit dem IT-Service zu klären, welches Camp
 - **Berufungsmittel:** Auftrag 58216001 (Berufungs- und Bleibemittel, Richtlinie Ziffer 5.4 Abs. 5) fließt über den Vortrag in die Kostenstelle;
   er zählt nicht zur Bezugsgröße der Übertragsgrenze.
 
+- **Beschlussliste (FA-719):** zweiter KI-Prompt; Zuordnung über die Antragsnummer, Zugehörigkeit zum Team über die Nachnamen der Mitglieder
+  (eine Person unter mehreren Antragstellern genügt). Felder am `Topf` (Schema 17): `Zweck`, `Begruendung`, `Anschaffung` (Neu/Ersatz),
+  `Laborbereich`, `Beschluss`. Erst die Beschlussliste, dann den Stand übernehmen; der Stand-Import findet die Töpfe über die Antragsnummer.
+
 ### Stand per KI-Chat (FA-703)
 
 Die Investitionsliste gibt es nur als PDF. Statt eines eigenen PDF-Parsers liefert ProfOMat einen Prompt; die Auswertung macht ein
