@@ -1,0 +1,199 @@
+@*
+    Budgetprognose der Laborkostenstelle (FA-713) nach den Regeln der Fakultät IuI; die gespeicherte Prognose des Folgejahres nutzt die Zeitachse.
+*@
+@using System.Globalization
+@using ProfOMat.Application.Finanzen
+@using ProfOMat.Domain.Finanzen
+@inject Vorgang Vorgang
+@inject NotificationService Hinweise
+
+<div class="pm-row">
+    <label class="pm-lbl" for="prog-jahr">Budgetjahr</label>
+    <select id="prog-jahr" class="pm-select pm-fin-kurz" value="@jahr" @onchange="JahrAsync">
+        @for (var j = Heute.Year + 1; j >= Heute.Year - 2; j--)
+        {
+            <option value="@j">@j</option>
+        }
+    </select>
+    @if (ansicht is { Vorlage: true })
+    {
+        <StatusPille Stil="info">Vorlage aus @(jahr - 1) – noch nicht gespeichert</StatusPille>
+    }
+    else if (ansicht is { Neu: true })
+    {
+        <StatusPille Stil="neutral">noch nicht erfasst</StatusPille>
+    }
+</div>
+<p class="pm-small pm-muted">Das Sachmittelbudget @jahr entsteht aus den Daten von @(jahr - 1): Anmeldungen in Campusnet × anrechenbare SWS der budgetierungsfähigen
+    Praktika, Projekte und Studienarbeiten (FR-Liste), verfallene SWS, nicht anrechenbare SWS aus Abschlussarbeiten und die Personen (Stellenhülsen).
+    Die gespeicherte Prognose des Folgejahres rechnet die Zeitachse im Januar ein.</p>
+
+@if (fehler is not null)
+{
+    <div class="pm-alert pm-crit" role="alert">@fehler</div>
+}
+
+<h3>Veranstaltungen</h3>
+<div class="pm-tbl">
+    <table>
+        <thead><tr><th>Semester</th><th>Veranstaltung</th><th>Art</th><th class="pm-geld">Teilnehmende</th><th class="pm-geld">SWS</th><th class="pm-geld">Betrag</th><th></th></tr></thead>
+        <tbody>
+            @foreach (var z in zeilen)
+            {
+                var zeile = z;
+                <tr>
+                    <td><input class="pm-input pm-fin-kurz" @bind="zeile.Semester" placeholder="SoSe @(jahr - 1)" aria-label="Semester" /></td>
+                    <td><input class="pm-input" @bind="zeile.Bezeichnung" aria-label="Veranstaltung" /></td>
+                    <td>
+                        <select class="pm-select" @bind="zeile.Art" aria-label="Art">
+                            @foreach (var a in Enum.GetValues<Veranstaltungsart>()) { <option value="@a">@a</option> }
+                        </select>
+                    </td>
+                    <td class="pm-geld"><input class="pm-input pm-fin-kurz" inputmode="numeric" @bind="zeile.Teilnehmende" aria-label="Teilnehmende" /></td>
+                    <td class="pm-geld"><input class="pm-input pm-fin-kurz" inputmode="decimal" @bind="zeile.Sws" aria-label="SWS" /></td>
+                    <td class="pm-geld">@Geld.Text(Zahl(zeile.Teilnehmende) * Zahl(zeile.Sws) * Zahl(satzStudSws))</td>
+                    <td><button type="button" class="pm-btn pm-btn-klein" @onclick="() => zeilen.Remove(zeile)" aria-label="Zeile entfernen">✕</button></td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</div>
+<button type="button" class="pm-linkbutton" @onclick="() => zeilen.Add(new Zeile { Semester = zeilen.LastOrDefault()?.Semester ?? Semester(jahr - 1, false) })">+ Veranstaltung</button>
+
+<h3>Weitere Angaben</h3>
+<div class="pm-fields">
+    <div class="pm-field"><label class="pm-lbl" for="p-prof">Professuren/LfbA (Stellenhülsen)</label><input id="p-prof" class="pm-input" inputmode="decimal" @bind="professuren" /></div>
+    <div class="pm-field"><label class="pm-lbl" for="p-ma">WM/MTV/Doktorand/innen</label><input id="p-ma" class="pm-input" inputmode="decimal" @bind="mitarbeitende" /></div>
+    <div class="pm-field"><label class="pm-lbl" for="p-vs">Verfallene SWS Sommersemester</label><input id="p-vs" class="pm-input" inputmode="decimal" @bind="verfallenSoSe" /></div>
+    <div class="pm-field"><label class="pm-lbl" for="p-vw">Verfallene SWS Wintersemester</label><input id="p-vw" class="pm-input" inputmode="decimal" @bind="verfallenWiSe" /></div>
+    <div class="pm-field"><label class="pm-lbl" for="p-na">Nicht anrechenbare SWS (Abschlussarbeiten)</label><input id="p-na" class="pm-input" inputmode="decimal" @bind="nichtAnrechenbar" /></div>
+    <div class="pm-field pm-field-weit"><label class="pm-lbl" for="p-notiz">Notiz</label><input id="p-notiz" class="pm-input" @bind="notiz" maxlength="2000" /></div>
+</div>
+<details class="pm-za-tabelle">
+    <summary>Sätze (Fakultät IuI)</summary>
+    <div class="pm-fields">
+        <div class="pm-field"><label class="pm-lbl" for="s-1">€ je Studierendem und SWS</label><input id="s-1" class="pm-input" inputmode="decimal" @bind="satzStudSws" /></div>
+        <div class="pm-field"><label class="pm-lbl" for="s-2">€ je verfallener bzw. nicht anrechenbarer SWS</label><input id="s-2" class="pm-input" inputmode="decimal" @bind="satzSws" /></div>
+        <div class="pm-field"><label class="pm-lbl" for="s-3">höchstens € je Semester (verfallene SWS)</label><input id="s-3" class="pm-input" inputmode="decimal" @bind="hoechst" /></div>
+        <div class="pm-field"><label class="pm-lbl" for="s-4">€ je Professur/LfbA</label><input id="s-4" class="pm-input" inputmode="decimal" @bind="satzProf" /></div>
+        <div class="pm-field"><label class="pm-lbl" for="s-5">€ je WM/MTV/Doktorand/in</label><input id="s-5" class="pm-input" inputmode="decimal" @bind="satzMa" /></div>
+    </div>
+</details>
+
+@{
+    var lehre = zeilen.Sum(z => Zahl(z.Teilnehmende) * Zahl(z.Sws)) * Zahl(satzStudSws);
+    var verf = Math.Min(Zahl(verfallenSoSe) * Zahl(satzSws), Zahl(hoechst)) + Math.Min(Zahl(verfallenWiSe) * Zahl(satzSws), Zahl(hoechst));
+    var absch = Zahl(nichtAnrechenbar) * Zahl(satzSws);
+    var pers = (Zahl(professuren) * Zahl(satzProf)) + (Zahl(mitarbeitende) * Zahl(satzMa));
+    var summe = lehre + verf + absch + pers;
+}
+<dl class="pm-dl pm-fin-zahlen">
+    <dt>Lehre (Praktika, Projekte, Studienarbeiten)</dt><dd>@Geld.Text(lehre)</dd>
+    <dt>Verfallene SWS</dt><dd>@Geld.Text(verf)</dd>
+    <dt>Abschlussarbeiten</dt><dd>@Geld.Text(absch)</dd>
+    <dt>Personen</dt><dd>@Geld.Text(pers)</dd>
+    <dt><b>Prognose @jahr</b></dt><dd><b>@Geld.Text(summe)</b></dd>
+    @if (ansicht?.Gebucht is { } g)
+    {
+        <dt>Gebucht @jahr</dt><dd>@Geld.Text(g) (Abweichung @Geld.Text(g - summe))</dd>
+    }
+</dl>
+<div class="pm-row">
+    <BegruendeterButton Text="Prognose speichern" Haupt="true" Click="SpeichernAsync" Beschaeftigt="@beschaeftigt" />
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public Guid TeamId { get; set; }
+
+    [Parameter, EditorRequired]
+    public Guid TopfId { get; set; }
+
+    [Parameter, EditorRequired]
+    public DateOnly Heute { get; set; }
+
+    private sealed class Zeile
+    {
+        public string? Semester { get; set; }
+
+        public string? Bezeichnung { get; set; }
+
+        public Veranstaltungsart Art { get; set; }
+
+        public string? Teilnehmende { get; set; }
+
+        public string? Sws { get; set; }
+    }
+
+    private static readonly CultureInfo De = CultureInfo.GetCultureInfo("de-DE");
+
+    private int jahr;
+    private Prognoseansicht? ansicht;
+    private List<Zeile> zeilen = [];
+    private string? professuren, mitarbeitende, verfallenSoSe, verfallenWiSe, nichtAnrechenbar, notiz, fehler;
+    private string? satzStudSws, satzSws, hoechst, satzProf, satzMa;
+    private bool beschaeftigt;
+
+    private static decimal Zahl(string? s) => decimal.TryParse((s ?? "").Replace("€", "", StringComparison.Ordinal).Trim(), NumberStyles.Number, De, out var d) ? d : 0;
+
+    private static string T(decimal d) => d.ToString("0.##", De);
+
+    private static string Semester(int jahr, bool winter) => winter ? $"WiSe {jahr}/{(jahr + 1) % 100:00}" : $"SoSe {jahr}";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (jahr == 0)
+        {
+            jahr = Heute.Year + 1;
+            await LadenAsync();
+        }
+    }
+
+    private async Task JahrAsync(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value as string, out var j))
+        {
+            jahr = j;
+            await LadenAsync();
+        }
+    }
+
+    private async Task LadenAsync()
+    {
+        fehler = null;
+        ansicht = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<FinanzDienst>().PrognoseAsync(TeamId, TopfId, jahr));
+        var p = ansicht.Prognose;
+        zeilen = [.. p.Veranstaltungen.OrderBy(v => v.Nr).Select(v => new Zeile { Semester = v.Semester, Bezeichnung = v.Bezeichnung, Art = v.Art, Teilnehmende = v.Teilnehmende.ToString(De), Sws = T(v.Sws) })];
+        if (zeilen.Count == 0)
+        {
+            zeilen.Add(new Zeile { Semester = Semester(jahr - 1, false) });
+        }
+
+        (professuren, mitarbeitende, verfallenSoSe, verfallenWiSe, nichtAnrechenbar, notiz) =
+            (T(p.Professuren), T(p.Mitarbeitende), T(p.VerfalleneSwsSoSe), T(p.VerfalleneSwsWiSe), T(p.NichtAnrechenbareSws), p.Notiz);
+        (satzStudSws, satzSws, hoechst, satzProf, satzMa) = (T(p.SatzStudierendeSws), T(p.SatzSws), T(p.HoechstVerfallenJeSemester), T(p.SatzProfessur), T(p.SatzMitarbeitende));
+    }
+
+    private async Task SpeichernAsync()
+    {
+        fehler = null;
+        beschaeftigt = true;
+        try
+        {
+            var liste = zeilen.Select(z => (z.Semester ?? "", z.Bezeichnung ?? "", z.Art, (int)Zahl(z.Teilnehmende), Zahl(z.Sws))).ToList();
+            var j = jahr;
+            await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<FinanzDienst>().PrognoseSpeichernAsync(TeamId, TopfId, j, Zahl(professuren), Zahl(mitarbeitende),
+                Zahl(verfallenSoSe), Zahl(verfallenWiSe), Zahl(nichtAnrechenbar), liste, (Zahl(satzStudSws), Zahl(satzSws), Zahl(hoechst), Zahl(satzProf), Zahl(satzMa)), notiz));
+            Hinweise.Notify(NotificationSeverity.Success, $"Budgetprognose {j} gespeichert.");
+            await LadenAsync();
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+        }
+        finally
+        {
+            beschaeftigt = false;
+        }
+    }
+}

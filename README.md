@@ -2,7 +2,8 @@
 
 Webanwendung für Professorinnen und Professoren der Hochschule Osnabrück: Prüfungsabläufe digital, mit Unterschrift, ohne Papier.
 Funktionen: **Anmeldung mündlicher Drittprüfungen** (ATPO § 18 Abs. 1 Satz 3), **Klausuren** (Prüfungsliste importieren, Räume und Sitzplätze, Serienbrief-Daten, Punkte, Noten, Veröffentlichung mit Statistik) und
-**Mündliche Prüfung live** (Fragen, Punkte, Bemerkungen und Zurückstellungen per Tastatur protokollieren, Note läuft mit; Protokoll-PDF mit Erst-/Zweitprüfung, festgelegter Note und Unterschriftsfeldern). Dazu als persönliche Hilfe **Verteiler beschriften** (Schaltschrank nachbauen, Geräte beschriften, Streifen-PDF mit Schnittmarken). Aufbau und Leitlinien folgen
+**Mündliche Prüfung live** (Fragen, Punkte, Bemerkungen und Zurückstellungen per Tastatur protokollieren, Note läuft mit; Protokoll-PDF mit Erst-/Zweitprüfung, festgelegter Note und Unterschriftsfeldern). Dazu unter *Nerd Tools* **Verteiler beschriften** (Schaltschrank nachbauen, Geräte beschriften, Streifen-PDF mit Schnittmarken) und **Gefache lasern** (Teilungseinsätze für Euro-Lagerboxen u. a., 3D-Vorschau, Schnittvorlagen SVG/DXF
+für den Lasercutter). Aufbau und Leitlinien folgen
 **VibeVHS** (`C:\repos\vibevhs`).
 
 | Dokument | Inhalt |
@@ -34,8 +35,13 @@ Testkonten (Testanmeldung ohne Passwort; Mailadressen `…@demo.invalid`, außer
 Ablauf zum Ausprobieren: *Antrag stellen* (ohne Anmeldung, Mail z. B. `…@stud.hs-osnabrueck.de`) → Postausgang: Link öffnen und
 bestätigen → als Mustermann Termin festlegen und unterschreiben → als Beispiel bestellen → PDF.
 Klausuren: als Mustermann unter *Klausuren* die Datei `tools/Testdaten/pruefungsliste-beispiel.csv` (57 erfundene Personen) hochladen. Der Raum SI 0012 hat einen Beispielgrundriss (*Räume → Grundriss*).
+Hausarbeiten: unter *Hausarbeiten* `tools/Testdaten/pruefungsliste-mehrere.csv` hochladen und eine Prüfung wählen, unter *Themen* die Themenliste
+der Modulwebseite einfügen, Teams mit Wünschen anlegen, zuteilen, *Bestätigungsmails erstellen* → *Mails zum Versenden* (.eml fürs Desktop-Outlook;
+Signatur vorher unter *Profil → Mailsignatur* hochladen).
 Mündliche Prüfung live: als Klaus Liebler (oder Philip Niemeyer, Erika Mustermann) unter *Live-Protokoll* eine Bezeichnung eingeben, Enter, dann z. B. `7⏎5⏎4⏎ 8⏎⏎z⏎ 8⏎4⏎` tippen.
-Verteiler beschriften: unter *Persönlich → Verteiler beschriften* einen Schrank anlegen, freien Platz (+) anklicken, Gerät wählen, rechts beschriften, unten *PDF erstellen*.
+Verteiler beschriften: unter *Nerd Tools → Verteiler beschriften* einen Schrank anlegen, freien Platz (+) anklicken, Gerät wählen, rechts beschriften, unten *PDF erstellen*.
+Gefache lasern: unter *Nerd Tools → Gefache lasern* ein Gefach anlegen (Euro-Lagerbox vorbelegt), Höhe und Fächer einstellen, unten die
+Schnittvorlagen laden; *Öffentlich sichtbar* zeigt es allen anderen, die es als Vorlage übernehmen können. Das three.js-Bündel der 3D-Vorschau baut `tools/Three/README.md`.
 Der Katalog (Mock) enthält die Maschinenbau-Studiengänge der Hochschule (Osnabrück und Lingen); Prüfungsordnungen und Prüfungen darin sind erfunden.
 
 Einen Schlüssel zum Testen erzeugt `openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -aes-256-cbc -out test.pem`.
@@ -51,6 +57,10 @@ node tests\Browser\ablauf.mjs http://localhost:5310 <Ordner>  # Drittprüfung im
 node tests\Browser\klausur.mjs http://localhost:5310 <Ordner> # Klausurablauf (frische Datenbank)
 node tests\Browser\muendlich.mjs http://localhost:5310 <Ordner> # Mündliche Prüfung live: Tastatur, Bemerkung, Protokoll-PDF, 390 px
 node tests\Browser\beschriftung.mjs http://localhost:5310 <Ordner> # Verteiler beschriften: Klick, Ziehen, Pfeiltasten, PDF, 390 px
+node tests\Browser\gefach.mjs http://localhost:5310 <Ordner>       # Gefache lasern: 3D, Höhe ≤ Stapelhöhe, Fachgrößen, SVG/DXF/ZIP, öffentlich/Vorlage, 390 px
+node tests\Browser\hausarbeit.mjs http://localhost:5310 <Ordner>  # Hausarbeit: Signatur, Themen, Teams, .eml, Bestätigungslink, 390 px (frische Datenbank)
+node tests\Browser\finanzen.mjs http://localhost:5310 <Ordner>    # Finanzen: Team, SAP-Auszüge, Cockpit, Zeitachse, Aufteilen, Planung, Auslagen (XLSX), Hilfskräfte, SQM-Excel, KI-JSON, 390 px
+node tests\Browserinanzen.mjs http://localhost:5310 <Ordner>    # Finanzen: Team, SAP-Auszüge, Cockpit, Zeitachse, Aufteilen, Planung, Auslagen (XLSX), Hilfskräfte, SQM-Excel, KI-JSON, 390 px
 ```
 
 ## Betrieb (Kurzfassung)

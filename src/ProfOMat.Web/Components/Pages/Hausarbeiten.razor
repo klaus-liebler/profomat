@@ -1,0 +1,168 @@
+@page "/hausarbeiten"
+@attribute [Authorize]
+@using ProfOMat.Application.Hausarbeiten
+@using ProfOMat.Application.Klausuren
+@using ProfOMat.Domain.Hausarbeiten
+@inject Vorgang Vorgang
+@inject Ortszeit Zeit
+@inject TimeProvider Uhr
+@inject NavigationManager Navigation
+
+<PageTitle>Hausarbeiten · ProfOMat</PageTitle>
+
+<div class="pm-head">
+    <div>
+        <h1>Hausarbeiten</h1>
+        <p>Prüfungsliste hochladen, Themen und Teams mit Wünschen erfassen, Themen zuteilen und von jeder Person persönlich bestätigen lassen.</p>
+    </div>
+</div>
+
+@if (fehler is not null)
+{
+    <div class="pm-alert pm-crit" role="alert">@fehler</div>
+}
+
+<section class="pm-card">
+    <h2>Neue Hausarbeit aus Prüfungsliste</h2>
+    <p>Prüfungsliste aus dem Reporting-Server der Hochschule Osnabrück (<a href="@PruefungslisteLeser.DownloadOsnabrueck" target="_blank" rel="noopener noreferrer">hier klicken</a>
+        und speichern, dann diese Datei hier hochladen). Sie enthält alle Ihre Prüfungen; danach wählen Sie eine aus.</p>
+    <div class="pm-fields">
+        <div class="pm-field pm-field-weit">
+            <label class="pm-lbl" for="liste">Prüfungsliste (CSV)</label>
+            <InputFile id="liste" OnChange="DateiGewaehltAsync" accept=".csv,text/csv" class="pm-input" />
+            @if (vorschau is { AuswahlNoetig: true } || auswahl is not null)
+            {
+                <label class="pm-lbl" for="pruefung">Prüfung aus der Liste (@angebot.Count enthalten)</label>
+                <select id="pruefung" class="pm-select" value="@(auswahl ?? "")" @onchange="PruefungGewaehlt">
+                    <option value="">– bitte wählen –</option>
+                    @foreach (var a in angebot)
+                    {
+                        <option value="@a.Nummer">@a.Anzeige</option>
+                    }
+                </select>
+            }
+            @if (vorschau is { AuswahlNoetig: false })
+            {
+                <span class="pm-hilfe">@vorschau.Zeilen.Count Personen · @(vorschau.Pruefungsname ?? "ohne Prüfungsname") · @(vorschau.Pruefungsnummer ?? "")
+                    @foreach (var h in vorschau.Hinweise) { <br />@h }</span>
+            }
+        </div>
+        <div class="pm-field">
+            <label class="pm-lbl" for="titel">Titel</label>
+            <input id="titel" class="pm-input" @bind="titel" placeholder="aus der Liste" />
+        </div>
+        <div class="pm-field">
+            <label class="pm-lbl">Themen bestätigen bis</label>
+            <RadzenDatePicker TValue="DateTime?" @bind-Value="frist" ShowTime="false" DateFormat="dd.MM.yyyy" Style="width:100%" />
+            <span class="pm-hilfe">Bis zum Ende dieses Tages; später änderbar.</span>
+        </div>
+    </div>
+    <div>
+        <BegruendeterButton Text="Hausarbeit anlegen" Haupt="true" Click="AnlegenAsync" Beschaeftigt="@beschaeftigt"
+                            Freigabe="@(datei is null ? Freigabe.Nein("Bitte zuerst die CSV-Datei wählen.") : vorschau is { AuswahlNoetig: true } ? Freigabe.Nein("Bitte eine Prüfung aus der Liste wählen.") : Freigabe.Ja)" />
+    </div>
+</section>
+
+<section class="pm-card">
+    <h2>Meine Hausarbeiten</h2>
+    @if (liste.Count == 0)
+    {
+        <p class="pm-muted">Noch keine.</p>
+    }
+    else
+    {
+        <div class="pm-tbl">
+            <table>
+                <thead><tr><th>Hausarbeit</th><th>Personen</th><th>Teams</th><th>Bestätigt</th></tr></thead>
+                <tbody>
+                    @foreach (var h in liste)
+                    {
+                        var mitglieder = h.Teams.SelectMany(t => t.Mitglieder).ToList();
+                        <tr>
+                            <td><a href="hausarbeiten/@h.Id">@h.Titel</a><br /><span class="pm-small pm-muted">@h.Pruefungsnummer</span></td>
+                            <td>@h.Personen.Count(p => p.Angemeldet)</td>
+                            <td>@h.Teams.Count</td>
+                            <td>@mitglieder.Count(m => m.Bestaetigt is not null) / @mitglieder.Count</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</section>
+
+@code {
+    private IReadOnlyList<Hausarbeit> liste = [];
+    private byte[]? datei;
+    private Pruefungsliste? vorschau;
+    private IReadOnlyList<Pruefungsangebot> angebot = [];
+    private string? titel, fehler, auswahl, titelAusListe;
+    private DateTime? frist;
+    private bool beschaeftigt;
+
+    protected override async Task OnInitializedAsync() => liste = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<HausarbeitDienst>().ListeAsync());
+
+    private async Task DateiGewaehltAsync(InputFileChangeEventArgs e)
+    {
+        fehler = null;
+        (vorschau, datei, auswahl, angebot) = (null, null, null, []);
+        try
+        {
+            using var puffer = new MemoryStream();
+            await e.File.OpenReadStream(PruefungslisteLeser.MaxBytes).CopyToAsync(puffer);
+            datei = puffer.ToArray();
+            vorschau = PruefungslisteLeser.Lesen(datei);
+            angebot = vorschau.Angebot;
+            TitelVorbelegen();
+        }
+        catch (Exception ex) when (ex is FachlicherFehler or IOException)
+        {
+            fehler = ex.Message;
+            datei = null;
+        }
+    }
+
+    private void PruefungGewaehlt(ChangeEventArgs e)
+    {
+        fehler = null;
+        auswahl = e.Value as string is { Length: > 0 } nr ? nr : null;
+        try
+        {
+            vorschau = PruefungslisteLeser.Lesen(datei!, auswahl);
+            TitelVorbelegen();
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+        }
+    }
+
+    private void TitelVorbelegen()
+    {
+        if (string.IsNullOrWhiteSpace(titel) || titel == titelAusListe)
+        {
+            titel = vorschau?.Pruefungsname;
+            titelAusListe = titel;
+        }
+    }
+
+    private async Task AnlegenAsync()
+    {
+        fehler = null;
+        beschaeftigt = true;
+        try
+        {
+            var bis = frist is { } f ? Zeit.AlsUtc(f.Date.AddDays(1).AddSeconds(-1)) : (DateTimeOffset?)null;
+            var h = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<HausarbeitDienst>().AusListeAnlegenAsync(datei!, titel, auswahl, bis));
+            Navigation.NavigateTo($"hausarbeiten/{h.Id}");
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+        }
+        finally
+        {
+            beschaeftigt = false;
+        }
+    }
+}

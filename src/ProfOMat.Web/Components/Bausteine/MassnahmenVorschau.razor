@@ -1,0 +1,67 @@
+@*
+    Vorschau eines Maßnahmen-Imports: je Maßnahme bewilligt und verausgabt (bisher → neu), Hinweise; unbekannte zum Anlegen ankreuzen.
+*@
+@using ProfOMat.Application.Finanzen
+
+<p class="pm-small pm-muted">Stand vom @Import.Stichtag.ToString("dd.MM.yyyy")@(Import.Uebrige > 0 ? $" · {Import.Uebrige} Anträge anderer Personen übergangen" : "")</p>
+@if (Import.Massnahmen.Count == 0)
+{
+    <p class="pm-alert pm-warn">Keine Maßnahme dieses Teams in der Datei.</p>
+}
+else
+{
+    <div class="pm-tbl">
+        <table>
+            <thead><tr><th>Maßnahme</th><th class="pm-geld">bewilligt</th><th class="pm-geld">verausgabt</th><th>Hinweise</th><th></th></tr></thead>
+            <tbody>
+                @foreach (var m in Import.Massnahmen)
+                {
+                    var nr = m.Antragsnummer;
+                    <tr class="@(m.Hinweise.Count > 0 ? "pm-hervor" : null)">
+                        <td><b>@nr</b><br /><span class="pm-small pm-muted">@m.Bezeichnung@(m.Antragsteller is { Length: > 0 } a ? $" · {a}" : "")</span></td>
+                        <td class="pm-geld">@(m.BewilligtBisher is { } bb && bb != m.Bewilligt ? $"{Geld.Text(bb)} → " : "")@Geld.Text(m.Bewilligt)</td>
+                        <td class="pm-geld">@(m.AusgegebenBisher is { } ab && ab != m.Ausgegeben ? $"{Geld.Text(ab)} → " : "")@Geld.Text(m.Ausgegeben)</td>
+                        <td class="pm-small">@string.Join("; ", m.Hinweise)</td>
+                        <td>
+                            @if (m.TopfId is null)
+                            {
+                                <label class="pm-check pm-small"><input type="checkbox" checked="@Anlegen.Contains(nr)" @onchange="e => Umschalten(nr, e)" /> anlegen</label>
+                            }
+                            else
+                            {
+                                <span class="pm-small pm-muted">aktualisieren</span>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public Massnahmenimport Import { get; set; } = default!;
+
+    /// <summary>Antragsnummern, die angelegt werden sollen (wird verändert).</summary>
+    [Parameter, EditorRequired]
+    public HashSet<string> Anlegen { get; set; } = [];
+
+    /// <summary>Nach jedem Umschalten (die übergeordnete Freigabe hängt an der Auswahl).</summary>
+    [Parameter]
+    public EventCallback Geaendert { get; set; }
+
+    private async Task Umschalten(string nr, ChangeEventArgs e)
+    {
+        if (e.Value is true)
+        {
+            Anlegen.Add(nr);
+        }
+        else
+        {
+            Anlegen.Remove(nr);
+        }
+
+        await Geaendert.InvokeAsync();
+    }
+}

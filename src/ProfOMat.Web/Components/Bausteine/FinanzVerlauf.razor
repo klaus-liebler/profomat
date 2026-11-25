@@ -1,0 +1,109 @@
+@*
+    Verlauf der Kostenstelle je Monat (Ist und geplant) und Jahresvergleich je Kostenartengruppe (FA-711).
+*@
+@using ProfOMat.Application.Finanzen
+@using ProfOMat.Domain.Finanzen
+@inject Vorgang Vorgang
+
+<div class="pm-row">
+    <label class="pm-lbl" for="verlauf-jahr">Jahr</label>
+    <select id="verlauf-jahr" class="pm-select pm-fin-kurz" value="@jahr" @onchange="JahrAsync">
+        @foreach (var j in Jahre)
+        {
+            <option value="@j.Jahr">@j.Jahr</option>
+        }
+    </select>
+</div>
+
+<h3>Verlauf @jahr je Monat</h3>
+@{
+    var max = verlauf.Count == 0 ? 1m : Math.Max(1m, verlauf.Max(m => Math.Max(m.Ausgaben, m.Geplant)));
+}
+<div class="pm-tbl">
+    <table>
+        <thead><tr><th>Monat</th><th class="pm-geld">Zugänge</th><th class="pm-geld">Ausgaben</th><th class="pm-geld">geplant</th><th class="pm-fin-balkenkopf"><span class="pm-za-legende"><span><i class="pm-za-farbe pm-fin-ist"></i>Ausgaben</span><span><i class="pm-za-farbe pm-fin-plan"></i>geplant</span></span></th><th class="pm-geld">Rest am Monatsende</th></tr></thead>
+        <tbody>
+            @foreach (var m in verlauf)
+            {
+                <tr>
+                    <td>@m.Monat.ToString("MMMM", System.Globalization.CultureInfo.GetCultureInfo("de-DE"))</td>
+                    <td class="pm-geld">@(m.Zugaenge == 0 ? "" : Geld.Text(m.Zugaenge))</td>
+                    <td class="pm-geld">@(m.Ausgaben == 0 ? "" : Geld.Text(m.Ausgaben))</td>
+                    <td class="pm-geld">@(m.Geplant == 0 ? "" : Geld.Text(m.Geplant))</td>
+                    <td class="pm-fin-balken" aria-hidden="true">
+                        <i class="pm-fin-ist" style="width: @Prozent(Math.Max(0, m.Ausgaben), max)%"></i><i class="pm-fin-plan" style="width: @Prozent(m.Geplant, max)%"></i>
+                    </td>
+                    <td class="pm-geld">@Geld.Text(m.RestAmEnde)</td>
+                </tr>
+            }
+        </tbody>
+        <tfoot>
+            <tr><td><b>Summe</b></td><td class="pm-geld"><b>@Geld.Text(verlauf.Sum(m => m.Zugaenge))</b></td><td class="pm-geld"><b>@Geld.Text(verlauf.Sum(m => m.Ausgaben))</b></td>
+                <td class="pm-geld"><b>@Geld.Text(verlauf.Sum(m => m.Geplant))</b></td><td></td><td></td></tr>
+        </tfoot>
+    </table>
+</div>
+<p class="pm-small pm-muted">Nach Buchungsdatum. „Geplant“ (nur im laufenden Jahr): geplante Ausgaben, Auslagen und Hilfskraft-Monate im Monat ihrer Fälligkeit.
+    Der Rest am Monatsende enthält den Vortrag erst, wenn er gebucht ist.</p>
+
+<h3>Jahresvergleich der Ausgaben</h3>
+@if (vergleich.Jahre.Count == 0)
+{
+    <p class="pm-muted">Noch keine Ausgaben.</p>
+}
+else
+{
+    <div class="pm-tbl">
+        <table>
+            <thead><tr><th>Gruppe</th>@foreach (var j in vergleich.Jahre) { <th class="pm-geld">@j</th> }</tr></thead>
+            <tbody>
+                @foreach (var z in vergleich.Zeilen)
+                {
+                    <tr><td>@z.Gruppe</td>@foreach (var j in vergleich.Jahre) { <td class="pm-geld">@(z.Werte.TryGetValue(j, out var w) ? Geld.Text(w) : "–")</td> }</tr>
+                }
+            </tbody>
+            <tfoot>
+                <tr><td><b>Summe</b></td>@foreach (var j in vergleich.Jahre) { <td class="pm-geld"><b>@Geld.Text(vergleich.Zeilen.Sum(z => z.Werte.GetValueOrDefault(j)))</b></td> }</tr>
+            </tfoot>
+        </table>
+    </div>
+    <p class="pm-small pm-muted">Jahre mit unvollständigem Auszug (laufendes Jahr) sind nicht direkt vergleichbar.</p>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public Guid TeamId { get; set; }
+
+    [Parameter, EditorRequired]
+    public Guid TopfId { get; set; }
+
+    [Parameter, EditorRequired]
+    public IReadOnlyList<Kostenstellenstand> Jahre { get; set; } = [];
+
+    private int jahr;
+    private IReadOnlyList<Monatswert> verlauf = [];
+    private (IReadOnlyList<int> Jahre, IReadOnlyList<(string Gruppe, IReadOnlyDictionary<int, decimal> Werte)> Zeilen) vergleich = ([], []);
+
+    private static string Prozent(decimal wert, decimal max) => (wert / max * 100m).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Jahre.Count == 0)
+        {
+            return;
+        }
+
+        jahr = Jahre.Any(j => j.Jahr == jahr) ? jahr : Jahre[0].Jahr;
+        verlauf = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<FinanzDienst>().VerlaufAsync(TeamId, TopfId, jahr));
+        vergleich = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<FinanzDienst>().JahresvergleichAsync(TeamId, TopfId));
+    }
+
+    private async Task JahrAsync(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value as string, out var j))
+        {
+            jahr = j;
+            verlauf = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<FinanzDienst>().VerlaufAsync(TeamId, TopfId, jahr));
+        }
+    }
+}

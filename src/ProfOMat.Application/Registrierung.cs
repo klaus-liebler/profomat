@@ -16,6 +16,8 @@ public static class Registrierung
         dienste.AddSingleton<Ortszeit>();
         dienste.AddScoped<Protokoll>();
         dienste.AddScoped<Postausgang>();
+        dienste.AddScoped<Mailentwuerfe>();
+        dienste.AddScoped<Mailsignaturen>();
         dienste.AddScoped<KontoDienst>();
         dienste.AddScoped<KatalogDienst>();
         dienste.AddSingleton<Menschenpruefung>();
@@ -24,6 +26,9 @@ public static class Registrierung
         dienste.AddScoped<Muendlich.MuendlichDienst>();
         dienste.AddSingleton<Beschriftung.Streifenlayout>();
         dienste.AddScoped<Beschriftung.BeschriftungDienst>();
+        dienste.AddScoped<Hausarbeiten.HausarbeitDienst>();
+        dienste.AddScoped<Gefache.GefachDienst>();
+        dienste.AddScoped<Finanzen.FinanzDienst>();
         return dienste;
     }
 }

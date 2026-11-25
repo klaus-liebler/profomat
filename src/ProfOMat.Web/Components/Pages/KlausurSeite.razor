@@ -227,7 +227,9 @@ else
                     </div>
                     <div><BegruendeterButton Text="Speichern" Click="AngabenSpeichernAsync" /></div>
                     <h3>Prüfungsliste aktualisieren</h3>
-                    <p class="pm-small pm-muted">Neue Liste hochladen (Format Hochschule Osnabrück oder GA-Master, wird erkannt): Nachmeldungen kommen dazu, Abgemeldete bleiben sichtbar.</p>
+                    <p class="pm-small pm-muted">Neue Liste hochladen (Format Hochschule Osnabrück oder GA-Master, wird erkannt): Nachmeldungen kommen dazu, Abgemeldete bleiben sichtbar.
+                        Enthält die Liste mehrere Prüfungen, zählt nur die dieser Klausur (@(k.Pruefungsnummer ?? "Prüfungsnummer oben eintragen")).
+                        Format „Hochschule Osnabrück“: <a href="@PruefungslisteLeser.DownloadOsnabrueck" target="_blank" rel="noopener noreferrer">Prüfungsliste herunterladen</a>.</p>
                     <InputFile OnChange="ListeAbgleichenAsync" accept=".csv,text/csv" class="pm-input" />
                 </section>
                 <section class="pm-card">

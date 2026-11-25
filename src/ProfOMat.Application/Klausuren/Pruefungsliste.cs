@@ -4,9 +4,23 @@ using ProfOMat.Domain.Klausuren;
 
 namespace ProfOMat.Application.Klausuren;
 
-/// <summary>Eingelesene Prüfungsliste (CSV-Export aus dem Hochschulsystem).</summary>
+/// <summary>
+/// Eingelesene Prüfungsliste (CSV-Export aus dem Hochschulsystem). <see cref="Angebot"/> nennt alle Prüfungen der Datei; enthält sie
+/// mehrere und wurde keine gewählt, ist <see cref="AuswahlNoetig"/> gesetzt und <see cref="Zeilen"/> leer.
+/// </summary>
 public sealed record Pruefungsliste(string? Pruefungsnummer, string? Pruefungsname, string? Pruefer, IReadOnlyList<Listenzeile> Zeilen, IReadOnlyList<string> Hinweise,
-    string Format = PruefungslisteLeser.FormatOsnabrueck);
+    string Format = PruefungslisteLeser.FormatOsnabrueck, IReadOnlyList<Pruefungsangebot>? Angebot = null)
+{
+    public IReadOnlyList<Pruefungsangebot> Angebot { get; init; } = Angebot ?? [];
+
+    public bool AuswahlNoetig => Pruefungsnummer is null && Angebot.Count > 1;
+}
+
+/// <summary>Eine Prüfung in einer Prüfungsliste mit mehreren Prüfungen (Format „Hochschule Osnabrück“).</summary>
+public sealed record Pruefungsangebot(string Nummer, string? Name, string? Pruefer, int Teilnehmende)
+{
+    public string Anzeige => $"{Nummer} – {Name ?? "ohne Namen"} ({Teilnehmende} Teilnehmende)";
+}
 
 /// <summary>
 /// Liest die CSV-Prüfungsliste des Hochschulsystems. Spalten über die Kopfzeile (Reihenfolge egal):
@@ -25,6 +39,10 @@ public static class PruefungslisteLeser
 
     public const string FormatGaMaster = "GA-Master";
 
+    /// <summary>Download der Kandidatenliste im Format „Hochschule Osnabrück“ (Berichtsserver, CSV; Anmeldung mit Hochschulkonto).</summary>
+    public const string DownloadOsnabrueck =
+        "https://reporting.hs-osnabrueck.de/ReportServer?/Reports/Lehrende/KandidatenlisteMail&rs:Command=Render&rs:Format=CSV&rc:OutputFormat=CSV&rv:ParamMode=Collapsed";
+
     private static readonly Dictionary<string, string[]> Spalten = new()
     {
         ["matrikel"] = ["matriculation_number1", "matriculation_number", "matrikelnummer", "matrnr", "matnr"],
@@ -37,7 +55,9 @@ public static class PruefungslisteLeser
         ["pruefer"] = ["pruefer", "prüfer"],
     };
 
-    public static Pruefungsliste Lesen(byte[] inhalt)
+    /// <param name="inhalt">CSV-Datei.</param>
+    /// <param name="pruefungsnummer">Gewählte Prüfung, wenn die Datei mehrere enthält; nur deren Zeilen werden gelesen.</param>
+    public static Pruefungsliste Lesen(byte[] inhalt, string? pruefungsnummer = null)
     {
         ArgumentNullException.ThrowIfNull(inhalt);
         if (inhalt.Length == 0)
@@ -73,12 +93,32 @@ public static class PruefungslisteLeser
         var (iMail, iZeile, iNummer, iName, iPruefer) = (Spalte("mail"), Spalte("zeile"), Spalte("nummer"), Spalte("pname"), Spalte("pruefer"));
         string Feld(string[] z, int i) => i >= 0 && i < z.Length ? z[i].Trim() : string.Empty;
 
+        string? Wert(string[] z, int i) => Feld(z, i) is { Length: > 0 } w ? w : null;
+
+        // Prüfungen der Datei in der Reihenfolge ihres ersten Auftretens (Name und Prüfer aus deren erster Zeile)
+        var datenzeilen = Enumerable.Range(1, zeilen.Count - 1).Select(n => (N: n, Z: zeilen[n], Nummer: Feld(zeilen[n], iNummer))).ToList();
+        var angebot = datenzeilen.Where(d => d.Nummer.Length > 0).GroupBy(d => d.Nummer, StringComparer.Ordinal)
+            .Select(g => new Pruefungsangebot(g.Key, Wert(g.First().Z, iName), Wert(g.First().Z, iPruefer), g.Count())).ToList();
+
+        if (pruefungsnummer is not null)
+        {
+            if (angebot.All(a => a.Nummer != pruefungsnummer))
+            {
+                var enthalten = angebot.Count == 0 ? "keine Prüfungsnummer" : string.Join(", ", angebot.Select(a => a.Nummer));
+                throw new FachlicherFehler($"Die Datei enthält die Prüfung {pruefungsnummer} nicht (enthalten: {enthalten}).");
+            }
+
+            datenzeilen = datenzeilen.Where(d => d.Nummer == pruefungsnummer).ToList();
+        }
+        else if (angebot.Count > 1)
+        {
+            return new Pruefungsliste(null, null, null, [], [], FormatOsnabrueck, angebot);
+        }
+
         var hinweise = new List<string>();
         var ergebnis = new List<Listenzeile>();
-        var nummern = new HashSet<string>(StringComparer.Ordinal);
-        for (var n = 1; n < zeilen.Count; n++)
+        foreach (var (n, z, _) in datenzeilen)
         {
-            var z = zeilen[n];
             var matrikel = Feld(z, iMatrikel);
             if (matrikel.Length is < 5 or > 10 || !matrikel.All(char.IsAsciiDigit))
             {
@@ -86,23 +126,13 @@ public static class PruefungslisteLeser
                 continue;
             }
 
-            if (Feld(z, iNummer) is { Length: > 0 } nr)
-            {
-                nummern.Add(nr);
-            }
-
             var zeile = int.TryParse(Feld(z, iZeile), out var r) ? r : n;
-            ergebnis.Add(new Listenzeile(zeile, matrikel, Feld(z, iNach), Feld(z, iVor), Feld(z, iMail) is { Length: > 0 } m ? m : null));
+            ergebnis.Add(new Listenzeile(zeile, matrikel, Feld(z, iNach), Feld(z, iVor), Wert(z, iMail)));
         }
 
-        if (nummern.Count > 1)
-        {
-            throw new FachlicherFehler($"Die Datei enthält mehrere Prüfungen ({string.Join(", ", nummern)}). Bitte je Prüfung eine Datei hochladen.");
-        }
-
-        var erste = zeilen[1];
-        return new Pruefungsliste(nummern.FirstOrDefault(), Feld(erste, iName) is { Length: > 0 } pn ? pn : null,
-            Feld(erste, iPruefer) is { Length: > 0 } pr ? pr : null, ergebnis, hinweise);
+        var erste = datenzeilen[0].Z;
+        return new Pruefungsliste(pruefungsnummer ?? angebot.SingleOrDefault()?.Nummer, Wert(erste, iName), Wert(erste, iPruefer), ergebnis, hinweise,
+            FormatOsnabrueck, angebot);
     }
 
     private static Pruefungsliste GaMasterLesen(List<string> kopf, List<string[]> zeilen)

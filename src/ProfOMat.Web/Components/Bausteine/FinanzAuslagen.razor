@@ -1,0 +1,97 @@
+@*
+    Sammel-Auslagenabrechnungen eines Laborteams (FA-707): Liste und neue Abrechnung.
+*@
+@using ProfOMat.Application.Finanzen
+@using ProfOMat.Domain.Finanzen
+@inject Vorgang Vorgang
+@inject NavigationManager Navigation
+
+<section class="pm-card">
+    <h2>Neue Sammel-Auslagenabrechnung</h2>
+    <p class="pm-small pm-muted">Privat vorfinanzierte Käufe sammeln und jede Position dem passenden Topf zuordnen (Kostenstelle, Investition, SQM).
+        Offene und eingereichte Abrechnungen binden Mittel, bis sie erstattet sind. Die Aufstellung je Topf gibt es als Excel-Datei für das Abrechnungsformular.</p>
+    <div class="pm-row">
+        <input class="pm-input pm-grow" @bind="bezeichnung" @bind:event="oninput" maxlength="200" aria-label="Bezeichnung der Abrechnung"
+               placeholder="@($"z. B. Sammelabrechnung {DateTime.Today:MMMM yyyy}")" />
+        <BegruendeterButton Text="Anlegen" Haupt="true" Click="AnlegenAsync" Beschaeftigt="@beschaeftigt"
+                            Freigabe="@(string.IsNullOrWhiteSpace(bezeichnung) ? Freigabe.Nein("Bitte zuerst eine Bezeichnung eingeben.") : Freigabe.Ja)" />
+    </div>
+    @if (fehler is not null)
+    {
+        <div class="pm-alert pm-crit" role="alert">@fehler</div>
+    }
+</section>
+
+<section class="pm-card">
+    <h2>Abrechnungen</h2>
+    @if (liste.Count == 0)
+    {
+        <p class="pm-muted">Noch keine.</p>
+    }
+    else
+    {
+        <div class="pm-tbl">
+            <table>
+                <thead><tr><th>Abrechnung</th><th>von</th><th>Stand</th><th class="pm-geld">Positionen</th><th class="pm-geld">Summe</th><th>Hinweise</th></tr></thead>
+                <tbody>
+                    @foreach (var a in liste)
+                    {
+                        <tr class="@(a.Abrechnung.Offen ? null : "pm-alt")">
+                            <td><a href="finanzen/@TeamId/auslagen/@a.Abrechnung.Id">@a.Abrechnung.Bezeichnung</a></td>
+                            <td>@a.Person</td>
+                            <td><StatusPille Stil="@Stil(a.Abrechnung.Stand)">@StandText(a.Abrechnung)</StatusPille></td>
+                            <td class="pm-geld">@a.Abrechnung.Positionen.Count</td>
+                            <td class="pm-geld">@Geld.Text(a.Abrechnung.Summe)</td>
+                            <td>@(a.Hinweise.Count == 0 ? "" : $"{a.Hinweise.Count} prüfen")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired]
+    public Guid TeamId { get; set; }
+
+    private IReadOnlyList<Auslagenansicht> liste = [];
+    private string? bezeichnung, fehler;
+    private bool beschaeftigt;
+
+    internal static string Stil(Auslagenstand s) => s switch { Auslagenstand.Offen => "info", Auslagenstand.Eingereicht => "warn", _ => "gut" };
+
+    internal static string StandText(Auslagenabrechnung a) => a.Stand switch
+    {
+        Auslagenstand.Offen => "offen",
+        Auslagenstand.Eingereicht => $"eingereicht {a.Eingereicht:dd.MM.yyyy}",
+        _ => "erstattet",
+    };
+
+    protected override async Task OnParametersSetAsync()
+        => liste = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<FinanzDienst>().AuslagenAsync(TeamId));
+
+    private async Task AnlegenAsync()
+    {
+        if (beschaeftigt)
+        {
+            return;
+        }
+
+        fehler = null;
+        beschaeftigt = true;
+        try
+        {
+            var a = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<FinanzDienst>().AuslageAnlegenAsync(TeamId, bezeichnung!));
+            Navigation.NavigateTo($"finanzen/{TeamId}/auslagen/{a.Id}");
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+        }
+        finally
+        {
+            beschaeftigt = false;
+        }
+    }
+}

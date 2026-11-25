@@ -1,0 +1,249 @@
+@*
+    Zeitachse der freien Mittel (FA-716): eine Linie je Topf (Farbe fest je Topf), gestrichelt ab erwarteten Zugängen, Marken für Verfall
+    und Übertragsgrenze; beim Darüberfahren über einen Monat alle Werte (SVG-<title>, ohne Skript). Darunter dieselben Werte als Tabelle.
+*@
+@using System.Globalization
+@using ProfOMat.Application.Finanzen
+@using ProfOMat.Domain.Finanzen
+
+@if (Achse is not null && Achse.Reihen.Count > 0)
+{
+    List<Zeitreihe> reihen = Summenansicht ? [] : [.. Achse.Reihen];
+    var werte = (Summenansicht ? Achse.Summe.AsEnumerable() : reihen.SelectMany(r => r.Punkte.Where(p => p.Aktiv).Select(p => p.Frei)))
+        .Concat(reihen.SelectMany(r => r.Punkte.Where(p => p.Grenze is not null).Select(p => p.Grenze!.Value))).ToList();
+    var (unten, oben, schritt) = Skala(werte.DefaultIfEmpty(0).Min(), werte.DefaultIfEmpty(0).Max());
+    var n = Achse.Monate.Count;
+    double X(int i) => Links + (n <= 1 ? 0 : i * (Breite - Links - Rechts) / (double)(n - 1));
+    double Y(decimal v) => Oben + ((double)(oben - v) / (double)(oben - unten) * (Hoehe - Oben - Unten));
+    var spalte = n <= 1 ? 40 : (Breite - Links - Rechts) / (double)(n - 1);
+
+    <div class="pm-row pm-za-kopf">
+        <div class="pm-za-legende" aria-label="Legende">
+            @if (Summenansicht)
+            {
+                <span><i class="pm-za-farbe" style="background: var(--pm-fg)"></i>Summe frei aller Töpfe</span>
+            }
+            else
+            {
+                @foreach (var r in reihen)
+                {
+                    <span><i class="pm-za-farbe" style="background: @Farbe(r.Topf)"></i>@Name(r.Topf)</span>
+                }
+            }
+            <span class="pm-muted"><i class="pm-za-strich"></i>mit erwarteten Zugängen</span>
+        </div>
+        <div class="pm-row pm-row-eng" role="group" aria-label="Darstellung">
+            <button type="button" class="pm-btn pm-btn-klein @(Summenansicht ? null : "pm-btn-haupt")" aria-pressed="@(!Summenansicht)" @onclick="() => Summenansicht = false">je Topf</button>
+            <button type="button" class="pm-btn pm-btn-klein @(Summenansicht ? "pm-btn-haupt" : null)" aria-pressed="@Summenansicht" @onclick="() => Summenansicht = true">Summe</button>
+        </div>
+    </div>
+
+    <div class="pm-za">
+        <svg viewBox="0 0 @Breite @Hoehe" role="img" aria-label="@($"Freie Mittel je Monat von {Achse.Monate[0]:MM.yyyy} bis {Achse.Monate[^1]:MM.yyyy}; Werte in der Tabelle darunter")">
+            @for (var v = unten; v <= oben; v += schritt)
+            {
+                <line class="@(v == 0 ? "pm-za-null" : "pm-za-gitter")" x1="@F(Links)" x2="@F(Breite - Rechts)" y1="@F(Y(v))" y2="@F(Y(v))" />
+                @T(Links - 8, Y(v) + 4, "pm-za-achse", Kurz(v), "end")
+            }
+            @for (var i = 0; i < n; i++)
+            {
+                var m = Achse.Monate[i];
+                @T(X(i), Hoehe - Unten + 16, "pm-za-achse", m.ToString("MMM", De), "middle")
+                @if (i == 0 || m.Month == 1)
+                {
+                    @T(X(i), Hoehe - Unten + 30, "pm-za-achse pm-za-jahr", m.Year.ToString(CultureInfo.InvariantCulture), "middle")
+                }
+            }
+
+            @if (Summenansicht)
+            {
+                var punkte = Achse.Summe.Select((v, i) => (X(i), Y(v))).ToList();
+                <polyline class="pm-za-linie" stroke="var(--pm-fg)" points="@Punkte(punkte)" />
+            }
+            else
+            {
+                var etiketten = new List<(Topf Topf, double X, double Y)>();
+                @foreach (var r in reihen)
+                {
+                    var aktiv = r.Punkte.Select((p, i) => (p, i)).Where(x => x.p.Aktiv).ToList();
+                    if (aktiv.Count == 0)
+                    {
+                        continue;
+                    }
+
+                    var ersteErwartet = aktiv.FindIndex(x => x.p.Erwartet);
+                    var fest = ersteErwartet < 0 ? aktiv : aktiv.Take(ersteErwartet + 1).ToList();
+                    List<(Zeitpunkt p, int i)> erwartet = ersteErwartet < 0 ? [] : [.. aktiv.Skip(Math.Max(0, ersteErwartet - 1))];
+                    if (ersteErwartet == 0)
+                    {
+                        fest = [];
+                        erwartet = aktiv;
+                    }
+
+                    @if (fest.Count > 1)
+                    {
+                        <polyline class="pm-za-linie" stroke="@Farbe(r.Topf)" points="@Punkte(fest.Select(x => (X(x.i), Y(x.p.Frei))))" />
+                    }
+                    @if (erwartet.Count > 1)
+                    {
+                        <polyline class="pm-za-linie pm-za-erwartet" stroke="@Farbe(r.Topf)" points="@Punkte(erwartet.Select(x => (X(x.i), Y(x.p.Frei))))" />
+                    }
+                    @if (aktiv.Count == 1)
+                    {
+                        <circle cx="@F(X(aktiv[0].i))" cy="@F(Y(aktiv[0].p.Frei))" r="4" fill="@Farbe(r.Topf)" />
+                    }
+                    @foreach (var (p, i) in aktiv.Where(x => x.p.Grenze is not null))
+                    {
+                        <line class="pm-za-grenze" x1="@F(X(i) - 14)" x2="@F(X(i) + 14)" y1="@F(Y(p.Grenze!.Value))" y2="@F(Y(p.Grenze.Value))" />
+                        @T(X(i), Y(p.Grenze.Value) - 6, "pm-za-marke", "Grenze", "middle")
+                    }
+                    @foreach (var (p, i) in aktiv.Where(x => x.p.Verfaellt is not null))
+                    {
+                        <circle class="pm-za-verfall" cx="@F(X(i))" cy="@F(Y(p.Frei))" r="5" stroke="@Farbe(r.Topf)" />
+                        @T(X(i), Y(p.Frei) - 10, "pm-za-krit", "✕ verfällt " + Kurz(p.Verfaellt!.Value), "middle")
+                    }
+                    etiketten.Add((r.Topf, aktiv[^1].i == n - 1 ? Breite - Rechts + 10 : X(aktiv[^1].i) + 10, Y(aktiv[^1].p.Frei)));
+                }
+
+                @* Beschriftung am Ende der Linien (rechter Rand), ohne Überlappung *@
+                var belegt = new List<double>();
+                @foreach (var (topf, x0, y0) in etiketten.OrderBy(e => e.Y))
+                {
+                    var y = x0 < Breite - Rechts ? y0 + 4 : Math.Max(y0 + 4, belegt.Count == 0 ? double.MinValue : belegt[^1] + 13);
+                    if (x0 >= Breite - Rechts)
+                    {
+                        belegt.Add(y);
+                    }
+
+                    <circle cx="@F(x0)" cy="@F(y - 4)" r="3.5" fill="@Farbe(topf)" />
+                    @T(x0 + 7, y, "pm-za-name", Name(topf))
+                }
+            }
+
+            @for (var i = 0; i < n; i++)
+            {
+                <rect class="pm-za-spalte" x="@F(X(i) - (spalte / 2))" y="@F(Oben)" width="@F(spalte)" height="@F(Hoehe - Oben - Unten)">
+                    <title>@Tooltip(i)</title>
+                </rect>
+            }
+        </svg>
+    </div>
+
+    <details class="pm-za-tabelle" open="@TabelleOffen">
+        <summary>Werte als Tabelle</summary>
+        <div class="pm-tbl">
+            <table>
+                <thead>
+                    <tr><th>Monat</th>
+                        @foreach (var r in Achse.Reihen) { <th class="pm-geld">@Name(r.Topf)</th> }
+                        <th class="pm-geld">Summe</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @for (var i = 0; i < n; i++)
+                    {
+                        var idx = i;
+                        <tr>
+                            <td class="pm-nowrap">@Achse.Monate[idx].ToString("MM.yyyy")</td>
+                            @foreach (var r in Achse.Reihen)
+                            {
+                                var p = r.Punkte[idx];
+                                <td class="pm-geld">
+                                    @if (!p.Aktiv)
+                                    {
+                                        <span class="pm-muted">–</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="@(p.Erwartet ? "pm-za-erw" : null)">@Geld.Text(p.Frei)</span>
+                                        @if (p.Abfluss > 0) { <br /><span class="pm-small pm-muted">−@Geld.Text(p.Abfluss)</span> }
+                                        @if (p.Zugang > 0) { <br /><span class="pm-small pm-muted">+@Geld.Text(p.Zugang) erwartet</span> }
+                                        @if (p.Verfaellt is { } vf) { <br /><span class="pm-small pm-za-krit">✕ verfällt @Geld.Text(vf)</span> }
+                                        @if (p.EinzugMoeglich is { } ez) { <br /><span class="pm-small pm-za-krit">über Grenze @Geld.Text(ez)</span> }
+                                    }
+                                </td>
+                            }
+                            <td class="pm-geld"><b>@Geld.Text(Achse.Summe[idx])</b></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        <p class="pm-small pm-muted">Werte zum Monatsende. Kursiv: enthält erwartete Zugänge (Sachmittelbudget im Januar mit dem Wert des laufenden Jahres,
+            SQM zur Mittelfreigabe). „Über Grenze“ wird nicht abgezogen – es ist der Betrag, der eingezogen werden könnte.</p>
+    </details>
+}
+
+@code {
+    /// <summary>Die berechnete Zeitachse.</summary>
+    [Parameter, EditorRequired]
+    public Zeitachse? Achse { get; set; }
+
+    /// <summary>Alle Töpfe des Teams (auch archivierte) – bestimmt die feste Farbe je Topf.</summary>
+    [Parameter, EditorRequired]
+    public IReadOnlyList<Topf> AlleToepfe { get; set; } = [];
+
+    [Parameter]
+    public bool TabelleOffen { get; set; }
+
+    private const int Breite = 900, Hoehe = 300, Links = 64, Rechts = 120, Oben = 22, Unten = 40;
+
+    private static readonly CultureInfo De = CultureInfo.GetCultureInfo("de-DE");
+
+    /// <summary>Kategoriale Palette (geprüft: Helligkeit, Farbsättigung, Farbsehschwächen); Reihenfolge fest, nie wiederholt eingefärbt.</summary>
+    private static readonly string[] Palette = ["#257de0", "#f47230", "#00b894", "#f2a600", "#ee7fac", "#008a17", "#6a4ce2", "#ec4647"];
+
+    private bool Summenansicht;
+
+    private string Farbe(Topf t)
+    {
+        var i = AlleToepfe.ToList().FindIndex(x => x.Id == t.Id);
+        return i >= 0 && i < Palette.Length ? Palette[i] : "#7a8694";
+    }
+
+    private static string Name(Topf t) => t.Kennung;
+
+    /// <summary>SVG-&lt;text&gt; (in Razor reserviert) als kodiertes Markup.</summary>
+    private static MarkupString T(double x, double y, string klasse, string inhalt, string? anker = null)
+        => new($"<text x=\"{F(x)}\" y=\"{F(y)}\" class=\"{klasse}\"{(anker is null ? "" : $" text-anchor=\"{anker}\"")}>{System.Net.WebUtility.HtmlEncode(inhalt)}</text>");
+
+    private static string F(double d) => d.ToString("0.#", CultureInfo.InvariantCulture);
+
+    private static string Punkte(IEnumerable<(double X, double Y)> p) => string.Join(' ', p.Select(x => $"{F(x.X)},{F(x.Y)}"));
+
+    private static string Kurz(decimal v) => Math.Abs(v) >= 1000 ? (v / 1000m).ToString("0.#", De) + " T€" : v.ToString("0", De) + " €";
+
+    /// <summary>Glatte Achsenteilung mit der Null darin.</summary>
+    private static (decimal Unten, decimal Oben, decimal Schritt) Skala(decimal min, decimal max)
+    {
+        min = Math.Min(0, min);
+        max = Math.Max(max, min + 100);
+        var roh = (double)(max - min) / 4;
+        var mag = Math.Pow(10, Math.Floor(Math.Log10(roh)));
+        var schritt = (decimal)(new[] { 1, 2, 2.5, 5, 10 }.Select(f => f * mag).First(s => s >= roh));
+        return (Math.Floor(min / schritt) * schritt, Math.Ceiling(max / schritt) * schritt, schritt);
+    }
+
+    private string Tooltip(int i)
+    {
+        var zeilen = new List<string> { Achse!.Monate[i].ToString("MMMM yyyy", De) };
+        foreach (var r in Achse.Reihen)
+        {
+            var p = r.Punkte[i];
+            if (!p.Aktiv)
+            {
+                continue;
+            }
+
+            var zusatz = new List<string>();
+            if (p.Abfluss > 0) { zusatz.Add($"−{Geld.Text(p.Abfluss)}"); }
+            if (p.Zugang > 0) { zusatz.Add($"+{Geld.Text(p.Zugang)} erwartet"); }
+            if (p.Verfaellt is { } v) { zusatz.Add($"verfällt {Geld.Text(v)}"); }
+            if (p.Grenze is { } g) { zusatz.Add($"Grenze {Geld.Text(g)}"); }
+            zeilen.Add($"{r.Topf.Kennung}: {Geld.Text(p.Frei)}{(p.Erwartet ? " (mit erwarteten Zugängen)" : "")}{(zusatz.Count > 0 ? " · " + string.Join(", ", zusatz) : "")}");
+        }
+
+        zeilen.Add($"Summe: {Geld.Text(Achse.Summe[i])}");
+        return string.Join('\n', zeilen);
+    }
+}

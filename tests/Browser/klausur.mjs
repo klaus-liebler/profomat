@@ -10,6 +10,7 @@ const basis = (process.argv[2] ?? 'http://localhost:5310').replace(/\/$/, '') + 
 const bilder = process.argv[3] ?? mkdtempSync(join(tmpdir(), 'profomat-bilder-'));
 mkdirSync(bilder, { recursive: true });
 const liste = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', 'tools', 'Testdaten', 'pruefungsliste-beispiel.csv');
+const mehrere = resolve(dirname(liste), 'pruefungsliste-mehrere.csv');
 const { seite, beenden } = await browserStarten({ port: 9335, hoehe: 1000 });
 const schritt = (t) => console.log(`• ${t}`);
 let nr = 0;
@@ -22,6 +23,22 @@ try {
     await seite.oeffnen(basis + 'anmelden');
     await seite.eval(`[...document.querySelectorAll('.pm-list > div')].find(d => d.textContent.includes('Erika Mustermann')).querySelector('button').click()`);
     await seite.warteAuf(`!location.pathname.endsWith('/anmelden')`);
+
+    schritt('Liste mit mehreren Prüfungen: Auswahl, Titel wird vorbelegt (auch 390 px)');
+    await seite.oeffnen(basis + 'klausuren');
+    await seite.dateiSetzen('input[type=file]', mehrere);
+    await seite.warteAuf(`!!document.querySelector('#pruefung') && document.body.innerText.includes('3 enthalten')`);
+    if (await seite.eval(`!!document.querySelector('.pm-alert')`)) { throw new Error('Mehrere Prüfungen: Fehlermeldung statt Auswahl'); }
+    const waehlen = (nr) => seite.eval(`(() => { const s = document.querySelector('#pruefung'); s.value = ${JSON.stringify(nr)}; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+    await waehlen('11B1555-1-PJ-EuI');
+    await seite.warteAuf(`document.querySelector('#titel').value === 'Projekt Mechatronik' && document.body.innerText.includes('2 Teilnehmende')`);
+    await waehlen('11B0400-1-VL-ET');
+    await seite.warteAuf(`document.querySelector('#titel').value === 'Regelungstechnik (Vorlesung)' && document.body.innerText.includes('57 Teilnehmende')`);
+    await seite.breite(390, 844);
+    await foto('auswahl-390px');
+    const querA = await seite.eval('document.documentElement.scrollWidth');
+    if (querA > 392) { throw new Error(`390 px: Auswahl rollt waagerecht (${querA})`); }
+    await seite.breite(1280, 1000);
 
     schritt('Prüfungsliste hochladen');
     await seite.oeffnen(basis + 'klausuren');

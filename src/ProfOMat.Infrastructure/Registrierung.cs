@@ -31,6 +31,8 @@ public static class Registrierung
         dienste.AddSingleton<ProfOMat.Application.Beschriftung.ITextmass, Textmass>();
         dienste.AddSingleton<ProfOMat.Application.Beschriftung.IStreifenPdf, StreifenPdf>();
         dienste.AddSingleton<ProfOMat.Application.Klausuren.IKlausurDokumente, KlausurDokumente>();
+        dienste.AddSingleton<ProfOMat.Application.Finanzen.IFinanzDokumente, FinanzDokumente>();
+        dienste.AddSingleton<ProfOMat.Application.Finanzen.ISqmListenLeser, SqmListenLeser>();
         dienste.Configure<SmtpOptionen>(konfiguration.GetSection(SmtpOptionen.Abschnitt));
         dienste.AddSingleton<IMailZustellung, SmtpZustellung>();
 
@@ -43,6 +45,7 @@ public static class Registrierung
                     .WithSimpleSchedule(x => x.WithInterval(TimeSpan.FromSeconds(takt)).RepeatForever()));
                 q.ScheduleJob<KatalogAbgleichJob>(t => t.WithIdentity("katalog").WithCronSchedule(konfiguration["Katalog:AbgleichCron"] ?? "0 30 3 * * ?"));
                 q.ScheduleJob<VerfallJob>(t => t.WithIdentity("verfall").WithCronSchedule("0 15 * * * ?"));
+                q.ScheduleJob<FinanzErinnerungJob>(t => t.WithIdentity("finanzerinnerung").WithCronSchedule(konfiguration["Finanzen:ErinnerungCron"] ?? "0 0 7 * * ?"));
             });
             dienste.AddQuartzHostedService(o => o.WaitForJobsToComplete = true);
         }
@@ -148,5 +151,16 @@ internal sealed class VerfallJob(IServiceScopeFactory bereiche) : IJob
     {
         await using var bereich = bereiche.CreateAsyncScope();
         await bereich.ServiceProvider.GetRequiredService<DrittpruefungDienst>().VerfallenLassenAsync(cancellationToken);
+    }
+}
+
+/// <summary>Täglich: Fristerinnerungen der Laborteams (FA-712).</summary>
+[DisallowConcurrentExecution]
+internal sealed class FinanzErinnerungJob(IServiceScopeFactory bereiche) : IJob
+{
+    public async ValueTask Execute(IJobExecutionContext context, CancellationToken cancellationToken)
+    {
+        await using var bereich = bereiche.CreateAsyncScope();
+        await bereich.ServiceProvider.GetRequiredService<ProfOMat.Application.Finanzen.FinanzDienst>().ErinnerungenVersendenAsync(cancellationToken);
     }
 }

@@ -1,0 +1,568 @@
+@page "/hausarbeiten/{Id:guid}"
+@attribute [Authorize]
+@using ProfOMat.Application.Hausarbeiten
+@using ProfOMat.Application.Klausuren
+@using ProfOMat.Domain.Hausarbeiten
+@inject Vorgang Vorgang
+@inject Ortszeit Zeit
+@inject TimeProvider Uhr
+@inject NotificationService Hinweise
+
+<PageTitle>@(h?.Titel ?? "Hausarbeit") · ProfOMat</PageTitle>
+
+@if (ladefehler is not null)
+{
+    <section class="pm-card"><h1>Hausarbeit</h1><div class="pm-alert pm-crit" role="alert">@ladefehler</div></section>
+}
+else if (h is not null)
+{
+    var jetzt = Uhr.GetUtcNow();
+    var alle = h.TeamsSortiert.SelectMany(t => t.Mitglieder.Select(m => h.Stand(t, m, jetzt))).ToList();
+    var zuBenachrichtigen = h.ZuBenachrichtigen().Count;
+    var ohneMail = h.TeamsSortiert.Where(t => t.ThemaId is not null).SelectMany(t => t.Mitglieder).Count(m => m.Benachrichtigt is null && h.Person(m.PersonId).Email is null);
+    <div class="pm-head">
+        <div>
+            <h1>@h.Titel</h1>
+            <p>@h.Pruefungsnummer @(h.Pruefer is { } pruefer ? $"· {pruefer}" : "") · Themen bestätigen bis @(h.Bestaetigungsfrist is { } f ? Zeit.Datum(f) : "– (keine Frist)")</p>
+        </div>
+        <div class="pm-row">
+            <StatusPille Stil="info">@h.Personen.Count(x => x.Angemeldet) Personen</StatusPille>
+            <StatusPille Stil="@(h.OhneTeam.Any() ? "warn" : "gut")">@h.OhneTeam.Count() ohne Team</StatusPille>
+            <StatusPille Stil="@(alle.Count > 0 && alle.All(s => s == Bestaetigungsstand.Bestaetigt) ? "gut" : "neutral")">@alle.Count(s => s == Bestaetigungsstand.Bestaetigt) / @alle.Count bestätigt</StatusPille>
+        </div>
+    </div>
+
+    @if (fehler is not null)
+    {
+        <div class="pm-alert pm-crit" role="alert">@fehler</div>
+    }
+
+    <div class="pm-tabs" role="tablist">
+        @foreach (var (key, text) in new[] { ("teams", "Teams und Zuteilung"), ("themen", $"Themen ({h.Themen.Count})"), ("personen", "Personen"), ("angaben", "Angaben") })
+        {
+            <button type="button" role="tab" class="pm-tab @(bereich == key ? "on" : null)" aria-selected="@(bereich == key)" @onclick="() => bereich = key">@text</button>
+        }
+    </div>
+
+    @if (bereich == "teams")
+    {
+        <section class="pm-card">
+            <h2>Zuteilung und Bestätigung</h2>
+            <div class="pm-row">
+                <BegruendeterButton Text="Themen nach Wünschen zuteilen" Click="VorschlagAsync"
+                                    Freigabe="@(h.Teams.Any(t => t.ThemaId is null && t.Wuensche.Count > 0) ? Freigabe.Ja : Freigabe.Nein("Alle Teams mit Wünschen haben schon ein Thema."))" />
+                <BegruendeterButton Text="@($"Bestätigungsmails erstellen ({zuBenachrichtigen})")" Haupt="true" Click="MailsAsync" Beschaeftigt="@beschaeftigt"
+                                    Freigabe="@(zuBenachrichtigen > 0 ? Freigabe.Ja : Freigabe.Nein("Niemand wartet auf eine Mail: Erst Themen zuteilen; wer schon eine Mail hat, bekommt keine zweite (dafür „neue Mail“ in der Zeile)."))" />
+            </div>
+            <p class="pm-small pm-muted">Erst mit „Bestätigungsmails erstellen“ entsteht je Person eine Mail mit persönlichem Link – als Entwurf unter
+                <a href="entwuerfe">Mails zum Versenden</a>, verschickt wird sie aus Ihrem Outlook. Wechselt das Thema eines Teams, gilt der alte Link nicht mehr.
+                @if (ohneMail > 0) { <b>@ohneMail Person(en) ohne Mailadresse</b> }</p>
+            @if (mailsErstellt > 0)
+            {
+                <NaechsteSchritte Schritte="@([new NaechsterSchritt($"{mailsErstellt} Mail(s) in Outlook öffnen und senden", "entwuerfe", Hauptschritt: true)])" />
+            }
+        </section>
+
+        <section class="pm-card">
+            <h2>Teams (@h.Teams.Count)</h2>
+            @if (h.Teams.Count == 0)
+            {
+                <p class="pm-muted">Noch keine. Unten das erste Team anlegen.</p>
+            }
+            else
+            {
+                <div class="pm-tbl">
+                    <table>
+                        <thead><tr><th>Team</th><th>Mitglieder und Bestätigung</th><th>Wünsche</th><th>Thema</th><th></th></tr></thead>
+                        <tbody>
+                            @foreach (var t in h.TeamsSortiert)
+                            {
+                                var team = t;
+                                <tr>
+                                    <td><b>@t.Nr</b>@if (t.Notiz is { } n) { <br /><span class="pm-small pm-muted">@n</span> }</td>
+                                    <td>
+                                        @foreach (var m in t.Mitglieder.OrderBy(m => h.Person(m.PersonId).Nachname))
+                                        {
+                                            var mitglied = m;
+                                            var person = h.Person(m.PersonId);
+                                            var stand = h.Stand(t, m, jetzt);
+                                            <div class="pm-row-eng">
+                                                <span>@person.VollerName@(t.SprecherId == person.Id && t.Mitglieder.Count > 1 ? " (Sprecher/in)" : "")</span>
+                                                <StatusPille Stil="@Stil(stand)">@Text(stand)</StatusPille>
+                                                @if (stand is Bestaetigungsstand.Wartet or Bestaetigungsstand.Ueberfaellig && person.Email is not null)
+                                                {
+                                                    <button type="button" class="pm-linkbutton pm-small" title="Neue Mail mit neuem Link; der alte gilt dann nicht mehr" @onclick="() => MailErneuernAsync(mitglied.Id)">neue Mail</button>
+                                                }
+                                                @if (!person.Angemeldet)
+                                                {
+                                                    <StatusPille Stil="krit">nicht in der Prüfungsliste</StatusPille>
+                                                }
+                                            </div>
+                                        }
+                                    </td>
+                                    <td class="pm-small">
+                                        @foreach (var (w, i) in t.Wuensche.Select((w, i) => (w, i)))
+                                        {
+                                            var thema = h.Thema(w);
+                                            <div title="@thema?.Titel">@(i + 1). @(thema?.Anzeige ?? "?")</div>
+                                        }
+                                    </td>
+                                    <td>
+                                        <select class="pm-select" aria-label="Thema für Team @t.Nr" value="@(t.ThemaId?.ToString() ?? "")" @onchange="e => ZuteilenAsync(team, e.Value as string)">
+                                            <option value="">– kein Thema –</option>
+                                            @foreach (var th in h.ThemenSortiert)
+                                            {
+                                                var andere = h.TeamsMitThema(th.Id).Where(x => x.Id != team.Id).Select(x => x.Nr).ToList();
+                                                var wunsch = t.Wuensche.ToList().IndexOf(th.Id);
+                                                <option value="@th.Id">@th.Anzeige@(wunsch >= 0 ? $" ★ Wunsch {wunsch + 1}" : "")@(andere.Count > 0 ? $" · schon Team {string.Join(", ", andere)}" : "")</option>
+                                            }
+                                        </select>
+                                    </td>
+                                    <td class="pm-nowrap">
+                                        <button type="button" class="pm-btn pm-btn-klein" @onclick="() => TeamBearbeiten(team)">Bearbeiten</button>
+                                        <button type="button" class="pm-btn pm-btn-klein pm-btn-gefahr" @onclick="() => TeamEntfernenAsync(team)">Entfernen</button>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </section>
+
+        <section class="pm-card" id="teamformular">
+            <h2>@(entwurf.Id is null ? "Neues Team" : $"Team {h.TeamMit(entwurf.Id.Value).Nr} bearbeiten")</h2>
+            @{ var waehlbar = h.PersonenSortiert.Where(p => h.TeamVon(p.Id) is not { } x || x.Id == entwurf.Id).ToList(); }
+            <div class="pm-fields">
+                @for (var i = 0; i < Hausarbeit.MaxTeamgroesse; i++)
+                {
+                    var platz = i;
+                    <div class="pm-field">
+                        <label class="pm-lbl" for="person@(platz)">@(platz == 0 ? "Person 1" : $"Person {platz + 1} (optional)")</label>
+                        <select id="person@(platz)" class="pm-select" value="@entwurf.Personen[platz]" @onchange="e => entwurf.Personen[platz] = e.Value as string ?? string.Empty">
+                            <option value="">–</option>
+                            @foreach (var p in waehlbar)
+                            {
+                                <option value="@p.Id">@p.Name (@p.Matrikelnummer)@(p.Angemeldet ? "" : " – nicht in der Liste")</option>
+                            }
+                        </select>
+                    </div>
+                }
+                <div class="pm-field">
+                    <label class="pm-lbl" for="sprecher">Sprecher/in</label>
+                    <select id="sprecher" class="pm-select" value="@entwurf.Sprecher" @onchange="e => entwurf.Sprecher = e.Value as string ?? string.Empty">
+                        <option value="">Person 1</option>
+                        @foreach (var p in entwurf.Personen.Where(x => x.Length > 0).Distinct().Select(x => h.Personen.FirstOrDefault(p => p.Id.ToString() == x)).OfType<Bearbeitende>())
+                        {
+                            <option value="@p.Id">@p.VollerName</option>
+                        }
+                    </select>
+                </div>
+            </div>
+            <div class="pm-fields">
+                @for (var i = 0; i < 3; i++)
+                {
+                    var platz = i;
+                    <div class="pm-field">
+                        <label class="pm-lbl" for="wunsch@(platz)">@($"{platz + 1}. Wunsch")</label>
+                        <select id="wunsch@(platz)" class="pm-select" value="@entwurf.Wuensche[platz]" @onchange="e => entwurf.Wuensche[platz] = e.Value as string ?? string.Empty">
+                            <option value="">–</option>
+                            @foreach (var th in h.ThemenSortiert)
+                            {
+                                <option value="@th.Id">@th.Anzeige</option>
+                            }
+                        </select>
+                    </div>
+                }
+                <div class="pm-field">
+                    <label class="pm-lbl" for="notiz">Notiz (optional)</label>
+                    <input id="notiz" class="pm-input" @bind="entwurf.Notiz" placeholder="z. B. Mail vom 12.11." />
+                </div>
+            </div>
+            @if (h.Themen.Count == 0)
+            {
+                <p class="pm-small pm-muted">Für Wünsche zuerst unter „Themen“ die Themenliste einfügen.</p>
+            }
+            <div class="pm-row">
+                <BegruendeterButton Text="@(entwurf.Id is null ? "Team anlegen" : "Team speichern")" Haupt="true" Click="TeamSpeichernAsync"
+                                    Freigabe="@(entwurf.Personen.Any(p => p.Length > 0) ? Freigabe.Ja : Freigabe.Nein("Bitte mindestens eine Person wählen."))" />
+                @if (entwurf.Id is not null)
+                {
+                    <button type="button" class="pm-btn" @onclick="() => entwurf = new()">Abbrechen</button>
+                }
+            </div>
+        </section>
+
+        <section class="pm-card">
+            <h2>Ohne Team (@h.OhneTeam.Count())</h2>
+            @if (!h.OhneTeam.Any())
+            {
+                <p class="pm-muted">Alle Personen der Prüfungsliste sind in einem Team.</p>
+            }
+            else
+            {
+                <p>@string.Join(" · ", h.OhneTeam.Select(p => p.Name))</p>
+            }
+        </section>
+    }
+    else if (bereich == "themen")
+    {
+        <section class="pm-card">
+            <h2>Themen</h2>
+            @if (h.Themen.Count == 0)
+            {
+                <p class="pm-muted">Noch keine. Unten die Themenliste aus Ihrer Webseite einfügen oder einzeln anlegen.</p>
+            }
+            else
+            {
+                <div class="pm-tbl">
+                    <table>
+                        <thead><tr><th>Nr.</th><th>Thema</th><th>Art</th><th>Gewünscht</th><th>Zugeteilt</th><th></th></tr></thead>
+                        <tbody>
+                            @foreach (var th in h.ThemenSortiert)
+                            {
+                                var thema = th;
+                                var entfernen = h.KannThemaEntfernen(th.Id);
+                                <tr>
+                                    <td>@th.Nr</td>
+                                    <td><b>@th.Titel</b>@if (th.Eigen) { <text> </text><StatusPille Stil="info">eigenes Thema</StatusPille> }
+                                        @if (th.Beschreibung is { } b) { <br /><span class="pm-small pm-muted">@(b.Length > 160 ? b[..160] + " …" : b)</span> }</td>
+                                    <td>@th.Art</td>
+                                    <td>@h.Teams.Count(t => t.Wuensche.Contains(th.Id))</td>
+                                    <td>@string.Join(", ", h.TeamsMitThema(th.Id).Select(t => $"Team {t.Nr}"))</td>
+                                    <td class="pm-nowrap">
+                                        <button type="button" class="pm-btn pm-btn-klein" @onclick="() => ThemaBearbeiten(thema)">Bearbeiten</button>
+                                        <BegruendeterButton Text="Entfernen" Gefahr="true" Freigabe="@entfernen" Click="() => ThemaEntfernenAsync(thema)" />
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </section>
+
+        <section class="pm-card">
+            <h2>@(themaEntwurf.Id is null ? "Thema anlegen" : "Thema bearbeiten")</h2>
+            <div class="pm-fields">
+                <div class="pm-field"><label class="pm-lbl" for="tnr">Nr.</label><input id="tnr" type="number" min="1" class="pm-input" @bind="themaEntwurf.Nr" /></div>
+                <div class="pm-field pm-field-weit"><label class="pm-lbl" for="ttitel">Titel</label><input id="ttitel" class="pm-input" @bind="themaEntwurf.Titel" /></div>
+                <div class="pm-field">
+                    <label class="pm-lbl" for="tart">Art</label>
+                    <select id="tart" class="pm-select" @bind="themaEntwurf.Art">
+                        <option value="@Themenart.Software">Software</option>
+                        <option value="@Themenart.Hardware">Hardware</option>
+                    </select>
+                </div>
+            </div>
+            <div class="pm-field">
+                <label class="pm-lbl" for="tbes">Beschreibung</label>
+                <textarea id="tbes" class="pm-textarea" rows="3" @bind="themaEntwurf.Beschreibung"></textarea>
+            </div>
+            <label class="pm-check"><input type="checkbox" @bind="themaEntwurf.Eigen" /> Eigenes Thema eines Teams (nicht aus der Themenliste)</label>
+            <div class="pm-row">
+                <BegruendeterButton Text="Thema speichern" Haupt="true" Click="ThemaSpeichernAsync"
+                                    Freigabe="@(string.IsNullOrWhiteSpace(themaEntwurf.Titel) ? Freigabe.Nein("Bitte einen Titel angeben.") : Freigabe.Ja)" />
+                @if (themaEntwurf.Id is not null)
+                {
+                    <button type="button" class="pm-btn" @onclick="NeuesThema">Abbrechen</button>
+                }
+            </div>
+        </section>
+
+        <section class="pm-card">
+            <h2>Themenliste einfügen</h2>
+            <p class="pm-small">Den Abschnitt „Themenideen“ Ihrer Webseite kopieren und hier einfügen: je Thema eine Zeile wie „12. Titel Software“ (oder
+                „Hardware“), darunter die Beschreibung. Vorhandene Nummern werden aktualisiert.</p>
+            <textarea class="pm-textarea" rows="8" @bind="themenText" aria-label="Themenliste"></textarea>
+            <div><BegruendeterButton Text="Themen einlesen" Click="ThemenEinlesenAsync"
+                                     Freigabe="@(string.IsNullOrWhiteSpace(themenText) ? Freigabe.Nein("Bitte zuerst den Text einfügen.") : Freigabe.Ja)" /></div>
+        </section>
+    }
+    else if (bereich == "personen")
+    {
+        <section class="pm-card">
+            <h2>Personen (@h.Personen.Count)</h2>
+            <div class="pm-tbl">
+                <table>
+                    <thead><tr><th>Name</th><th>Matrikelnr.</th><th>Mail</th><th>Team</th><th>Stand</th></tr></thead>
+                    <tbody>
+                        @foreach (var p in h.PersonenSortiert)
+                        {
+                            <tr>
+                                <td>@p.Name</td>
+                                <td>@p.Matrikelnummer</td>
+                                <td class="pm-small">@(p.Email ?? "–")</td>
+                                <td>@(h.TeamVon(p.Id)?.Nr.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "–")</td>
+                                <td>@if (p.Angemeldet) { <StatusPille Stil="gut">in der Liste</StatusPille> }
+                                    else if (p.VonHand) { <StatusPille Stil="warn">von Hand</StatusPille> }
+                                    else { <StatusPille Stil="krit">abgemeldet</StatusPille> }</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <div class="pm-grid-2">
+            <section class="pm-card">
+                <h2>Prüfungsliste aktualisieren</h2>
+                <p class="pm-small pm-muted">Neue Liste vom <a href="@PruefungslisteLeser.DownloadOsnabrueck" target="_blank" rel="noopener noreferrer">Reporting-Server</a>
+                    hochladen: Nachmeldungen kommen dazu, Abgemeldete bleiben sichtbar. Enthält die Liste mehrere Prüfungen, zählt nur @(h.Pruefungsnummer ?? "die unter „Angaben“ eingetragene").</p>
+                <InputFile OnChange="ListeAbgleichenAsync" accept=".csv,text/csv" class="pm-input" />
+            </section>
+            <section class="pm-card">
+                <h2>Person von Hand ergänzen</h2>
+                <p class="pm-small pm-muted">Z. B. wer sich noch nicht zur Prüfung angemeldet hat.</p>
+                <div class="pm-fields">
+                    <div class="pm-field"><label class="pm-lbl" for="pv">Vorname</label><input id="pv" class="pm-input" @bind="neuVorname" /></div>
+                    <div class="pm-field"><label class="pm-lbl" for="pn">Nachname</label><input id="pn" class="pm-input" @bind="neuNachname" /></div>
+                    <div class="pm-field"><label class="pm-lbl" for="pm">Matrikelnummer</label><input id="pm" class="pm-input" @bind="neuMatrikel" /></div>
+                    <div class="pm-field"><label class="pm-lbl" for="pe">Mail</label><input id="pe" type="email" class="pm-input" @bind="neuMail" /></div>
+                </div>
+                <div><BegruendeterButton Text="Person ergänzen" Click="PersonAsync" /></div>
+            </section>
+        </div>
+    }
+    else
+    {
+        <section class="pm-card">
+            <h2>Angaben</h2>
+            <div class="pm-fields">
+                <div class="pm-field pm-field-weit"><label class="pm-lbl" for="atitel">Titel</label><input id="atitel" class="pm-input" @bind="angTitel" /></div>
+                <div class="pm-field"><label class="pm-lbl" for="anr">Prüfungsnummer</label><input id="anr" class="pm-input" @bind="angNummer" /></div>
+                <div class="pm-field">
+                    <label class="pm-lbl">Themen bestätigen bis</label>
+                    <RadzenDatePicker TValue="DateTime?" @bind-Value="angFrist" ShowTime="false" DateFormat="dd.MM.yyyy" Style="width:100%" />
+                </div>
+            </div>
+            <div><BegruendeterButton Text="Speichern" Haupt="true" Click="AngabenAsync" /></div>
+        </section>
+    }
+}
+
+@code {
+    [Parameter]
+    public Guid Id { get; set; }
+
+    private Hausarbeit? h;
+    private string? fehler, ladefehler, themenText, angTitel, angNummer, neuVorname, neuNachname, neuMatrikel, neuMail;
+    private DateTime? angFrist;
+    private string bereich = "teams";
+    private bool beschaeftigt;
+    private int mailsErstellt;
+    private TeamEntwurf entwurf = new();
+    private ThemaEntwurf themaEntwurf = new();
+
+    private sealed class TeamEntwurf
+    {
+        public Guid? Id { get; set; }
+
+        public string[] Personen { get; } = ["", "", ""];
+
+        public string Sprecher { get; set; } = string.Empty;
+
+        public string[] Wuensche { get; } = ["", "", ""];
+
+        public string? Notiz { get; set; }
+    }
+
+    private sealed class ThemaEntwurf
+    {
+        public Guid? Id { get; set; }
+
+        public int Nr { get; set; } = 1;
+
+        public string? Titel { get; set; }
+
+        public string? Beschreibung { get; set; }
+
+        public Themenart Art { get; set; }
+
+        public bool Eigen { get; set; }
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await LadenAsync();
+        if (h is not null)
+        {
+            (angTitel, angNummer) = (h.Titel, h.Pruefungsnummer);
+            angFrist = h.Bestaetigungsfrist is { } f ? Zeit.Lokal(f).Date : null;
+            NeuesThema();
+        }
+    }
+
+    private async Task LadenAsync()
+    {
+        try
+        {
+            h = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<HausarbeitDienst>().LadenAsync(Id));
+        }
+        catch (FachlicherFehler ex)
+        {
+            ladefehler = ex.Message;
+        }
+    }
+
+    private async Task AusfuehrenAsync(Func<HausarbeitDienst, Task> arbeit, string? erfolg)
+    {
+        fehler = null;
+        try
+        {
+            await Vorgang.AusfuehrenAsync(d => arbeit(d.GetRequiredService<HausarbeitDienst>()));
+            if (erfolg is not null)
+            {
+                Hinweise.Notify(NotificationSeverity.Success, erfolg);
+            }
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+        }
+
+        await LadenAsync();
+    }
+
+    private static string Stil(Bestaetigungsstand s) => s switch
+    {
+        Bestaetigungsstand.Bestaetigt => "gut",
+        Bestaetigungsstand.Wartet => "warn",
+        Bestaetigungsstand.Ueberfaellig => "krit",
+        Bestaetigungsstand.NichtBenachrichtigt => "info",
+        _ => "neutral",
+    };
+
+    private static string Text(Bestaetigungsstand s) => s switch
+    {
+        Bestaetigungsstand.Bestaetigt => "bestätigt",
+        Bestaetigungsstand.Wartet => "wartet",
+        Bestaetigungsstand.Ueberfaellig => "überfällig",
+        Bestaetigungsstand.NichtBenachrichtigt => "Mail fehlt",
+        _ => "kein Thema",
+    };
+
+    private static Guid? AlsId(string? s) => Guid.TryParse(s, out var g) ? g : null;
+
+    // ------------------------------------------------------------------ Teams
+    private void TeamBearbeiten(Team t)
+    {
+        entwurf = new TeamEntwurf { Id = t.Id, Sprecher = t.SprecherId?.ToString() ?? "", Notiz = t.Notiz };
+        var personen = t.Mitglieder.Select(m => m.PersonId.ToString()).ToList();
+        for (var i = 0; i < entwurf.Personen.Length; i++)
+        {
+            entwurf.Personen[i] = personen.ElementAtOrDefault(i) ?? "";
+            entwurf.Wuensche[i] = t.Wuensche.ElementAtOrDefault(i) is var w && w != Guid.Empty ? w.ToString() : "";
+        }
+    }
+
+    private async Task TeamSpeichernAsync()
+    {
+        var personen = entwurf.Personen.Select(AlsId).OfType<Guid>().ToList();
+        var wuensche = entwurf.Wuensche.Select(AlsId).OfType<Guid>().ToList();
+        var e = entwurf;
+        await AusfuehrenAsync(d => d.TeamSpeichernAsync(Id, e.Id, personen, AlsId(e.Sprecher), wuensche, e.Notiz), e.Id is null ? "Team angelegt." : "Team gespeichert.");
+        if (fehler is null)
+        {
+            entwurf = new();
+        }
+    }
+
+    private Task TeamEntfernenAsync(Team t) => AusfuehrenAsync(d => d.TeamEntfernenAsync(Id, t.Id), $"Team {t.Nr} entfernt.");
+
+    private Task ZuteilenAsync(Team t, string? themaId) => AusfuehrenAsync(d => d.ThemaZuteilenAsync(Id, t.Id, AlsId(themaId)), null);
+
+    private async Task VorschlagAsync()
+    {
+        var anzahl = 0;
+        await AusfuehrenAsync(async d => anzahl = await d.NachWuenschenZuteilenAsync(Id), null);
+        if (fehler is null)
+        {
+            Hinweise.Notify(NotificationSeverity.Success, anzahl == 0 ? "Kein freier Wunsch mehr übrig – bitte von Hand zuteilen." : $"{anzahl} Team(s) nach Wünschen zugeteilt – bitte prüfen.");
+        }
+    }
+
+    private async Task MailsAsync()
+    {
+        beschaeftigt = true;
+        await AusfuehrenAsync(async d => mailsErstellt = await d.BestaetigungsmailsErstellenAsync(Id), null);
+        beschaeftigt = false;
+    }
+
+    private Task MailErneuernAsync(Guid mitgliedId) => AusfuehrenAsync(async d =>
+    {
+        await d.MailErneuernAsync(Id, mitgliedId);
+        mailsErstellt = 1;
+    }, "Neue Mail erstellt – der alte Link gilt nicht mehr.");
+
+    // ------------------------------------------------------------------ Themen
+    private void NeuesThema() => themaEntwurf = new ThemaEntwurf { Nr = h?.NaechsteThemennummer ?? 1 };
+
+    private void ThemaBearbeiten(HausarbeitThema t)
+        => themaEntwurf = new ThemaEntwurf { Id = t.Id, Nr = t.Nr, Titel = t.Titel, Beschreibung = t.Beschreibung, Art = t.Art, Eigen = t.Eigen };
+
+    private async Task ThemaSpeichernAsync()
+    {
+        var t = themaEntwurf;
+        await AusfuehrenAsync(d => d.ThemaSpeichernAsync(Id, t.Id, t.Nr, t.Titel ?? "", t.Beschreibung, t.Art, t.Eigen), "Thema gespeichert.");
+        if (fehler is null)
+        {
+            NeuesThema();
+        }
+    }
+
+    private Task ThemaEntfernenAsync(HausarbeitThema t) => AusfuehrenAsync(d => d.ThemaEntfernenAsync(Id, t.Id), $"Thema {t.Nr} entfernt.");
+
+    private async Task ThemenEinlesenAsync()
+    {
+        ThemenImport? ergebnis = null;
+        var text = themenText ?? "";
+        await AusfuehrenAsync(async d => ergebnis = await d.ThemenEinlesenAsync(Id, text), null);
+        if (ergebnis is { } e)
+        {
+            Hinweise.Notify(NotificationSeverity.Success, $"{e.Neu} Thema/Themen neu, {e.Geaendert} aktualisiert.");
+            themenText = null;
+            NeuesThema();
+        }
+    }
+
+    // ------------------------------------------------------------------ Personen und Angaben
+    private async Task ListeAbgleichenAsync(InputFileChangeEventArgs e)
+    {
+        fehler = null;
+        byte[] inhalt;
+        try
+        {
+            using var puffer = new MemoryStream();
+            await e.File.OpenReadStream(PruefungslisteLeser.MaxBytes).CopyToAsync(puffer);
+            inhalt = puffer.ToArray();
+        }
+        catch (IOException)
+        {
+            fehler = "Die Datei ist zu groß (höchstens 2 MB).";
+            return;
+        }
+
+        ProfOMat.Domain.Klausuren.ImportErgebnis? ergebnis = null;
+        await AusfuehrenAsync(async d => ergebnis = await d.ListeAbgleichenAsync(Id, inhalt), null);
+        if (ergebnis is { } x)
+        {
+            Hinweise.Notify(NotificationSeverity.Success, $"Abgeglichen: {x.Neu} neu, {x.Abgemeldet} abgemeldet, {x.Wieder} wieder angemeldet, {x.Geaendert} geändert.");
+        }
+    }
+
+    private async Task PersonAsync()
+    {
+        await AusfuehrenAsync(d => d.PersonHinzufuegenAsync(Id, neuMatrikel ?? "", neuNachname ?? "", neuVorname ?? "", neuMail), "Person ergänzt.");
+        if (fehler is null)
+        {
+            neuVorname = neuNachname = neuMatrikel = neuMail = null;
+        }
+    }
+
+    private Task AngabenAsync()
+    {
+        var bis = angFrist is { } f ? Zeit.AlsUtc(f.Date.AddDays(1).AddSeconds(-1)) : (DateTimeOffset?)null;
+        return AusfuehrenAsync(d => d.AendernAsync(Id, angTitel ?? "", angNummer, bis), "Angaben gespeichert.");
+    }
+}

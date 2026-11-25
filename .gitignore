@@ -494,3 +494,6 @@ data/
 logs/
 
 deploy/ausgabe/
+
+# Interne Finanzunterlagen (nicht ins Repository)
+finanzen_info/

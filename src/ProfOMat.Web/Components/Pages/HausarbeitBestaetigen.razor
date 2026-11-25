@@ -1,0 +1,72 @@
+@page "/hausarbeit/bestaetigen/{Id:guid}/{Token}"
+@attribute [AllowAnonymous]
+@using ProfOMat.Application.Hausarbeiten
+@inject Vorgang Vorgang
+@inject Ortszeit Zeit
+
+<PageTitle>Thema bestätigen · ProfOMat</PageTitle>
+
+@if (ansicht is null)
+{
+    <section class="pm-card">
+        <h1>Link ungültig</h1>
+        <p>Der Link ist unvollständig oder gilt nicht mehr (zum Beispiel, weil Ihrem Team inzwischen ein anderes Thema zugeteilt wurde).
+            Bitte den Link aus der neuesten Mail vollständig öffnen oder bei der Prüferin bzw. dem Prüfer nachfragen.</p>
+    </section>
+}
+else
+{
+    var a = ansicht;
+    <div class="pm-head">
+        <div>
+            <h1>Ihr Thema für die Hausarbeit</h1>
+            <p>Modul „@a.Hausarbeit“@(a.Pruefer is { } p ? $" · {p}" : "")</p>
+        </div>
+        @if (a.Bestaetigt is not null)
+        {
+            <StatusPille Stil="gut">bestätigt</StatusPille>
+        }
+    </div>
+
+    <section class="pm-card">
+        <h2>@a.Thema.Nr. @a.Thema.Titel <StatusPille Stil="info">@a.Thema.Art</StatusPille></h2>
+        @if (a.Thema.Beschreibung is { } b)
+        {
+            <p>@b</p>
+        }
+        <dl class="pm-dl">
+            <dt>Sie</dt><dd>@a.Name</dd>
+            <dt>Team</dt><dd>@string.Join(", ", a.Team)</dd>
+            <dt>Bestätigen bis</dt><dd>@(a.Frist is { } f ? Zeit.Datum(f) : "–")</dd>
+        </dl>
+    </section>
+
+    @if (a.Bestaetigt is { } wann)
+    {
+        <div class="pm-alert pm-gut" role="status">Danke! Sie haben das Thema am @Zeit.Kurz(wann) angenommen. Jedes Teammitglied bestätigt über den eigenen Link.</div>
+    }
+    else
+    {
+        <section class="pm-card">
+            <h2>Thema annehmen</h2>
+            <p>Mit der Bestätigung nehmen Sie dieses Thema für Ihre Hausarbeit an. Jedes Teammitglied bestätigt einzeln.</p>
+            <div><BegruendeterButton Text="Thema verbindlich annehmen" Haupt="true" Click="BestaetigenAsync" /></div>
+        </section>
+    }
+}
+
+@code {
+    [Parameter]
+    public Guid Id { get; set; }
+
+    [Parameter]
+    public string Token { get; set; } = string.Empty;
+
+    private Themenbestaetigung? ansicht;
+
+    protected override async Task OnParametersSetAsync()
+        => ansicht = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<HausarbeitDienst>().BestaetigungAnsichtAsync(Id, Token));
+
+    private async Task BestaetigenAsync()
+        => ansicht = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<HausarbeitDienst>().BestaetigenAsync(Id, Token));
+}

@@ -100,7 +100,7 @@ export async function browserStarten({ port = 9333, breite = 1280, hoehe = 900 }
         async dateiSetzen(selektor, pfad) {
             const { root } = await s('DOM.getDocument', { depth: -1, pierce: true });
             const { nodeId } = await s('DOM.querySelector', { nodeId: root.nodeId, selector: selektor });
-            await s('DOM.setFileInputFiles', { nodeId, files: [pfad] });
+            await s('DOM.setFileInputFiles', { nodeId, files: Array.isArray(pfad) ? pfad : [pfad] });
             await warte(800);
         },
         /** Echte Tastendrücke an das fokussierte Element: Zeichen einzeln, „⏎“ = Enter, „⇥“ = Tab, „↑“/„↓“/„←“/„→“ = Pfeiltasten, „⎋“ = Escape. */

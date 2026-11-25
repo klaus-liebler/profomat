@@ -73,6 +73,42 @@ public static class DatenbankInitialisierung
             version = 9;
         }
 
+        if (version == 9)
+        {
+            await TabellenErgaenzenAsync(db, 10, ProfOMatDbContext.TabellenAbVersion10, abbruch);
+            version = 10;
+        }
+
+        if (version == 10)
+        {
+            await TabellenErgaenzenAsync(db, 11, ProfOMatDbContext.TabellenAbVersion11, abbruch);
+            version = 11;
+        }
+
+        if (version == 11)
+        {
+            await AufVersion12Async(db, abbruch);
+            version = 12;
+        }
+
+        if (version == 12)
+        {
+            await TabellenErgaenzenAsync(db, 13, ProfOMatDbContext.TabellenAbVersion13, abbruch);
+            version = 13;
+        }
+
+        if (version == 13)
+        {
+            await TabellenErgaenzenAsync(db, 14, ProfOMatDbContext.TabellenAbVersion14, abbruch);
+            version = 14;
+        }
+
+        if (version == 14)
+        {
+            await AufVersion15Async(db, abbruch);
+            version = 15;
+        }
+
         if (version != ProfOMatDbContext.Schemaversion)
         {
             throw new InvalidOperationException(
@@ -102,6 +138,55 @@ public static class DatenbankInitialisierung
         await transaktion.CommitAsync(abbruch);
     }
 
+    /// <summary>11 → 12 ohne Datenverlust: Gefache können öffentlich sichtbar sein (bisherige bleiben privat).</summary>
+    private static async Task AufVersion12Async(ProfOMatDbContext db, CancellationToken abbruch)
+    {
+        var typ = db.Model.FindEntityType(typeof(ProfOMat.Domain.Gefache.Gefach))!;
+        var spalte = typ.FindProperty(nameof(ProfOMat.Domain.Gefache.Gefach.Oeffentlich))!.GetColumnName();
+        var tabelle = typ.GetTableName()!;
+        await using var transaktion = await db.Database.BeginTransactionAsync(abbruch);
+        // Kam die Tabelle erst mit 10 → 11 (aus dem aktuellen Modell), hat sie die Spalte schon.
+        var vorhanden = await db.Database.SqlQuery<int>($"SELECT COUNT(*) AS \"Value\" FROM pragma_table_info({tabelle}) WHERE name = {spalte}")
+            .SingleAsync(abbruch);
+        if (vorhanden == 0)
+        {
+            var sql = "ALTER TABLE \"" + tabelle + "\" ADD COLUMN \"" + spalte + "\" INTEGER NOT NULL DEFAULT 0;";
+            await db.Database.ExecuteSqlRawAsync(sql, abbruch);
+        }
+
+        var info = await db.Set<Schemainfo>().SingleAsync(abbruch);
+        info.Version = 12;
+        await db.SaveChangesAsync(abbruch);
+        await transaktion.CommitAsync(abbruch);
+    }
+
+    /// <summary>14 → 15 ohne Datenverlust: neue Finanztabellen und Erinnerungs-Vorlauf der Laborteams (bisherige: 30 Tage).</summary>
+    private static async Task AufVersion15Async(ProfOMatDbContext db, CancellationToken abbruch)
+    {
+        var typ = db.Model.FindEntityType(typeof(ProfOMat.Domain.Finanzen.Laborteam))!;
+        var spalte = typ.FindProperty(nameof(ProfOMat.Domain.Finanzen.Laborteam.ErinnerungVorlaufTage))!.GetColumnName();
+        var tabelle = typ.GetTableName()!;
+        await using var transaktion = await db.Database.BeginTransactionAsync(abbruch);
+        foreach (var anweisung in NeueTabellen(db.Database.GenerateCreateScript(), ProfOMatDbContext.TabellenAbVersion15))
+        {
+            await db.Database.ExecuteSqlRawAsync(anweisung, abbruch);
+        }
+
+        var vorhanden = await db.Database.SqlQuery<int>($"SELECT COUNT(*) AS \"Value\" FROM pragma_table_info({tabelle}) WHERE name = {spalte}")
+            .SingleAsync(abbruch);
+        if (vorhanden == 0)
+        {
+            var sql = "ALTER TABLE \"" + tabelle + "\" ADD COLUMN \"" + spalte + "\" INTEGER NOT NULL DEFAULT "
+                      + ProfOMat.Domain.Finanzen.Laborteam.StandardVorlaufTage.ToString(System.Globalization.CultureInfo.InvariantCulture) + ";";
+            await db.Database.ExecuteSqlRawAsync(sql, abbruch);
+        }
+
+        var info = await db.Set<Schemainfo>().SingleAsync(abbruch);
+        info.Version = 15;
+        await db.SaveChangesAsync(abbruch);
+        await transaktion.CommitAsync(abbruch);
+    }
+
     /// <summary>8 → 9 ohne Datenverlust: Schlüssel der Teilnahmen = letzte Stellen der Matrikelnummer statt zufälliger Klausur-ID.</summary>
     private static async Task AufVersion9Async(ProfOMatDbContext db, CancellationToken abbruch)
     {
@@ -115,5 +200,47 @@ public static class DatenbankInitialisierung
         info.Version = 9;
         await db.SaveChangesAsync(abbruch);
         await transaktion.CommitAsync(abbruch);
+    }
+
+    /// <summary>
+    /// Aufwertung ohne Datenverlust, wenn nur Tabellen dazukommen (9 → 10: Hausarbeiten und Mailentwürfe; 10 → 11: Gefache; 12 → 13: Finanzen; 13 → 14: Finanzplanung). Die
+    /// Anweisungen stammen aus dem Erstellskript des Modells; übernommen werden nur CREATE TABLE/INDEX der neuen Tabellen.
+    /// </summary>
+    private static async Task TabellenErgaenzenAsync(ProfOMatDbContext db, int neueVersion, IReadOnlyCollection<string> tabellen, CancellationToken abbruch)
+    {
+        await using var transaktion = await db.Database.BeginTransactionAsync(abbruch);
+        foreach (var anweisung in NeueTabellen(db.Database.GenerateCreateScript(), tabellen))
+        {
+            await db.Database.ExecuteSqlRawAsync(anweisung, abbruch);
+        }
+
+        var info = await db.Set<Schemainfo>().SingleAsync(abbruch);
+        info.Version = neueVersion;
+        await db.SaveChangesAsync(abbruch);
+        await transaktion.CommitAsync(abbruch);
+    }
+
+    /// <summary>Aus einem Erstellskript die CREATE-Anweisungen, die eine der genannten Tabellen anlegen oder indizieren.</summary>
+    internal static IReadOnlyList<string> NeueTabellen(string skript, IReadOnlyCollection<string> tabellen)
+    {
+        ArgumentNullException.ThrowIfNull(skript);
+        ArgumentNullException.ThrowIfNull(tabellen);
+        var ergebnis = new List<string>();
+        foreach (var roh in skript.Split(';'))
+        {
+            var a = roh.Trim();
+            var ziel = a.StartsWith("CREATE TABLE \"", StringComparison.Ordinal) ? a["CREATE TABLE \"".Length..].Split('"')[0]
+                : a.StartsWith("CREATE ", StringComparison.Ordinal) && a.Contains(" INDEX ", StringComparison.Ordinal) && a.Contains(" ON \"", StringComparison.Ordinal)
+                    ? a[(a.IndexOf(" ON \"", StringComparison.Ordinal) + 5)..].Split('"')[0]
+                    : null;
+            if (ziel is not null && tabellen.Contains(ziel))
+            {
+                // IF NOT EXISTS: eine (teilweise) vorhandene Tabelle bricht die Aufwertung nicht ab
+                ergebnis.Add(a.Replace("CREATE TABLE \"", "CREATE TABLE IF NOT EXISTS \"", StringComparison.Ordinal)
+                    .Replace(" INDEX \"", " INDEX IF NOT EXISTS \"", StringComparison.Ordinal) + ";");
+            }
+        }
+
+        return ergebnis;
     }
 }

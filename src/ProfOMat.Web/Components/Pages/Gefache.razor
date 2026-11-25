@@ -1,0 +1,152 @@
+@page "/gefache"
+@attribute [Authorize]
+@using ProfOMat.Application.Gefache
+@using ProfOMat.Domain.Gefache
+@inject Vorgang Vorgang
+@inject NavigationManager Navigation
+
+<PageTitle>Gefache lasern · ProfOMat</PageTitle>
+
+<div class="pm-head">
+    <div>
+        <h1>Gefache lasern</h1>
+        <p>Teilungseinsätze für Kisten – vorbelegt für die Euro-Lagerbox 60 × 40 × 22 cm – aus MDF auf dem Lasercutter schneiden: Kistenmaße,
+            Holzdicke, Plattengröße und Fächer angeben, das Gefach in 3D prüfen und die Schnittvorlagen (SVG und DXF je Platte) herunterladen.
+            Die Wände werden ineinandergesteckt (Kreuzschlitze). Ihre Gefache sehen nur Sie – außer Sie markieren eines als „öffentlich sichtbar“;
+            öffentliche Gefache anderer können Sie ansehen und als Vorlage übernehmen.</p>
+    </div>
+</div>
+
+@if (fehler is not null)
+{
+    <div class="pm-alert pm-crit" role="alert">@fehler</div>
+}
+
+<section class="pm-card">
+    <h2>Neues Gefach</h2>
+    <div class="pm-fields">
+        <div class="pm-field pm-field-weit">
+            <label class="pm-lbl" for="bezeichnung">Bezeichnung</label>
+            <input id="bezeichnung" class="pm-input" @bind="bezeichnung" @bind:event="oninput" @onkeydown="TasteAsync"
+                   maxlength="@Gefach.BezeichnungMaxLaenge" autocomplete="off" placeholder="z. B. Schrauben-Kiste Werkstatt" />
+            <span class="pm-hilfe">Beginnt mit der Euro-Lagerbox (innen 570 × 370 mm, 204 mm Stapelhöhe), 3 mm MDF auf 800 × 600 mm und 3 × 2 Fächern –
+                alles ist danach änderbar.</span>
+        </div>
+    </div>
+    <div>
+        <BegruendeterButton Text="Gefach anlegen" Haupt="true" Click="AnlegenAsync" Beschaeftigt="@beschaeftigt"
+                            Freigabe="@(string.IsNullOrWhiteSpace(bezeichnung) ? Freigabe.Nein("Bitte zuerst eine Bezeichnung eingeben.") : Freigabe.Ja)" />
+    </div>
+</section>
+
+<section class="pm-card">
+    <h2>Meine Gefache</h2>
+    @if (liste.Count == 0)
+    {
+        <p class="pm-muted">Noch keine.</p>
+    }
+    else
+    {
+        <div class="pm-tbl">
+            <table>
+                <thead><tr><th>Gefach</th><th>Kiste innen</th><th>Fächer</th><th>Holz</th><th>Sichtbar</th></tr></thead>
+                <tbody>
+                    @foreach (var g in liste)
+                    {
+                        var a = g.Angaben;
+                        <tr>
+                            <td><a href="gefache/@g.Id">@g.Bezeichnung</a></td>
+                            <td>@Mm(a.InnenLaengeMm) × @Mm(a.InnenBreiteMm) × @Mm(a.HoeheMm) mm</td>
+                            <td>@Faecher(a)</td>
+                            <td>@Mm(a.DickeMm) mm</td>
+                            <td>@(g.Oeffentlich ? "öffentlich" : "nur ich")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</section>
+
+<section class="pm-card" id="oeffentlich">
+    <h2>Öffentliche Gefache anderer</h2>
+    @if (oeffentlich.Count == 0)
+    {
+        <p class="pm-muted">Noch keine. Wer ein Gefach als „öffentlich sichtbar“ markiert, erscheint hier.</p>
+    }
+    else
+    {
+        <p class="pm-muted pm-small">Ansehen, ausprobieren und als Vorlage zu Ihren Gefachen übernehmen; ändern kann nur, wer es angelegt hat.</p>
+        <div class="pm-tbl">
+            <table>
+                <thead><tr><th>Gefach</th><th>Von</th><th>Kiste innen</th><th>Fächer</th><th>Holz</th></tr></thead>
+                <tbody>
+                    @foreach (var o in oeffentlich)
+                    {
+                        var a = o.Gefach.Angaben;
+                        <tr>
+                            <td><a href="gefache/@o.Gefach.Id">@o.Gefach.Bezeichnung</a></td>
+                            <td>@o.Von</td>
+                            <td>@Mm(a.InnenLaengeMm) × @Mm(a.InnenBreiteMm) × @Mm(a.HoeheMm) mm</td>
+                            <td>@Faecher(a)</td>
+                            <td>@Mm(a.DickeMm) mm</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</section>
+
+@code {
+    private IReadOnlyList<Gefach> liste = [];
+    private IReadOnlyList<Gefachansicht> oeffentlich = [];
+    private string? bezeichnung, fehler;
+    private bool beschaeftigt;
+
+    private static string Mm(decimal d) => d.ToString("0.##", System.Globalization.CultureInfo.GetCultureInfo("de-DE"));
+
+    private static string Faecher(Gefachangaben a)
+    {
+        var plan = Gefachplan.Berechnen(a);
+        return plan.Freigabe.Erlaubt ? $"{plan.FaecherLaenge.Count} × {plan.FaecherBreite.Count}" : "–";
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        liste = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<GefachDienst>().ListeAsync());
+        oeffentlich = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<GefachDienst>().OeffentlicheAsync());
+    }
+
+    private async Task TasteAsync(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !string.IsNullOrWhiteSpace(bezeichnung))
+        {
+            await AnlegenAsync();
+        }
+    }
+
+    private async Task AnlegenAsync()
+    {
+        if (beschaeftigt || string.IsNullOrWhiteSpace(bezeichnung))
+        {
+            return;
+        }
+
+        fehler = null;
+        beschaeftigt = true;
+        try
+        {
+            var g = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<GefachDienst>().AnlegenAsync(bezeichnung));
+            Navigation.NavigateTo($"gefache/{g.Id}");
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+        }
+        finally
+        {
+            beschaeftigt = false;
+        }
+    }
+}

@@ -1,0 +1,274 @@
+@*
+    Buchungen einer Kostenstelle: Jahr, Suche, Filter (Gruppe, Markierung), Summen je Gruppe; je Buchung Kommentar und Markierungen (FA-718),
+    für alle im Laborteam sichtbar. Notizen ohne passende Buchung (nach Korrektur im neuen Auszug) stehen darunter.
+*@
+@using ProfOMat.Application.Finanzen
+@using ProfOMat.Domain.Finanzen
+@inject Vorgang Vorgang
+@inject NotificationService Hinweise
+
+<div class="pm-row">
+    <select class="pm-select" value="@jahr" @onchange="JahrGewaehltAsync" aria-label="Jahr">
+        @foreach (var j in Jahre)
+        {
+            <option value="@j.Jahr">@j.Jahr</option>
+        }
+    </select>
+    <input class="pm-input pm-grow" @bind="suche" @bind:event="oninput" placeholder="Suchen in Text, Kostenart, Belegnummer, Betrag, Kommentar" aria-label="Suchen" />
+    <select class="pm-select" @bind="gruppe" aria-label="Kostenartengruppe">
+        <option value="">alle Gruppen</option>
+        @foreach (var g in buchungen.Select(b => Kostenartgruppe.Von(b.Kostenart)).Distinct().Order())
+        {
+            <option value="@g">@g</option>
+        }
+    </select>
+    <select class="pm-select" @bind="filter" aria-label="Markierung">
+        <option value="">alle Buchungen</option>
+        <option value="offen">offen markiert (@notizen.JeBuchung.Values.Count(n => n.Notiz.Offen))</option>
+        <option value="notiz">mit Notiz (@notizen.JeBuchung.Count)</option>
+        @foreach (var m in Buchungsnotiz.Einzeln(Alle))
+        {
+            <option value="@((int)m)">@Buchungsnotiz.Anzeige(m)</option>
+        }
+    </select>
+</div>
+
+@if (Stand is { } stand)
+{
+    <p class="pm-small pm-muted">Stand „@stand.Dateiname“ (Buchungen bis @stand.BisDatum?.ToString("dd.MM.yyyy"), übernommen @stand.Importiert.ToLocalTime().ToString("dd.MM.yyyy")) ·
+        @stand.Anzahl Buchungen · Rest @Geld.Text(stand.Rest) · Vorzeichen wie im SAP-Auszug: positiv = Ausgabe, negativ = Zugang.</p>
+}
+
+@if (fehler is not null)
+{
+    <div class="pm-alert pm-crit" role="alert">@fehler</div>
+}
+
+<div class="pm-tbl">
+    <table>
+        <thead><tr><th>Gruppe</th><th class="pm-geld">Zugänge</th><th class="pm-geld">Ausgaben</th></tr></thead>
+        <tbody>
+            @foreach (var g in buchungen.GroupBy(b => Kostenartgruppe.Von(b.Kostenart)).OrderBy(g => g.Key == Kostenartgruppe.Zuweisungen ? 0 : 1).ThenByDescending(g => g.Sum(b => b.Betrag)))
+            {
+                var summe = g.Sum(b => b.Betrag);
+                <tr>
+                    <td><button type="button" class="pm-linkbutton" @onclick="() => gruppe = g.Key">@g.Key</button></td>
+                    <td class="pm-geld">@(g.First().IstZugang ? Geld.Text(-summe) : "")</td>
+                    <td class="pm-geld">@(g.First().IstZugang ? "" : Geld.Text(summe))</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</div>
+
+@{
+    var gefiltert = Gefiltert().ToList();
+}
+<div class="pm-tbl">
+    <table class="pm-fin-buchungen">
+        <thead><tr><th>Beleg</th><th>Kostenart</th><th>Text</th><th>Beleg-Nr.</th><th class="pm-geld">Betrag</th><th>Notiz</th></tr></thead>
+        <tbody>
+            @foreach (var b in gefiltert)
+            {
+                var n = notizen.JeBuchung.GetValueOrDefault(b.Fingerabdruck);
+                <tr class="@(b.IstZugang ? "pm-hervor" : null)">
+                    <td class="pm-nowrap" title="@($"gebucht {b.Buchungsdatum:dd.MM.yyyy}")">@b.Belegdatum.ToString("dd.MM.yyyy")</td>
+                    <td><span class="pm-mono">@b.Kostenart</span> @b.KostenartText</td>
+                    <td>@b.Text</td>
+                    <td class="pm-mono">@b.Belegnummer</td>
+                    <td class="pm-geld">@Geld.Text(b.Betrag)</td>
+                    <td class="pm-fin-notiz">
+                        @if (n is not null)
+                        {
+                            <span class="pm-chips">
+                                @foreach (var m in Buchungsnotiz.Einzeln(n.Notiz.Markierung))
+                                {
+                                    <StatusPille Stil="@Stil(m)">@Buchungsnotiz.Anzeige(m)</StatusPille>
+                                }
+                            </span>
+                            @if (n.Notiz.Kommentar is { } k)
+                            {
+                                <span class="pm-small">@k</span>
+                            }
+                            <span class="pm-small pm-muted">@n.Von, @n.Notiz.Geaendert.ToLocalTime().ToString("dd.MM.yyyy")</span>
+                        }
+                        <button type="button" class="pm-linkbutton pm-small" @onclick="() => Bearbeiten(b, n)" aria-label="@($"Notiz zu {b.Text}")">@(n is null ? "+ Notiz" : "ändern")</button>
+                    </td>
+                </tr>
+                @if (bearbeitet == b.Id)
+                {
+                    <tr class="pm-fin-editor">
+                        <td colspan="6">
+                            <div class="pm-field">
+                                <label class="pm-lbl" for="notiz-text">Kommentar (für alle im Laborteam sichtbar)</label>
+                                <textarea id="notiz-text" class="pm-textarea" rows="2" maxlength="@Buchungsnotiz.KommentarMaxLaenge" @bind="kommentar"></textarea>
+                            </div>
+                            <div class="pm-row">
+                                @foreach (var m in Buchungsnotiz.Einzeln(Alle))
+                                {
+                                    var mm = m;
+                                    <label class="pm-check"><input type="checkbox" checked="@markierung.HasFlag(mm)" @onchange="e => Umschalten(mm, e)" /> @Buchungsnotiz.Anzeige(mm)</label>
+                                }
+                            </div>
+                            <div class="pm-row">
+                                <BegruendeterButton Text="Speichern" Haupt="true" Click="() => SpeichernAsync(b)" Beschaeftigt="@beschaeftigt" />
+                                <button type="button" class="pm-btn" @onclick="() => bearbeitet = null">Abbrechen</button>
+                                <span class="pm-small pm-muted">Kommentar leeren und alle Häkchen entfernen löscht die Notiz.</span>
+                            </div>
+                        </td>
+                    </tr>
+                }
+            }
+        </tbody>
+        <tfoot><tr><td colspan="4"><b>@gefiltert.Count Buchung(en)</b></td><td class="pm-geld"><b>@Geld.Text(gefiltert.Sum(b => b.Betrag))</b></td><td></td></tr></tfoot>
+    </table>
+</div>
+
+@if (notizen.Verwaist.Count > 0)
+{
+    <h3>Notizen ohne passende Buchung</h3>
+    <p class="pm-small pm-muted">Der neue Auszug enthält diese Buchungen nicht mehr unverändert (z. B. umgebucht oder korrigiert). Prüfen und bei Bedarf an der neuen Buchung neu notieren.</p>
+    <div class="pm-list">
+        @foreach (var v in notizen.Verwaist)
+        {
+            <div>
+                <span class="pm-grow"><b>@v.Notiz.Beschreibung</b><br /><span class="pm-small">@string.Join(", ", Buchungsnotiz.Einzeln(v.Notiz.Markierung).Select(Buchungsnotiz.Anzeige)) @v.Notiz.Kommentar</span></span>
+                <span class="pm-small pm-muted">@v.Von</span>
+                <button type="button" class="pm-btn pm-btn-klein" @onclick="() => VerwaistLoeschenAsync(v)">löschen</button>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public Guid TeamId { get; set; }
+
+    [Parameter, EditorRequired]
+    public Guid TopfId { get; set; }
+
+    /// <summary>Importierte Jahre (neuestes zuerst).</summary>
+    [Parameter, EditorRequired]
+    public IReadOnlyList<Kostenstellenstand> Jahre { get; set; } = [];
+
+    /// <summary>Filter beim Öffnen, z. B. „offen“ aus dem Cockpit.</summary>
+    [Parameter]
+    public string? StartFilter { get; set; }
+
+    private const Buchungsmarkierung Alle = Buchungsmarkierung.NichtOk | Buchungsmarkierung.Nachverfolgen | Buchungsmarkierung.Rueckfrage | Buchungsmarkierung.Geklaert;
+
+    private int jahr;
+    private IReadOnlyList<Buchung> buchungen = [];
+    private Buchungsnotizen notizen = new(new Dictionary<string, Notizansicht>(), []);
+    private string? suche, gruppe, filter, kommentar, fehler;
+    private Guid? bearbeitet;
+    private Buchungsmarkierung markierung;
+    private bool beschaeftigt, gestartet;
+
+    private Kostenstellenstand? Stand => Jahre.FirstOrDefault(j => j.Jahr == jahr);
+
+    internal static string Stil(Buchungsmarkierung m) => m switch
+    {
+        Buchungsmarkierung.NichtOk => "krit",
+        Buchungsmarkierung.Nachverfolgen => "warn",
+        Buchungsmarkierung.Rueckfrage => "info",
+        _ => "gut",
+    };
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!gestartet)
+        {
+            gestartet = true;
+            filter = StartFilter;
+        }
+
+        if (Jahre.Count > 0)
+        {
+            jahr = Jahre.Any(j => j.Jahr == jahr) ? jahr : Jahre[0].Jahr;
+            await LadenAsync();
+        }
+    }
+
+    private async Task LadenAsync()
+    {
+        buchungen = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<FinanzDienst>().BuchungenAsync(TeamId, TopfId, jahr));
+        notizen = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<FinanzDienst>().NotizenAsync(TeamId, TopfId, jahr));
+    }
+
+    private IEnumerable<Buchung> Gefiltert()
+    {
+        var q = buchungen.AsEnumerable();
+        if (!string.IsNullOrEmpty(gruppe))
+        {
+            q = q.Where(b => Kostenartgruppe.Von(b.Kostenart) == gruppe);
+        }
+
+        Notizansicht? N(Buchung b) => notizen.JeBuchung.GetValueOrDefault(b.Fingerabdruck);
+        q = filter switch
+        {
+            "offen" => q.Where(b => N(b)?.Notiz.Offen == true),
+            "notiz" => q.Where(b => N(b) is not null),
+            { Length: > 0 } f when int.TryParse(f, out var m) => q.Where(b => N(b)?.Notiz.Markierung.HasFlag((Buchungsmarkierung)m) == true),
+            _ => q,
+        };
+
+        if (!string.IsNullOrWhiteSpace(suche))
+        {
+            var s = suche.Trim();
+            q = q.Where(b => b.Text.Contains(s, StringComparison.CurrentCultureIgnoreCase) || b.KostenartText.Contains(s, StringComparison.CurrentCultureIgnoreCase)
+                             || b.Kostenart.StartsWith(s, StringComparison.Ordinal) || (b.Belegnummer?.Contains(s, StringComparison.Ordinal) ?? false)
+                             || Geld.Text(b.Betrag).Contains(s, StringComparison.Ordinal)
+                             || (N(b)?.Notiz.Kommentar?.Contains(s, StringComparison.CurrentCultureIgnoreCase) ?? false));
+        }
+
+        return q;
+    }
+
+    private async Task JahrGewaehltAsync(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value as string, out var j))
+        {
+            jahr = j;
+            bearbeitet = null;
+            await LadenAsync();
+        }
+    }
+
+    private void Bearbeiten(Buchung b, Notizansicht? n)
+    {
+        bearbeitet = b.Id;
+        kommentar = n?.Notiz.Kommentar;
+        markierung = n?.Notiz.Markierung ?? Buchungsmarkierung.Keine;
+    }
+
+    private void Umschalten(Buchungsmarkierung m, ChangeEventArgs e) => markierung = e.Value is true ? markierung | m : markierung & ~m;
+
+    private async Task SpeichernAsync(Buchung b)
+    {
+        fehler = null;
+        beschaeftigt = true;
+        try
+        {
+            var (k, m) = (kommentar, markierung);
+            await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<FinanzDienst>().NotizSetzenAsync(TeamId, TopfId, b.Id, k, m));
+            bearbeitet = null;
+            await LadenAsync();
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+        }
+        finally
+        {
+            beschaeftigt = false;
+        }
+    }
+
+    private async Task VerwaistLoeschenAsync(Notizansicht v)
+    {
+        await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<FinanzDienst>().NotizLoeschenAsync(TeamId, TopfId, v.Notiz.Id));
+        Hinweise.Notify(NotificationSeverity.Success, "Notiz gelöscht.");
+        await LadenAsync();
+    }
+}

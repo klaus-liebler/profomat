@@ -1,0 +1,106 @@
+@page "/finanzen"
+@attribute [Authorize]
+@using ProfOMat.Application.Finanzen
+@using ProfOMat.Domain.Finanzen
+@inject Vorgang Vorgang
+@inject NavigationManager Navigation
+
+<PageTitle>Finanzen · ProfOMat</PageTitle>
+
+<div class="pm-head">
+    <div>
+        <h1>Finanzen</h1>
+        <p>Finanzcockpit für Laborteams: der aktuelle Stand der Laborkostenstelle, der Investitions- und der SQM-Maßnahmen auf einen Blick,
+            mit Fristen und der Warnung vor der Übertragsgrenze zum Jahresende. Die Daten eines Teams sehen nur seine Mitglieder.</p>
+    </div>
+</div>
+
+@if (fehler is not null)
+{
+    <div class="pm-alert pm-crit" role="alert">@fehler</div>
+}
+
+<section class="pm-card">
+    <h2>Meine Laborteams</h2>
+    @if (teams.Count == 0)
+    {
+        <p class="pm-muted">Sie gehören noch keinem Laborteam an. Legen Sie eines an oder lassen Sie sich von einem Mitglied aufnehmen.</p>
+    }
+    else
+    {
+        <div class="pm-list">
+            @foreach (var t in teams)
+            {
+                <div>
+                    <a href="finanzen/@t.Id"><b>@t.Name</b></a>
+                    <span class="pm-muted pm-small">@t.Mitglieder.Count Mitglied(er)</span>
+                </div>
+            }
+        </div>
+    }
+</section>
+
+<section class="pm-card">
+    <h2>Neues Laborteam</h2>
+    <div class="pm-fields">
+        <div class="pm-field pm-field-weit">
+            <label class="pm-lbl" for="teamname">Name</label>
+            <input id="teamname" class="pm-input" @bind="name" @bind:event="oninput" @onkeydown="TasteAsync" maxlength="@Laborteam.NameMaxLaenge"
+                   autocomplete="off" placeholder="z. B. Labor Automatisierungstechnik" />
+            <span class="pm-hilfe">Danach im Reiter „Team“ weitere Lehrende aufnehmen und im Reiter „Import“ die SAP-Auszüge der Kostenstelle hochladen.</span>
+        </div>
+    </div>
+    <div>
+        <BegruendeterButton Text="Laborteam anlegen" Haupt="true" Click="AnlegenAsync" Beschaeftigt="@beschaeftigt" Freigabe="@AnlegenFreigabe" />
+    </div>
+</section>
+
+@code {
+    private IReadOnlyList<Laborteam> teams = [];
+    private Benutzer? wer;
+    private string? name, fehler;
+    private bool beschaeftigt;
+
+    private Freigabe AnlegenFreigabe => wer is null ? Freigabe.Nein("Wird geladen …")
+        : FinanzDienst.TeamsAnlegen(wer) is { Erlaubt: false } nein ? nein
+        : string.IsNullOrWhiteSpace(name) ? Freigabe.Nein("Bitte zuerst einen Namen eingeben.")
+        : Freigabe.Ja;
+
+    protected override async Task OnInitializedAsync()
+    {
+        wer = await Vorgang.BenutzerAsync();
+        teams = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<FinanzDienst>().TeamsAsync());
+    }
+
+    private async Task TasteAsync(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && AnlegenFreigabe.Erlaubt)
+        {
+            await AnlegenAsync();
+        }
+    }
+
+    private async Task AnlegenAsync()
+    {
+        if (beschaeftigt || !AnlegenFreigabe.Erlaubt)
+        {
+            return;
+        }
+
+        fehler = null;
+        beschaeftigt = true;
+        try
+        {
+            var t = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<FinanzDienst>().TeamAnlegenAsync(name!));
+            Navigation.NavigateTo($"finanzen/{t.Id}?bereich=import");
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+        }
+        finally
+        {
+            beschaeftigt = false;
+        }
+    }
+}

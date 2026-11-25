@@ -1,0 +1,369 @@
+@page "/finanzen/{TeamId:guid}/toepfe/{Id:guid}"
+@attribute [Authorize]
+@using ProfOMat.Application.Finanzen
+@using ProfOMat.Domain.Finanzen
+@inject Vorgang Vorgang
+@inject NotificationService Hinweise
+
+<PageTitle>@(topf?.Kennung ?? "Topf") · Finanzen · ProfOMat</PageTitle>
+
+@if (ladefehler is not null)
+{
+    <section class="pm-card"><h1>Topf</h1><div class="pm-alert pm-crit" role="alert">@ladefehler</div><p><a href="finanzen">Zur Übersicht</a></p></section>
+}
+else if (topf is not null)
+{
+    <p class="pm-small"><a href="finanzen/@TeamId">← Zum Cockpit</a></p>
+    <div class="pm-head">
+        <div>
+            <h1>@(topf.Art == Topfart.Kostenstelle ? $"Kostenstelle {topf.Kennung}" : topf.Kennung)</h1>
+            <p>@FinanzTeam.Artname(topf.Art) · @topf.Bezeichnung@(topf.Archiviert ? " · archiviert" : "")</p>
+        </div>
+        <div class="pm-row">
+            <BegruendeterButton Text="@(topf.Archiviert ? "Wieder aktivieren" : "Archivieren")" Click="ArchivierenAsync" Beschaeftigt="@beschaeftigt" />
+        </div>
+    </div>
+
+    @if (fehler is not null)
+    {
+        <div class="pm-alert pm-crit" role="alert">@fehler</div>
+    }
+
+    @if (topf.Art == Topfart.Kostenstelle)
+    {
+        <div class="pm-tabs" role="tablist">
+            @foreach (var (key, text) in new[] { ("buchungen", "Buchungen"), ("verlauf", "Verlauf"), ("prognose", "Budgetprognose") })
+            {
+                <button type="button" role="tab" class="pm-tab @(Bereich == key ? "on" : null)" aria-selected="@(Bereich == key)" @onclick="() => Bereich = key">@text</button>
+            }
+        </div>
+        <section class="pm-card">
+            @if (Bereich == "prognose")
+            {
+                <h2>Budgetprognose</h2>
+                <FinanzPrognose TeamId="TeamId" TopfId="Id" Heute="@Heute" />
+            }
+            else if (jahre.Count == 0)
+            {
+                <h2>Buchungen</h2>
+                <p class="pm-muted">Noch kein Auszug importiert.</p>
+                <NaechsteSchritte Schritte="@([new NaechsterSchritt("SAP-Auszüge importieren", $"finanzen/{TeamId}?bereich=import", Hauptschritt: true)])" />
+            }
+            else if (Bereich == "verlauf")
+            {
+                <h2>Verlauf und Jahresvergleich</h2>
+                <FinanzVerlauf TeamId="TeamId" TopfId="Id" Jahre="@jahre" />
+            }
+            else
+            {
+                <h2>Buchungen</h2>
+                <FinanzBuchungen TeamId="TeamId" TopfId="Id" Jahre="@jahre" StartFilter="@Filter" />
+            }
+        </section>
+    }
+    else
+    {
+        <section class="pm-card">
+            <h2>Stand</h2>
+            <p class="pm-small pm-muted">Den Stand der Fakultät (verausgabt zu einem Stichtag) hier eintragen – oder im Reiter
+                <a href="finanzen/@TeamId?bereich=import">Import</a> aus der SQM-Excel-Liste bzw. per KI-Chat aus der Investitionsliste übernehmen.</p>
+            <div class="pm-fields">
+                <div class="pm-field">
+                    <label class="pm-lbl" for="stichtag">Stichtag</label>
+                    <input id="stichtag" type="date" class="pm-input" @bind="standStichtag" />
+                </div>
+                <div class="pm-field">
+                    <label class="pm-lbl" for="verausgabt">Verausgabt (€)</label>
+                    <input id="verausgabt" class="pm-input" inputmode="decimal" @bind="standBetrag" />
+                </div>
+                <div class="pm-field pm-field-weit">
+                    <label class="pm-lbl" for="standnotiz">Notiz</label>
+                    <input id="standnotiz" class="pm-input" @bind="standNotiz" maxlength="500" placeholder="z. B. laut SQM-Liste der Fakultät" />
+                </div>
+            </div>
+            <div>
+                <BegruendeterButton Text="Stand eintragen" Haupt="true" Click="StandAsync" Beschaeftigt="@beschaeftigt"
+                                    Freigabe="@(standStichtag is null || string.IsNullOrWhiteSpace(standBetrag) ? Freigabe.Nein("Bitte Stichtag und Betrag angeben.") : Freigabe.Ja)" />
+            </div>
+            @if (staende.Count > 0)
+            {
+                <div class="pm-tbl">
+                    <table>
+                        <thead><tr><th>Stichtag</th><th class="pm-geld">verausgabt</th><th class="pm-geld">Rest</th><th>Quelle</th><th>Notiz</th></tr></thead>
+                        <tbody>
+                            @foreach (var s in staende)
+                            {
+                                <tr>
+                                    <td>@s.Stichtag.ToString("dd.MM.yyyy")</td>
+                                    <td class="pm-geld">@Geld.Text(s.Verausgabt)</td>
+                                    <td class="pm-geld">@Geld.Text(topf.Bewilligt - s.Verausgabt)</td>
+                                    <td>@(s.Quelle switch { Standquelle.Excel => "Excel", Standquelle.KiJson => "KI-JSON", _ => "von Hand" })</td>
+                                    <td>@s.Notiz</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </section>
+
+        <section class="pm-card">
+            <h2>Einzelbuchungen von Hand</h2>
+            <p class="pm-small pm-muted">Ausgaben, die noch in keinem Stand der Fakultät stehen. Sie zählen zusätzlich, soweit ihr Datum nach dem Stichtag des letzten Stands liegt;
+                Gutschriften negativ eintragen.</p>
+            <div class="pm-fields">
+                <div class="pm-field"><label class="pm-lbl" for="eb-datum">Datum</label><input id="eb-datum" type="date" class="pm-input" @bind="ebDatum" /></div>
+                <div class="pm-field pm-field-weit"><label class="pm-lbl" for="eb-text">Wofür</label><input id="eb-text" class="pm-input" @bind="ebText" maxlength="200" /></div>
+                <div class="pm-field"><label class="pm-lbl" for="eb-betrag">Betrag (€)</label><input id="eb-betrag" class="pm-input" inputmode="decimal" @bind="ebBetrag" /></div>
+            </div>
+            <div>
+                <BegruendeterButton Text="Eintragen" Click="EinzelAsync" Beschaeftigt="@beschaeftigt"
+                                    Freigabe="@(ebDatum is null || string.IsNullOrWhiteSpace(ebText) || string.IsNullOrWhiteSpace(ebBetrag) ? Freigabe.Nein("Bitte Datum, Text und Betrag angeben.") : Freigabe.Ja)" />
+            </div>
+            @if (einzel.Count > 0)
+            {
+                var letzter = staende.FirstOrDefault()?.Stichtag;
+                <div class="pm-tbl">
+                    <table>
+                        <thead><tr><th>Datum</th><th>Wofür</th><th class="pm-geld">Betrag</th><th></th></tr></thead>
+                        <tbody>
+                            @foreach (var e in einzel)
+                            {
+                                <tr class="@(letzter is { } l && e.Datum <= l ? "pm-alt" : null)" title="@(letzter is { } l2 && e.Datum <= l2 ? "im Stand vom " + l2.ToString("dd.MM.yyyy") + " enthalten – zählt nicht zusätzlich" : null)">
+                                    <td>@e.Datum.ToString("dd.MM.yyyy")</td><td>@e.Text</td><td class="pm-geld">@Geld.Text(e.Betrag)</td>
+                                    <td><button type="button" class="pm-linkbutton" @onclick="() => EinzelLoeschenAsync(e)">löschen</button></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </section>
+    }
+
+    <section class="pm-card">
+        <h2>Angaben</h2>
+        <div class="pm-fields">
+            <div class="pm-field pm-field-weit">
+                <label class="pm-lbl" for="bezeichnung">Bezeichnung</label>
+                <input id="bezeichnung" class="pm-input" @bind="a.Bezeichnung" maxlength="@Topf.TextMaxLaenge" />
+            </div>
+            @if (topf.Zweckgebunden)
+            {
+                @if (topf.Art == Topfart.Sqm)
+                {
+                    <div class="pm-field">
+                        <label class="pm-lbl" for="personal">Personalkosten bewilligt (€)</label>
+                        <input id="personal" class="pm-input" inputmode="decimal" @bind="a.Personal" />
+                    </div>
+                }
+                <div class="pm-field">
+                    <label class="pm-lbl" for="sach">Sachkosten bewilligt (€)</label>
+                    <input id="sach" class="pm-input" inputmode="decimal" @bind="a.Sach" />
+                </div>
+                <div class="pm-field">
+                    <label class="pm-lbl" for="von">Laufzeit von</label>
+                    <input id="von" type="date" class="pm-input" @bind="a.Von" />
+                </div>
+                <div class="pm-field">
+                    <label class="pm-lbl" for="bis">Laufzeit bis</label>
+                    <input id="bis" type="date" class="pm-input" @bind="a.Bis" />
+                </div>
+                @if (topf.Art == Topfart.Investition)
+                {
+                    <div class="pm-field">
+                        <label class="pm-lbl" for="bestell">Bestellschluss</label>
+                        <input id="bestell" type="date" class="pm-input" @bind="a.Bestellschluss" />
+                    </div>
+                    <div class="pm-field">
+                        <label class="pm-lbl" for="ia">Innenauftrag</label>
+                        <input id="ia" class="pm-input" @bind="a.Innenauftrag" maxlength="20" />
+                    </div>
+                }
+                else
+                {
+                    <div class="pm-field">
+                        <label class="pm-lbl" for="rechnung">Rechnungsabgabe bis</label>
+                        <input id="rechnung" type="date" class="pm-input" @bind="a.Rechnungsschluss" />
+                    </div>
+                    <div class="pm-field">
+                        <label class="pm-lbl" for="kat">Kategorie</label>
+                        <select id="kat" class="pm-select" @bind="a.Kategorie">
+                            <option value="">–</option>
+                            @foreach (var k in FinanzTeam.SqmKategorien.Append(a.Kategorie ?? "").Where(k => k.Length > 0).Distinct())
+                            {
+                                <option value="@k">@k</option>
+                            }
+                        </select>
+                    </div>
+                }
+            }
+            else
+            {
+                <div class="pm-field">
+                    <label class="pm-lbl" for="grenze">Übertragsgrenze (% des Jahresbudgets)</label>
+                    <input id="grenze" class="pm-input" inputmode="decimal" @bind="a.Grenze" />
+                    <span class="pm-hilfe">Budgetierungsrichtlinie 2026, Ziffer 5.4: Überträge über 12 % können zentral eingezogen werden.</span>
+                </div>
+            }
+            <div class="pm-field">
+                <label class="pm-lbl" for="verantwortlich">Verantwortlich</label>
+                <input id="verantwortlich" class="pm-input" @bind="a.Verantwortlich" maxlength="@Topf.TextMaxLaenge" />
+            </div>
+            <div class="pm-field pm-field-weit">
+                <label class="pm-lbl" for="notiz">Notiz</label>
+                <textarea id="notiz" class="pm-textarea" rows="3" @bind="a.Notiz" maxlength="@Topf.NotizMaxLaenge"></textarea>
+            </div>
+        </div>
+        <div>
+            <BegruendeterButton Text="Speichern" Haupt="true" Click="SpeichernAsync" Beschaeftigt="@beschaeftigt" />
+        </div>
+    </section>
+}
+
+@code {
+    [Parameter]
+    public Guid TeamId { get; set; }
+
+    [Parameter]
+    public Guid Id { get; set; }
+
+    [SupplyParameterFromQuery(Name = "bereich")]
+    public string? Bereich { get; set; }
+
+    [SupplyParameterFromQuery(Name = "filter")]
+    public string? Filter { get; set; }
+
+    [Inject]
+    private TimeProvider Uhr { get; set; } = default!;
+
+    private DateOnly Heute => DateOnly.FromDateTime(Uhr.GetLocalNow().DateTime);
+
+    /// <summary>Formularzustand (Beträge als Text, damit „1.234,56“ geht).</summary>
+    private sealed class Formular
+    {
+        public string? Bezeichnung { get; set; }
+
+        public string? Personal { get; set; }
+
+        public string? Sach { get; set; }
+
+        public DateOnly? Von { get; set; }
+
+        public DateOnly? Bis { get; set; }
+
+        public DateOnly? Bestellschluss { get; set; }
+
+        public DateOnly? Rechnungsschluss { get; set; }
+
+        public string? Innenauftrag { get; set; }
+
+        public string? Kategorie { get; set; }
+
+        public string? Verantwortlich { get; set; }
+
+        public string? Grenze { get; set; }
+
+        public string? Notiz { get; set; }
+    }
+
+    private Topf? topf;
+    private Formular a = new();
+    private IReadOnlyList<Kostenstellenstand> jahre = [];
+    private IReadOnlyList<Massnahmenstand> staende = [];
+    private IReadOnlyList<Einzelbuchung> einzel = [];
+    private DateOnly? ebDatum;
+    private string? ebText, ebBetrag;
+    private string? fehler, ladefehler;
+    private DateOnly? standStichtag;
+    private string? standBetrag, standNotiz;
+    private bool beschaeftigt;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        Bereich ??= "buchungen";
+        try
+        {
+            await LadenAsync();
+        }
+        catch (FachlicherFehler ex)
+        {
+            ladefehler = ex.Message;
+        }
+    }
+
+    private async Task LadenAsync()
+    {
+        topf = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<FinanzDienst>().TopfAsync(TeamId, Id));
+        var x = topf.Angaben;
+        a = new Formular
+        {
+            Bezeichnung = x.Bezeichnung, Personal = Geld.Eingabe(x.BewilligtPersonal), Sach = Geld.Eingabe(x.BewilligtSach), Von = x.LaufzeitVon, Bis = x.LaufzeitBis,
+            Bestellschluss = x.Bestellschluss, Rechnungsschluss = x.Rechnungsschluss, Innenauftrag = x.Innenauftrag, Kategorie = x.Kategorie,
+            Verantwortlich = x.Verantwortlich, Grenze = Geld.Eingabe(x.UebertragsgrenzeProzent), Notiz = x.Notiz,
+        };
+        if (topf.Art == Topfart.Kostenstelle)
+        {
+            jahre = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<FinanzDienst>().JahreAsync(TeamId, Id));
+        }
+        else
+        {
+            staende = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<FinanzDienst>().StaendeAsync(TeamId, Id));
+            einzel = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<FinanzDienst>().EinzelbuchungenAsync(TeamId, Id));
+        }
+    }
+
+    private async Task AusfuehrenAsync(Func<FinanzDienst, Task> aktion, string erfolg)
+    {
+        if (beschaeftigt)
+        {
+            return;
+        }
+
+        fehler = null;
+        beschaeftigt = true;
+        try
+        {
+            await Vorgang.AusfuehrenAsync(d => aktion(d.GetRequiredService<FinanzDienst>()));
+            Hinweise.Notify(NotificationSeverity.Success, erfolg);
+            await LadenAsync();
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+        }
+        finally
+        {
+            beschaeftigt = false;
+        }
+    }
+
+    private Task SpeichernAsync() => AusfuehrenAsync(d => d.TopfAendernAsync(TeamId, Id, new Topfangaben(
+        a.Bezeichnung ?? "", a.Innenauftrag,
+        topf!.Art == Topfart.Sqm ? Geld.Lesen(a.Personal, "Personalkosten") : 0,
+        topf.Zweckgebunden ? Geld.Lesen(a.Sach, "Sachkosten") : 0,
+        a.Kategorie is { Length: > 0 } k ? k : null, a.Von, a.Bis, a.Bestellschluss, a.Rechnungsschluss, a.Verantwortlich,
+        topf.Zweckgebunden ? topf.UebertragsgrenzeProzent : Geld.Lesen(a.Grenze, "Übertragsgrenze"), a.Notiz)), "Gespeichert.");
+
+    private Task ArchivierenAsync() => AusfuehrenAsync(d => d.ArchivierenAsync(TeamId, Id, !topf!.Archiviert), topf!.Archiviert ? "Wieder aktiv." : "Archiviert – erscheint nicht mehr im Cockpit.");
+
+    private async Task EinzelAsync()
+    {
+        await AusfuehrenAsync(d => d.EinzelbuchungAnlegenAsync(TeamId, Id, ebDatum!.Value, Geld.Lesen(ebBetrag, "Betrag"), ebText!), "Eingetragen.");
+        if (fehler is null)
+        {
+            (ebDatum, ebText, ebBetrag) = (null, null, null);
+        }
+    }
+
+    private Task EinzelLoeschenAsync(Einzelbuchung e) => AusfuehrenAsync(d => d.EinzelbuchungLoeschenAsync(TeamId, Id, e.Id), "Gelöscht.");
+
+    private async Task StandAsync()
+    {
+        await AusfuehrenAsync(d => d.StandErfassenAsync(TeamId, Id, standStichtag!.Value, Geld.Lesen(standBetrag, "Verausgabt"), standNotiz), "Stand eingetragen.");
+        if (fehler is null)
+        {
+            (standStichtag, standBetrag, standNotiz) = (null, null, null);
+        }
+    }
+}

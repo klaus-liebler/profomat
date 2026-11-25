@@ -231,6 +231,37 @@ app.MapGet("/beschriftung/{id:guid}/streifen.pdf", async (Guid id, string? r, Pr
     }
 }).RequireAuthorization();
 
+// Schnittvorlagen der Gefache: platte-<n>.svg, platte-<n>.dxf, schnittvorlagen.zip (nur wer das Gefach angelegt hat; prüft der Dienst)
+app.MapGet("/gefache/{id:guid}/{datei}", async (Guid id, string datei, ProfOMat.Application.Gefache.GefachDienst dienst, HttpContext http) =>
+{
+    try
+    {
+        var d = await dienst.DateiAsync(id, datei);
+        http.Response.Headers.CacheControl = "no-store";
+        http.Response.Headers.ContentDisposition = new System.Net.Mime.ContentDisposition { Inline = false, FileName = d.Dateiname }.ToString();
+        return Results.Bytes(d.Inhalt, d.Typ);
+    }
+    catch (FachlicherFehler ex)
+    {
+        return Results.Text(ex.Message, "text/plain; charset=utf-8", statusCode: StatusCodes.Status409Conflict);
+    }
+}).RequireAuthorization();
+
+// Aufstellung einer Sammel-Auslagenabrechnung (nur Mitglieder des Laborteams; prüft der Dienst)
+app.MapGet("/finanzen/{team:guid}/auslagen/{id:guid}/aufstellung.xlsx", async (Guid team, Guid id, ProfOMat.Application.Finanzen.FinanzDienst dienst, HttpContext http) =>
+{
+    try
+    {
+        var d = await dienst.AuslagenXlsxAsync(team, id);
+        http.Response.Headers.CacheControl = "no-store";
+        return Results.File(d.Inhalt, d.Typ, d.Name);
+    }
+    catch (FachlicherFehler ex)
+    {
+        return Results.Text(ex.Message, "text/plain; charset=utf-8", statusCode: StatusCodes.Status409Conflict);
+    }
+}).RequireAuthorization();
+
 // Klausur-Ausgaben (Rechte prüft der Dienst)
 app.MapGet("/klausuren/{id:guid}/{datei}", async (Guid id, string datei, ProfOMat.Application.Klausuren.KlausurDienst dienst, HttpContext http) =>
 {
@@ -258,6 +289,28 @@ app.MapGet("/klausuren/{id:guid}/{datei}", async (Guid id, string datei, ProfOMa
     {
         return Results.Text(ex.Message, "text/plain; charset=utf-8", statusCode: StatusCodes.Status409Conflict);
     }
+}).RequireAuthorization();
+
+// Mailentwürfe als .eml: das Desktop-Outlook öffnet sie als neue Mail (nur der eigene Entwurf; prüft der Dienst)
+app.MapGet("/entwuerfe/{id:guid}/mail.eml", async (Guid id, ProfOMat.Application.Betrieb.Mailentwuerfe dienst, HttpContext http) =>
+{
+    try
+    {
+        var (inhalt, name) = await dienst.EmlAsync(id);
+        http.Response.Headers.CacheControl = "no-store";
+        return Results.File(inhalt, "message/rfc822", name);
+    }
+    catch (FachlicherFehler ex)
+    {
+        return Results.Text(ex.Message, "text/plain; charset=utf-8", statusCode: StatusCodes.Status409Conflict);
+    }
+}).RequireAuthorization();
+
+app.MapGet("/profil/testmail.eml", async (ProfOMat.Application.Betrieb.Mailsignaturen dienst, HttpContext http) =>
+{
+    var (inhalt, name) = await dienst.TestmailAsync();
+    http.Response.Headers.CacheControl = "no-store";
+    return Results.File(inhalt, "message/rfc822", name);
 }).RequireAuthorization();
 
 app.MapRazorComponents<App>().AddInteractiveServerRenderMode();

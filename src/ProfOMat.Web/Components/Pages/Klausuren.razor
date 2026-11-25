@@ -22,11 +22,28 @@
 
 <section class="pm-card">
     <h2>Neue Klausur aus Prüfungsliste</h2>
+    <p>Es werden die folgenden Formate unterstützt und automatisch erkannt:</p>
+    <ol>
+        <li>Prüfungsliste aus dem Reporting-Server der Hochschule Osnabrück (<a href="@PruefungslisteLeser.DownloadOsnabrueck" target="_blank" rel="noopener noreferrer">hier klicken</a>
+            und speichern, dann diese Datei hier hochladen). Sie enthält alle Ihre Prüfungen; danach wählen Sie eine aus.</li>
+        <li>Prüfungsliste der FH Münster / Akademie Biberach für den GA-Master (per Mail erhalten).</li>
+    </ol>
     <div class="pm-fields">
         <div class="pm-field pm-field-weit">
-            <label class="pm-lbl" for="liste">Prüfungsliste (CSV: Hochschule Osnabrück oder GA-Master)</label>
+            <label class="pm-lbl" for="liste">Prüfungsliste (CSV)</label>
             <InputFile id="liste" OnChange="DateiGewaehltAsync" accept=".csv,text/csv" class="pm-input" />
-            @if (vorschau is not null)
+            @if (vorschau is { AuswahlNoetig: true } || auswahl is not null)
+            {
+                <label class="pm-lbl" for="pruefung">Prüfung aus der Liste (@angebot.Count enthalten)</label>
+                <select id="pruefung" class="pm-select" value="@(auswahl ?? "")" @onchange="PruefungGewaehlt">
+                    <option value="">– bitte wählen –</option>
+                    @foreach (var a in angebot)
+                    {
+                        <option value="@a.Nummer">@a.Anzeige</option>
+                    }
+                </select>
+            }
+            @if (vorschau is { AuswahlNoetig: false })
             {
                 <span class="pm-hilfe">Format @vorschau.Format · @vorschau.Zeilen.Count Teilnehmende · @(vorschau.Pruefungsname ?? "ohne Prüfungsname") · @(vorschau.Pruefungsnummer ?? "")
                     @foreach (var h in vorschau.Hinweise) { <br />@h }</span>
@@ -48,7 +65,7 @@
     </div>
     <div>
         <BegruendeterButton Text="Klausur anlegen" Haupt="true" Click="AnlegenAsync" Beschaeftigt="@beschaeftigt"
-                            Freigabe="@(datei is null ? Freigabe.Nein("Bitte zuerst die CSV-Datei wählen.") : string.IsNullOrWhiteSpace(kuerzel) ? Freigabe.Nein("Bitte ein Kürzel angeben.") : Freigabe.Ja)" />
+                            Freigabe="@(datei is null ? Freigabe.Nein("Bitte zuerst die CSV-Datei wählen.") : vorschau is { AuswahlNoetig: true } ? Freigabe.Nein("Bitte eine Prüfung aus der Liste wählen.") : string.IsNullOrWhiteSpace(kuerzel) ? Freigabe.Nein("Bitte ein Kürzel angeben.") : Freigabe.Ja)" />
     </div>
 </section>
 
@@ -83,7 +100,8 @@
     private IReadOnlyList<Klausur> liste = [];
     private byte[]? datei;
     private Pruefungsliste? vorschau;
-    private string? titel, kuerzel, fehler;
+    private IReadOnlyList<Pruefungsangebot> angebot = [];
+    private string? titel, kuerzel, fehler, auswahl, titelAusListe;
     private DateTime? termin;
     private bool beschaeftigt;
 
@@ -102,18 +120,46 @@
         fehler = null;
         vorschau = null;
         datei = null;
+        auswahl = null;
+        angebot = [];
         try
         {
             using var puffer = new MemoryStream();
             await e.File.OpenReadStream(PruefungslisteLeser.MaxBytes).CopyToAsync(puffer);
             datei = puffer.ToArray();
             vorschau = PruefungslisteLeser.Lesen(datei);
-            titel ??= vorschau.Pruefungsname;
+            angebot = vorschau.Angebot;
+            TitelVorbelegen();
         }
         catch (Exception ex) when (ex is FachlicherFehler or IOException)
         {
             fehler = ex.Message;
             datei = null;
+        }
+    }
+
+    private void PruefungGewaehlt(ChangeEventArgs e)
+    {
+        fehler = null;
+        auswahl = e.Value as string is { Length: > 0 } nr ? nr : null;
+        try
+        {
+            vorschau = PruefungslisteLeser.Lesen(datei!, auswahl);
+            TitelVorbelegen();
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+        }
+    }
+
+    /// <summary>Titel aus der Liste übernehmen, solange er nicht von Hand geändert wurde.</summary>
+    private void TitelVorbelegen()
+    {
+        if (string.IsNullOrWhiteSpace(titel) || titel == titelAusListe)
+        {
+            titel = vorschau?.Pruefungsname;
+            titelAusListe = titel;
         }
     }
 
@@ -124,7 +170,7 @@
         try
         {
             var t = termin is { } x ? Zeit.AlsUtc(x) : (DateTimeOffset?)null;
-            var (k, _, _) = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<KlausurDienst>().AusListeAnlegenAsync(datei!, titel, kuerzel ?? "", t));
+            var (k, _, _) = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<KlausurDienst>().AusListeAnlegenAsync(datei!, titel, kuerzel ?? "", t, auswahl));
             Navigation.NavigateTo($"klausuren/{k.Id}");
         }
         catch (FachlicherFehler ex)

@@ -1,0 +1,266 @@
+@*
+    Geplante Ausgaben eines Laborteams (FA-706): anlegen, auf Töpfe aufteilen, Stand setzen, mit einer Buchung verknüpfen.
+*@
+@using ProfOMat.Application.Finanzen
+@using ProfOMat.Domain.Finanzen
+@inject Vorgang Vorgang
+@inject NotificationService Hinweise
+
+<section class="pm-card" id="ausgabe-form">
+    <h2>@(bearbeitet is null ? "Ausgabe planen" : "Geplante Ausgabe ändern")</h2>
+    <div class="pm-fields">
+        <div class="pm-field pm-field-weit">
+            <label class="pm-lbl" for="ag-bez">Was?</label>
+            <input id="ag-bez" class="pm-input" @bind="bezeichnung" maxlength="@GeplanteAusgabe.TextMaxLaenge" placeholder="z. B. Zubehör ABB-Roboter, Messgeräte Embedded" />
+        </div>
+        <div class="pm-field">
+            <label class="pm-lbl" for="ag-monat">Voraussichtlicher Monat</label>
+            <input id="ag-monat" type="month" class="pm-input" value="@monat" @onchange="e => monat = e.Value as string" />
+        </div>
+    </div>
+    <div class="pm-fin-anteile">
+        @for (var i = 0; i < anteile.Count; i++)
+        {
+            var zeile = anteile[i];
+            var nr = i;
+            <div class="pm-row">
+                <select class="pm-select pm-grow" @bind="zeile.TopfId" aria-label="@($"Topf {nr + 1}")">
+                    <option value="">– Topf wählen –</option>
+                    @foreach (var t in Toepfe)
+                    {
+                        <option value="@t.Id">@t.Anzeige</option>
+                    }
+                </select>
+                <input class="pm-input pm-fin-betrag" inputmode="decimal" @bind="zeile.Betrag" placeholder="Betrag €" aria-label="@($"Betrag {nr + 1}")" />
+                @if (anteile.Count > 1)
+                {
+                    <button type="button" class="pm-btn pm-btn-klein" @onclick="() => anteile.RemoveAt(nr)" aria-label="Anteil entfernen">✕</button>
+                }
+            </div>
+        }
+        <div><button type="button" class="pm-linkbutton" @onclick="() => anteile.Add(new())">+ auf einen weiteren Topf aufteilen</button></div>
+    </div>
+    <div class="pm-field">
+        <label class="pm-lbl" for="ag-notiz">Notiz</label>
+        <input id="ag-notiz" class="pm-input" @bind="notiz" maxlength="2000" />
+    </div>
+    <div class="pm-row">
+        <BegruendeterButton Text="@(bearbeitet is null ? "Ausgabe planen" : "Änderung speichern")" Haupt="true" Click="SpeichernAsync" Beschaeftigt="@beschaeftigt" Freigabe="@Speicherbar" />
+        @if (bearbeitet is not null)
+        {
+            <button type="button" class="pm-btn" @onclick="Leeren">Abbrechen</button>
+        }
+    </div>
+    @if (fehler is not null)
+    {
+        <div class="pm-alert pm-crit" role="alert">@fehler</div>
+    }
+</section>
+
+<section class="pm-card">
+    <div class="pm-row" style="justify-content: space-between">
+        <h2>Geplante Ausgaben</h2>
+        <label class="pm-check pm-small"><input type="checkbox" @bind="erledigteZeigen" /> auch erledigte zeigen</label>
+    </div>
+    @if (!Sichtbar.Any())
+    {
+        <p class="pm-muted">Keine offenen. Was geplant ist, bindet Mittel im voraussichtlichen Monat und mindert „frei“ im Cockpit.</p>
+    }
+    else
+    {
+        <div class="pm-tbl">
+            <table>
+                <thead><tr><th>Monat</th><th>Ausgabe</th><th>Töpfe</th><th class="pm-geld">Betrag</th><th>Stand</th><th></th></tr></thead>
+                <tbody>
+                    @foreach (var a in Sichtbar)
+                    {
+                        <tr class="@(a.Offen ? null : "pm-alt")">
+                            <td class="pm-nowrap">@a.Monat.ToString("MM.yyyy")</td>
+                            <td>@a.Bezeichnung@if (a.Notiz is { } n) {<br /><span class="pm-small pm-muted">@n</span>}</td>
+                            <td>@foreach (var x in a.Anteile) {<span class="pm-nowrap">@Kennung(x.TopfId): @Geld.Text(x.Betrag)</span><br />}</td>
+                            <td class="pm-geld">@Geld.Text(a.Betrag)</td>
+                            <td>
+                                <select class="pm-select" value="@a.Stand" @onchange="e => StandAsync(a, e)" aria-label="Stand">
+                                    @foreach (var s in Enum.GetValues<Ausgabenstand>())
+                                    {
+                                        <option value="@s">@StandText(s)</option>
+                                    }
+                                </select>
+                            </td>
+                            <td class="pm-nowrap">
+                                <button type="button" class="pm-linkbutton" @onclick="() => Bearbeiten(a)">ändern</button>
+                                @if (a.Offen && a.Anteile.Any(x => Toepfe.Any(t => t.Id == x.TopfId && t.Art == Topfart.Kostenstelle)))
+                                {
+                                    <button type="button" class="pm-linkbutton" @onclick="() => VorschlaegeAsync(a)">Buchung suchen</button>
+                                }
+                                <button type="button" class="pm-linkbutton" @onclick="() => LoeschenAsync(a)">löschen</button>
+                            </td>
+                        </tr>
+                        @if (vorschlagFuer == a.Id)
+                        {
+                            <tr>
+                                <td colspan="6">
+                                    @if (vorschlaege.Count == 0)
+                                    {
+                                        <span class="pm-small pm-muted">Keine passende Buchung (Betrag ±2 %, ab zwei Monate vor dem geplanten Monat). Nach dem nächsten Import erneut suchen oder „Erledigt“ von Hand setzen.</span>
+                                    }
+                                    else
+                                    {
+                                        <div class="pm-list">
+                                            @foreach (var b in vorschlaege)
+                                            {
+                                                <div>
+                                                    <span class="pm-nowrap">@b.Belegdatum.ToString("dd.MM.yyyy")</span>
+                                                    <span class="pm-grow">@b.Text</span>
+                                                    <span class="pm-geld">@Geld.Text(b.Betrag)</span>
+                                                    <button type="button" class="pm-btn pm-btn-klein" @onclick="() => VerknuepfenAsync(a, b)">ist diese – erledigt</button>
+                                                </div>
+                                            }
+                                        </div>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+        </div>
+        <p class="pm-small pm-muted">„Erledigt“ setzen, sobald die Ausgabe im Ist-Stand steht (Buchung der Kostenstelle bzw. Stand der Maßnahme) – sonst zählt sie doppelt.</p>
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired]
+    public Guid TeamId { get; set; }
+
+    /// <summary>Aktive Töpfe des Teams.</summary>
+    [Parameter, EditorRequired]
+    public IReadOnlyList<Topf> Toepfe { get; set; } = [];
+
+    /// <summary>Nach jeder Änderung (Cockpit neu rechnen).</summary>
+    [Parameter]
+    public EventCallback Geaendert { get; set; }
+
+    private sealed class Zeile
+    {
+        public string? TopfId { get; set; }
+
+        public string? Betrag { get; set; }
+    }
+
+    private IReadOnlyList<GeplanteAusgabe> ausgaben = [];
+    private List<Zeile> anteile = [new()];
+    private GeplanteAusgabe? bearbeitet;
+    private string? bezeichnung, monat, notiz, fehler;
+    private bool beschaeftigt, erledigteZeigen;
+    private Guid? vorschlagFuer;
+    private IReadOnlyList<Buchung> vorschlaege = [];
+
+    private IEnumerable<GeplanteAusgabe> Sichtbar => ausgaben.Where(a => erledigteZeigen || a.Offen);
+
+    private Freigabe Speicherbar => string.IsNullOrWhiteSpace(bezeichnung) ? Freigabe.Nein("Bitte beschreiben, was ausgegeben werden soll.")
+        : FinanzAnzeige.Monat(monat) is null ? Freigabe.Nein("Bitte den voraussichtlichen Monat wählen.")
+        : !anteile.Any(z => Guid.TryParse(z.TopfId, out _) && !string.IsNullOrWhiteSpace(z.Betrag)) ? Freigabe.Nein("Bitte Topf und Betrag angeben.")
+        : Freigabe.Ja;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        monat ??= FinanzAnzeige.MonatWert(FinanzAnzeige.NaechsterMonat());
+        await LadenAsync();
+    }
+
+    private async Task LadenAsync() => ausgaben = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<FinanzDienst>().AusgabenAsync(TeamId));
+
+    private string Kennung(Guid topfId) => Toepfe.FirstOrDefault(t => t.Id == topfId)?.Kennung ?? "archiviert";
+
+    internal static string StandText(Ausgabenstand s) => s switch
+    {
+        Ausgabenstand.Geplant => "geplant",
+        Ausgabenstand.Bestellt => "bestellt",
+        Ausgabenstand.Abgerechnet => "abgerechnet",
+        _ => "erledigt (im Ist)",
+    };
+
+    private void Leeren()
+    {
+        (bearbeitet, bezeichnung, notiz, fehler) = (null, null, null, null);
+        anteile = [new()];
+    }
+
+    private void Bearbeiten(GeplanteAusgabe a)
+    {
+        bearbeitet = a;
+        (bezeichnung, monat, notiz) = (a.Bezeichnung, FinanzAnzeige.MonatWert(a.Monat), a.Notiz);
+        anteile = [.. a.Anteile.Select(x => new Zeile { TopfId = x.TopfId.ToString(), Betrag = Geld.Eingabe(x.Betrag) })];
+    }
+
+    private async Task AusfuehrenAsync(Func<FinanzDienst, Task> aktion, string? erfolg = null)
+    {
+        if (beschaeftigt)
+        {
+            return;
+        }
+
+        fehler = null;
+        beschaeftigt = true;
+        try
+        {
+            await Vorgang.AusfuehrenAsync(d => aktion(d.GetRequiredService<FinanzDienst>()));
+            if (erfolg is not null)
+            {
+                Hinweise.Notify(NotificationSeverity.Success, erfolg);
+            }
+
+            await LadenAsync();
+            await Geaendert.InvokeAsync();
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+            Hinweise.Notify(NotificationSeverity.Error, ex.Message);
+        }
+        finally
+        {
+            beschaeftigt = false;
+        }
+    }
+
+    private async Task SpeichernAsync()
+    {
+        var m = FinanzAnzeige.Monat(monat)!.Value;
+        var id = bearbeitet?.Id;
+        await AusfuehrenAsync(d =>
+            {
+                var liste = anteile.Where(z => Guid.TryParse(z.TopfId, out _)).Select(z => new Anteil(Guid.Parse(z.TopfId!), Geld.Lesen(z.Betrag, "Betrag"))).ToList();
+                return id is { } x ? d.AusgabeAendernAsync(TeamId, x, bezeichnung!, m, liste, notiz) : d.AusgabeAnlegenAsync(TeamId, bezeichnung!, m, liste, notiz);
+            },
+            id is null ? "Ausgabe geplant." : "Gespeichert.");
+        if (fehler is null)
+        {
+            Leeren();
+        }
+    }
+
+    private Task StandAsync(GeplanteAusgabe a, ChangeEventArgs e)
+        => Enum.TryParse<Ausgabenstand>(e.Value as string, out var s) ? AusfuehrenAsync(d => d.AusgabeStandAsync(TeamId, a.Id, s)) : Task.CompletedTask;
+
+    private Task LoeschenAsync(GeplanteAusgabe a) => AusfuehrenAsync(d => d.AusgabeLoeschenAsync(TeamId, a.Id), "Gelöscht.");
+
+    private async Task VorschlaegeAsync(GeplanteAusgabe a)
+    {
+        if (vorschlagFuer == a.Id)
+        {
+            vorschlagFuer = null;
+            return;
+        }
+
+        vorschlaege = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<FinanzDienst>().BuchungsvorschlaegeAsync(TeamId, a.Id));
+        vorschlagFuer = a.Id;
+    }
+
+    private async Task VerknuepfenAsync(GeplanteAusgabe a, Buchung b)
+    {
+        await AusfuehrenAsync(d => d.AusgabeStandAsync(TeamId, a.Id, Ausgabenstand.Erledigt, b.Fingerabdruck), "Mit der Buchung verknüpft – erledigt.");
+        vorschlagFuer = null;
+    }
+}

@@ -30,5 +30,5 @@
 
     /// <summary>Downloads (PDF, CSV, XLSX) brauchen einen echten Seitenaufruf statt der Blazor-Navigation.</summary>
     private static bool IstDatei(string ziel) => ziel.EndsWith("pdf", StringComparison.Ordinal) || ziel.EndsWith(".csv", StringComparison.Ordinal)
-                                                 || ziel.EndsWith(".xlsx", StringComparison.Ordinal);
+                                                 || ziel.EndsWith(".xlsx", StringComparison.Ordinal) || ziel.EndsWith(".eml", StringComparison.Ordinal);
 }

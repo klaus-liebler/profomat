@@ -1,0 +1,398 @@
+@*
+    Hilfskräfte eines Laborteams (FA-708/709): Einstellungsmöglichkeiten je Topf, Rechner mit Übernahme, Beschäftigungen, Stundensätze.
+*@
+@using ProfOMat.Application.Finanzen
+@using ProfOMat.Domain.Finanzen
+@inject Vorgang Vorgang
+@inject NotificationService Hinweise
+
+@if (fehler is not null)
+{
+    <div class="pm-alert pm-crit" role="alert">@fehler</div>
+}
+
+<section class="pm-card">
+    <h2>Was ist möglich?</h2>
+    <p class="pm-small pm-muted">Stunden je Monat, die der heute freie Betrag eines Topfs vom Beginn bis zu seinem Ende trägt (SQM: Laufzeitende;
+        Kostenstelle: Jahresende oder das gewählte Ende). Investitionsmittel bezahlen keine Hilfskräfte.</p>
+    <div class="pm-fields">
+        <div class="pm-field">
+            <label class="pm-lbl" for="hk-ab">ab</label>
+            <input id="hk-ab" type="month" class="pm-input" value="@beginn" @onchange="BeginnAsync" />
+        </div>
+        <div class="pm-field">
+            <label class="pm-lbl" for="hk-bis">bis (optional)</label>
+            <input id="hk-bis" type="month" class="pm-input" value="@ende" @onchange="EndeAsync" />
+        </div>
+    </div>
+    @if (moeglich.Count == 0)
+    {
+        <p class="pm-muted">Kein Topf kann Hilfskräfte bezahlen (Kostenstelle anlegen oder SQM-Maßnahme mit Personalmitteln).</p>
+    }
+    else
+    {
+        <div class="pm-tbl">
+            <table>
+                <thead>
+                    <tr><th>Topf</th><th class="pm-geld">frei</th><th>Zeitraum</th>
+                        @foreach (var art in Arten) { <th class="pm-geld">@Kurz(art)</th> }
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var m in moeglich)
+                    {
+                        <tr>
+                            <td>@m.Topf.Kennung</td>
+                            <td class="pm-geld">@Geld.Text(m.Frei)</td>
+                            <td class="pm-nowrap">@(m.Monate > 0 ? $"{m.Beginn:MM.yyyy}–{m.Ende:MM.yyyy} ({m.Monate} Mon.)" : "Laufzeit vorbei")</td>
+                            @foreach (var art in Arten) { <td class="pm-geld">@Stunden(m.StundenProMonat[art])</td> }
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        <p class="pm-small pm-muted">@string.Join(" · ", Arten.Select(a => $"{Kurz(a)} = {Stundensaetze.Anzeige(a)}")) – Stunden je Monat, auf halbe Stunden abgerundet.</p>
+    }
+</section>
+
+<section class="pm-card">
+    <h2>Rechner: Hilfskraft einstellen</h2>
+    <div class="pm-fields">
+        <div class="pm-field">
+            <label class="pm-lbl" for="r-person">Person</label>
+            <input id="r-person" class="pm-input" @bind="rPerson" maxlength="120" placeholder="z. B. N. N. Tutor Embedded" />
+        </div>
+        <div class="pm-field">
+            <label class="pm-lbl" for="r-art">Art</label>
+            <select id="r-art" class="pm-select" @bind="rArt">
+                @foreach (var a in Enum.GetValues<Hilfskraftart>()) { <option value="@a">@Stundensaetze.Anzeige(a)</option> }
+            </select>
+        </div>
+        <div class="pm-field">
+            <label class="pm-lbl" for="r-std">Stunden je Monat</label>
+            <input id="r-std" class="pm-input" inputmode="decimal" @bind="rStunden" />
+        </div>
+        <div class="pm-field">
+            <label class="pm-lbl" for="r-ab">ab</label>
+            <input id="r-ab" type="month" class="pm-input" value="@rBeginn" @onchange="e => rBeginn = e.Value as string" />
+        </div>
+        <div class="pm-field">
+            <label class="pm-lbl" for="r-bis">bis (gewünscht)</label>
+            <input id="r-bis" type="month" class="pm-input" value="@rEnde" @onchange="e => rEnde = e.Value as string" />
+        </div>
+    </div>
+    <div class="pm-row">
+        <BegruendeterButton Text="Berechnen" Click="RechnenAsync" Beschaeftigt="@beschaeftigt"
+                            Freigabe="@(FinanzAnzeige.Monat(rBeginn) is null || string.IsNullOrWhiteSpace(rStunden) ? Freigabe.Nein("Bitte Stunden und Beginn angeben.") : Freigabe.Ja)" />
+    </div>
+    @if (vorschlag is not null)
+    {
+        @if (vorschlag.Count == 0)
+        {
+            <p class="pm-alert pm-warn">Dafür reichen die freien Mittel ab @FinanzAnzeige.Monat(rBeginn)?.ToString("MM.yyyy") in keinem Topf für einen ganzen Monat.</p>
+        }
+        else
+        {
+            var bis = vorschlag[^1].Bis;
+            var ziel = FinanzAnzeige.Monat(rEnde);
+            <div class="pm-tbl">
+                <table>
+                    <thead><tr><th>aus</th><th>von</th><th>bis</th><th class="pm-geld">Monate</th><th class="pm-geld">Kosten</th></tr></thead>
+                    <tbody>
+                        @foreach (var x in vorschlag)
+                        {
+                            <tr><td>@x.Topf.Kennung</td><td>@x.Von.ToString("MM.yyyy")</td><td>@x.Bis.ToString("MM.yyyy")</td><td class="pm-geld">@x.Monate</td><td class="pm-geld">@Geld.Text(x.Kosten)</td></tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+            <p class="@(ziel is { } z && bis < z ? "pm-alert pm-warn" : "pm-alert pm-info")">
+                Reicht bis <b>@bis.ToString("MM.yyyy")</b>@(ziel is { } z2 && bis < z2 ? $" – für das gewünschte Ende {z2:MM.yyyy} fehlen Mittel." : ".")
+                Zuerst werden Mittel eingesetzt, die früher verfallen; die Kostenstelle zuletzt.
+            </p>
+            <BegruendeterButton Text="Als Beschäftigung übernehmen" Haupt="true" Click="UebernehmenAsync" Beschaeftigt="@beschaeftigt"
+                                Freigabe="@(string.IsNullOrWhiteSpace(rPerson) ? Freigabe.Nein("Bitte zuerst die Person eintragen (z. B. „N. N.“).") : Freigabe.Ja)" />
+        }
+    }
+</section>
+
+<section class="pm-card" id="hk-liste">
+    <h2>Beschäftigungen</h2>
+    @if (liste.Count == 0)
+    {
+        <p class="pm-muted">Noch keine. Eine Beschäftigung bindet die Monate, die noch nicht im Ist-Stand ihres Topfs stehen.</p>
+    }
+    else
+    {
+        <div class="pm-tbl">
+            <table>
+                <thead><tr><th>Person</th><th>Art</th><th class="pm-geld">h/Monat</th><th>Zeitraum</th><th>Töpfe</th><th class="pm-geld">je Monat</th><th></th></tr></thead>
+                <tbody>
+                    @foreach (var h in liste)
+                    {
+                        <tr class="@(h.Ende < FinanzAnzeige.NaechsterMonat().AddMonths(-1) ? "pm-alt" : null)">
+                            <td>@h.Person</td>
+                            <td>@Stundensaetze.Anzeige(h.Art)</td>
+                            <td class="pm-geld">@Stunden(h.StundenProMonat)</td>
+                            <td class="pm-nowrap">@h.Beginn.ToString("MM.yyyy")–@h.Ende.ToString("MM.yyyy")</td>
+                            <td>@string.Join(", ", h.Anteile.Select(x => $"{Kennung(x.TopfId)} {x.Prozent:0.##} %"))</td>
+                            <td class="pm-geld">@Geld.Text(h.StundenProMonat * Satz(h.Art, h.Beginn.Year))</td>
+                            <td class="pm-nowrap">
+                                <button type="button" class="pm-linkbutton" @onclick="() => Bearbeiten(h)">ändern</button>
+                                <button type="button" class="pm-linkbutton" @onclick="() => LoeschenAsync(h)">löschen</button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+
+    <h3>@(bearbeitet is null ? "Beschäftigung eintragen" : $"„{bearbeitet.Person}“ ändern")</h3>
+    <div class="pm-fields">
+        <div class="pm-field">
+            <label class="pm-lbl" for="h-person">Person</label>
+            <input id="h-person" class="pm-input" @bind="hPerson" maxlength="120" />
+        </div>
+        <div class="pm-field">
+            <label class="pm-lbl" for="h-art">Art</label>
+            <select id="h-art" class="pm-select" @bind="hArt">
+                @foreach (var a in Enum.GetValues<Hilfskraftart>()) { <option value="@a">@Stundensaetze.Anzeige(a)</option> }
+            </select>
+        </div>
+        <div class="pm-field">
+            <label class="pm-lbl" for="h-std">Stunden je Monat</label>
+            <input id="h-std" class="pm-input" inputmode="decimal" @bind="hStunden" />
+        </div>
+        <div class="pm-field">
+            <label class="pm-lbl" for="h-ab">von</label>
+            <input id="h-ab" type="month" class="pm-input" value="@hBeginn" @onchange="e => hBeginn = e.Value as string" />
+        </div>
+        <div class="pm-field">
+            <label class="pm-lbl" for="h-bis">bis</label>
+            <input id="h-bis" type="month" class="pm-input" value="@hEnde" @onchange="e => hEnde = e.Value as string" />
+        </div>
+    </div>
+    <div class="pm-fin-anteile">
+        @for (var i = 0; i < hAnteile.Count; i++)
+        {
+            var zeile = hAnteile[i];
+            var nr = i;
+            <div class="pm-row">
+                <select class="pm-select pm-grow" @bind="zeile.TopfId" aria-label="@($"Topf {nr + 1}")">
+                    <option value="">– Topf wählen –</option>
+                    @foreach (var t in Toepfe.Where(Bindungsrechnung.ErlaubtHilfskraefte))
+                    {
+                        <option value="@t.Id">@t.Anzeige</option>
+                    }
+                </select>
+                <input class="pm-input pm-fin-betrag" inputmode="decimal" @bind="zeile.Prozent" aria-label="@($"Anteil {nr + 1} in Prozent")" />
+                <span>%</span>
+                @if (hAnteile.Count > 1)
+                {
+                    <button type="button" class="pm-btn pm-btn-klein" @onclick="() => hAnteile.RemoveAt(nr)" aria-label="Anteil entfernen">✕</button>
+                }
+            </div>
+        }
+        <div><button type="button" class="pm-linkbutton" @onclick="WeitererAnteil">+ anteilig aus einem weiteren Topf</button></div>
+    </div>
+    <div class="pm-row">
+        <BegruendeterButton Text="@(bearbeitet is null ? "Eintragen" : "Speichern")" Haupt="true" Click="SpeichernAsync" Beschaeftigt="@beschaeftigt"
+                            Freigabe="@(string.IsNullOrWhiteSpace(hPerson) || string.IsNullOrWhiteSpace(hStunden) || FinanzAnzeige.Monat(hBeginn) is null || FinanzAnzeige.Monat(hEnde) is null
+                                       ? Freigabe.Nein("Bitte Person, Stunden, Beginn und Ende angeben.") : Freigabe.Ja)" />
+        @if (bearbeitet is not null)
+        {
+            <button type="button" class="pm-btn" @onclick="Leeren">Abbrechen</button>
+        }
+    </div>
+</section>
+
+<section class="pm-card">
+    <h2>Stundensätze @Jahr</h2>
+    <p class="pm-small pm-muted">„Anzusetzende Haushaltsbelastung“ je Stunde (Fakultät IuI, Stand 3/2026). Eigene Werte gelten für das Jahr und die folgenden, bis ein neuer eingetragen ist.</p>
+    <div class="pm-tbl">
+        <table>
+            <thead><tr><th>Art</th><th class="pm-geld">€/Std.</th><th></th></tr></thead>
+            <tbody>
+                @foreach (var s in saetze)
+                {
+                    var art = s.Art;
+                    <tr>
+                        <td>@Stundensaetze.Anzeige(art)@(s.EigenerWert ? "" : " (Fakultät)")</td>
+                        <td class="pm-geld"><input class="pm-input pm-fin-betrag" inputmode="decimal" value="@Geld.Eingabe(s.EuroProStunde)" @onchange="e => SatzAsync(art, e)" aria-label="@($"Stundensatz {Stundensaetze.Anzeige(art)}")" /></td>
+                        <td></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</section>
+
+@code {
+    [Parameter, EditorRequired]
+    public Guid TeamId { get; set; }
+
+    [Parameter, EditorRequired]
+    public IReadOnlyList<Topf> Toepfe { get; set; } = [];
+
+    [Parameter, EditorRequired]
+    public int Jahr { get; set; }
+
+    [Parameter]
+    public EventCallback Geaendert { get; set; }
+
+    private static readonly Hilfskraftart[] Arten = [Hilfskraftart.StudentischeHilfskraft, Hilfskraftart.WissHilfskraftBachelor, Hilfskraftart.WissHilfskraftMaster, Hilfskraftart.TutorOhneAbschluss];
+
+    private sealed class Zeile
+    {
+        public string? TopfId { get; set; }
+
+        public string? Prozent { get; set; } = "100";
+    }
+
+    private IReadOnlyList<Einstellungsmoeglichkeit> moeglich = [];
+    private IReadOnlyList<Hilfskraft> liste = [];
+    private IReadOnlyList<Stundensatzansicht> saetze = [];
+    private IReadOnlyList<Hilfskraftabschnitt>? vorschlag;
+    private string? beginn, ende, fehler;
+    private bool beschaeftigt;
+
+    private string? rPerson, rStunden = "20", rBeginn, rEnde;
+    private Hilfskraftart rArt = Hilfskraftart.StudentischeHilfskraft;
+
+    private Hilfskraft? bearbeitet;
+    private string? hPerson, hStunden, hBeginn, hEnde;
+    private Hilfskraftart hArt = Hilfskraftart.StudentischeHilfskraft;
+    private List<Zeile> hAnteile = [new()];
+
+    private static string Kurz(Hilfskraftart a) => a switch
+    {
+        Hilfskraftart.StudentischeHilfskraft => "SHK",
+        Hilfskraftart.WissHilfskraftBachelor => "WHK B.",
+        Hilfskraftart.WissHilfskraftMaster => "WHK M.",
+        Hilfskraftart.TutorOhneAbschluss => "Tutor",
+        Hilfskraftart.TutorBachelor => "Tutor B.",
+        _ => "Tutor M.",
+    };
+
+    private static string Stunden(decimal h) => h.ToString("0.#", System.Globalization.CultureInfo.GetCultureInfo("de-DE")) + " h";
+
+    private decimal Satz(Hilfskraftart art, int jahr) => saetze.FirstOrDefault(s => s.Art == art)?.EuroProStunde ?? Stundensaetze.Fakultaet2026[art];
+
+    private string Kennung(Guid topfId) => Toepfe.FirstOrDefault(t => t.Id == topfId)?.Kennung ?? "archiviert";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var naechster = FinanzAnzeige.MonatWert(FinanzAnzeige.NaechsterMonat());
+        beginn ??= naechster;
+        rBeginn ??= naechster;
+        hBeginn ??= naechster;
+        await LadenAsync();
+    }
+
+    private async Task LadenAsync()
+    {
+        var d0 = FinanzAnzeige.Monat(beginn)!.Value;
+        var d1 = FinanzAnzeige.Monat(ende);
+        moeglich = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<FinanzDienst>().EinstellungsmoeglichkeitenAsync(TeamId, d0, d1));
+        liste = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<FinanzDienst>().HilfskraefteAsync(TeamId));
+        saetze = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<FinanzDienst>().StundensaetzeAsync(TeamId, Jahr));
+    }
+
+    private async Task BeginnAsync(ChangeEventArgs e)
+    {
+        if (FinanzAnzeige.Monat(e.Value as string) is not null)
+        {
+            beginn = (string)e.Value!;
+            await LadenAsync();
+        }
+    }
+
+    private async Task EndeAsync(ChangeEventArgs e)
+    {
+        ende = e.Value as string is { Length: > 0 } s ? s : null;
+        await LadenAsync();
+    }
+
+    private async Task AusfuehrenAsync(Func<FinanzDienst, Task> aktion, string? erfolg = null)
+    {
+        if (beschaeftigt)
+        {
+            return;
+        }
+
+        fehler = null;
+        beschaeftigt = true;
+        try
+        {
+            await Vorgang.AusfuehrenAsync(d => aktion(d.GetRequiredService<FinanzDienst>()));
+            if (erfolg is not null)
+            {
+                Hinweise.Notify(NotificationSeverity.Success, erfolg);
+            }
+
+            await LadenAsync();
+            await Geaendert.InvokeAsync();
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+        }
+        finally
+        {
+            beschaeftigt = false;
+        }
+    }
+
+    private Task RechnenAsync() => AusfuehrenAsync(async d =>
+        vorschlag = await d.HilfskraftRechnenAsync(TeamId, rArt, Geld.Lesen(rStunden, "Stunden"), FinanzAnzeige.Monat(rBeginn)!.Value, FinanzAnzeige.Monat(rEnde)));
+
+    private async Task UebernehmenAsync()
+    {
+        var abschnitte = vorschlag!.Select(x => (x.Topf.Id, x.Von, x.Bis)).ToList();
+        await AusfuehrenAsync(d => d.VorschlagUebernehmenAsync(TeamId, rPerson!, rArt, Geld.Lesen(rStunden, "Stunden"), abschnitte),
+            abschnitte.Count == 1 ? "Beschäftigung eingetragen." : $"{abschnitte.Count} Abschnitte als Beschäftigungen eingetragen.");
+        if (fehler is null)
+        {
+            (vorschlag, rPerson) = (null, null);
+        }
+    }
+
+    private void WeitererAnteil() => hAnteile.Add(new Zeile { Prozent = "" });
+
+    private void Leeren()
+    {
+        (bearbeitet, hPerson, hStunden, hEnde) = (null, null, null, null);
+        hAnteile = [new()];
+    }
+
+    private void Bearbeiten(Hilfskraft h)
+    {
+        bearbeitet = h;
+        (hPerson, hArt, hStunden, hBeginn, hEnde) = (h.Person, h.Art, Geld.Eingabe(h.StundenProMonat), FinanzAnzeige.MonatWert(h.Beginn), FinanzAnzeige.MonatWert(h.Ende));
+        hAnteile = [.. h.Anteile.Select(x => new Zeile { TopfId = x.TopfId.ToString(), Prozent = Geld.Eingabe(x.Prozent) })];
+    }
+
+    private async Task SpeichernAsync()
+    {
+        var (von, bis) = (FinanzAnzeige.Monat(hBeginn)!.Value, FinanzAnzeige.Monat(hEnde)!.Value);
+        var id = bearbeitet?.Id;
+        await AusfuehrenAsync(d =>
+            {
+                var anteile = hAnteile.Where(z => Guid.TryParse(z.TopfId, out _)).Select(z => (Guid.Parse(z.TopfId!), Geld.Lesen(z.Prozent, "Anteil"))).ToList();
+                return id is { } x
+                    ? d.HilfskraftAendernAsync(TeamId, x, hPerson!, hArt, Geld.Lesen(hStunden, "Stunden"), von, bis, anteile)
+                    : d.HilfskraftAnlegenAsync(TeamId, hPerson!, hArt, Geld.Lesen(hStunden, "Stunden"), von, bis, anteile);
+            },
+            id is null ? "Beschäftigung eingetragen." : "Gespeichert.");
+        if (fehler is null)
+        {
+            Leeren();
+        }
+    }
+
+    private Task LoeschenAsync(Hilfskraft h) => AusfuehrenAsync(d => d.HilfskraftLoeschenAsync(TeamId, h.Id), "Gelöscht.");
+
+    private Task SatzAsync(Hilfskraftart art, ChangeEventArgs e)
+        => AusfuehrenAsync(d => d.StundensatzSetzenAsync(TeamId, Jahr, art, Geld.Lesen(e.Value as string, "Stundensatz")), "Stundensatz gespeichert.");
+}

@@ -68,6 +68,8 @@
         </section>
     </div>
 
+    <MailsignaturKarte />
+
     @if (nachweis is { } n)
     {
         <Unterschreiben @ref="unterschreiben" Text="@n.Text" Titel="Besitz des Schlüssels nachweisen" Unterzeichner="@konto.Anzeigename"

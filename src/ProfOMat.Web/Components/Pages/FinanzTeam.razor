@@ -1,0 +1,589 @@
+@page "/finanzen/{Id:guid}"
+@attribute [Authorize]
+@using ProfOMat.Application.Finanzen
+@using ProfOMat.Domain.Finanzen
+@inject Vorgang Vorgang
+@inject NotificationService Hinweise
+@inject NavigationManager Navigation
+
+<PageTitle>@(team?.Team.Name ?? "Finanzen") · ProfOMat</PageTitle>
+
+@if (ladefehler is not null)
+{
+    <section class="pm-card"><h1>Finanzen</h1><div class="pm-alert pm-crit" role="alert">@ladefehler</div><p><a href="finanzen">Zur Übersicht</a></p></section>
+}
+else if (team is not null && cockpit is not null)
+{
+    <div class="pm-head">
+        <div>
+            <h1>@team.Team.Name</h1>
+            <p>@string.Join(", ", team.Mitglieder.Select(m => m.Name)) · Stand @cockpit.Heute.ToString("dd.MM.yyyy")</p>
+        </div>
+        <div class="pm-row">
+            <StatusPille Stil="@(cockpit.FreiVerwendbar < 0 ? "krit" : "gut")">frei verwendbar @Geld.Text(cockpit.FreiVerwendbar)</StatusPille>
+            <StatusPille Stil="info">zweckgebunden frei @Geld.Text(cockpit.FreiZweckgebunden)</StatusPille>
+        </div>
+    </div>
+
+    @if (fehler is not null)
+    {
+        <div class="pm-alert pm-crit" role="alert">@fehler</div>
+    }
+
+    <div class="pm-tabs" role="tablist">
+        @foreach (var (key, text) in new[] { ("cockpit", "Cockpit"), ("planung", "Planung"), ("auslagen", "Auslagen"), ("hilfskraefte", "Hilfskräfte"), ("toepfe", $"Töpfe ({toepfe.Count})"), ("import", "Import"), ("team", "Team") })
+        {
+            <button type="button" role="tab" class="pm-tab @(Bereich == key ? "on" : null)" aria-selected="@(Bereich == key)" @onclick="() => Bereich = key">@text</button>
+        }
+    </div>
+
+    @if (Bereich == "cockpit")
+    {
+        @foreach (var a in cockpit.Toepfe.Where(a => a.Zahlen.UeberGrenze is > 0))
+        {
+            <div class="pm-alert @(a.Zahlen.GrenzeHervorheben ? "pm-crit" : "pm-warn")" role="status">
+                <b>Übertragsgrenze @a.Topf.Anzeige:</b> zum 31.12. bleiben voraussichtlich @Geld.Text(a.Zahlen.Prognose31Dez) übrig, sicher übertragen werden
+                @Geld.Text(a.Zahlen.Grenze) (@a.Topf.UebertragsgrenzeProzent.ToString("0.##") % des Budgets @Geld.Text(a.Zahlen.Budget)).
+                Bis zum Jahresende noch <b>@Geld.Text(a.Zahlen.UeberGrenze)</b> ausgeben oder fest einplanen – der Überhang kann sonst zentral eingezogen werden.
+            </div>
+        }
+
+        @if (cockpit.Toepfe.Count == 0)
+        {
+            <section class="pm-card">
+                <h2>Noch keine Töpfe</h2>
+                <p>Am schnellsten geht es mit den SAP-Auszügen der Laborkostenstelle: im Reiter „Import“ alle „… Tabelle.xls“ auf einmal hochladen –
+                    die Kostenstelle wird dabei angelegt. Investitions- und SQM-Maßnahmen legen Sie im Reiter „Töpfe“ an.</p>
+                <NaechsteSchritte Schritte="@([new NaechsterSchritt("SAP-Auszüge importieren", $"finanzen/{Id}?bereich=import", Hauptschritt: true),
+                                               new NaechsterSchritt("Maßnahme anlegen", $"finanzen/{Id}?bereich=toepfe")])" />
+            </section>
+        }
+        else
+        {
+            <div class="pm-kacheln">
+                @foreach (var a in cockpit.Toepfe)
+                {
+                    var z = a.Zahlen;
+                    <article class="pm-kachel">
+                        <div class="pm-row" style="justify-content: space-between">
+                            <h2><a href="finanzen/@Id/toepfe/@a.Topf.Id">@Titel(a.Topf)</a></h2>
+                            <StatusPille Stil="@Stil(z.Ampel)">frei @Geld.Text(z.Frei)</StatusPille>
+                        </div>
+                        <p class="pm-muted pm-small">@Unterzeile(a.Topf)</p>
+                        <dl class="pm-dl pm-fin-zahlen">
+                            <dt>@(a.Topf.Zweckgebunden ? "Bewilligt" : "Verfügbar")</dt>
+                            <dd>@Geld.Text(z.Verfuegbar)@(z.VortragErwartet is { } ve ? $" (davon Vortrag erwartet {Geld.Text(ve)})" : "")</dd>
+                            <dt>Ausgegeben</dt><dd>@Geld.Text(z.Ausgegeben)</dd>
+                            <dt>Gebunden</dt>
+                            <dd>
+                                @if (a.Bindungen.Count == 0)
+                                {
+                                    @Geld.Text(z.Gebunden)
+                                }
+                                else
+                                {
+                                    <details class="pm-fin-bindungen">
+                                        <summary>@Geld.Text(z.Gebunden) (@a.Bindungen.Count)</summary>
+                                        <ul class="pm-small">
+                                            @foreach (var b in a.Bindungen.GroupBy(b => b.Text.StartsWith("Hilfskraft ", StringComparison.Ordinal) ? b.Text[..b.Text.LastIndexOf(' ')] : b.Text)
+                                                         .Select(g => (Text: g.Key, Betrag: g.Sum(x => x.Betrag), Von: g.Min(x => x.Faellig), Bis: g.Max(x => x.Faellig), Anzahl: g.Count())))
+                                            {
+                                                <li>@b.Text: @Geld.Text(b.Betrag) @(b.Anzahl > 1 ? $"({b.Anzahl} Monate bis {b.Bis:MM.yyyy})" : $"({b.Von:MM.yyyy})")</li>
+                                            }
+                                        </ul>
+                                    </details>
+                                }
+                            </dd>
+                            <dt><b>Frei</b></dt><dd><b>@Geld.Text(z.Frei)</b></dd>
+                            @if (z.Grenze is { } g)
+                            {
+                                <dt>Übertragsgrenze</dt><dd>@Geld.Text(g) · Prognose 31.12.: @Geld.Text(z.Prognose31Dez)</dd>
+                            }
+                            <dt>Datenstand</dt><dd>@(z.Datenstand?.ToString("dd.MM.yyyy") ?? "–")</dd>
+                        </dl>
+                        @if (cockpit.OffeneMarkierungen.GetValueOrDefault(a.Topf.Id) is > 0 and var offen)
+                        {
+                            <p class="pm-small"><a href="finanzen/@Id/toepfe/@a.Topf.Id?bereich=buchungen&filter=offen">⚑ @offen Buchung(en) markiert (nicht ok, Nachverfolgung, Rückfrage)</a></p>
+                        }
+                        @if (z.Hinweise.Count > 0)
+                        {
+                            <ul class="pm-small pm-fin-hinweise">
+                                @foreach (var h in z.Hinweise.Where(h => !h.StartsWith("Übertragsgrenze", StringComparison.Ordinal)))
+                                {
+                                    <li>@h</li>
+                                }
+                            </ul>
+                        }
+                    </article>
+                }
+            </div>
+        }
+
+        @if (achse is not null && achse.Reihen.Count > 0)
+        {
+            <section class="pm-card">
+                <h2>Zeitachse: freie Mittel bis @achse.Monate[^1].ToString("MM.yyyy")</h2>
+                <p class="pm-small pm-muted">Freie Mittel je Topf zum Monatsende nach allen Bindungen. Gestrichelt: mit erwarteten Zugängen. Neue Investitionen
+                    planen und aufteilen im Reiter <a href="finanzen/@Id?bereich=planung">Planung</a>.</p>
+                <FinanzZeitachse Achse="@achse" AlleToepfe="@toepfe" />
+            </section>
+        }
+
+        <section class="pm-card">
+            <h2>Fristen der nächsten 12 Monate</h2>
+            <div class="pm-tbl">
+                <table>
+                    <thead><tr><th>Datum</th><th>in</th><th>Frist</th><th class="pm-geld">dann noch frei</th></tr></thead>
+                    <tbody>
+                        @foreach (var f in cockpit.Fristen)
+                        {
+                            var tage = f.Datum.DayNumber - cockpit.Heute.DayNumber;
+                            <tr class="@(f.Frei > 0 && tage <= Finanzrechnung.WarnTageVorStichtag ? "pm-hervor" : null)">
+                                <td class="pm-nowrap">@f.Datum.ToString("dd.MM.yyyy")</td>
+                                <td class="pm-nowrap">@(tage == 0 ? "heute" : $"{tage} Tagen")</td>
+                                <td>@f.Text</td>
+                                <td class="pm-geld">@(f.Frei is { } fr ? Geld.Text(fr) : "")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+            <p class="pm-small pm-muted">„Dann noch frei“ ist der heutige freie Betrag nach allen Bindungen (geplante Ausgaben, Auslagen, Hilfskräfte).</p>
+        </section>
+    }
+    else if (Bereich == "planung")
+    {
+        <FinanzAufteilen TeamId="Id" AlleToepfe="@toepfe" Geaendert="LadenAsync" />
+        <FinanzAusgaben TeamId="Id" Toepfe="@AktiveToepfe" Geaendert="LadenAsync" />
+    }
+    else if (Bereich == "auslagen")
+    {
+        <FinanzAuslagen TeamId="Id" />
+    }
+    else if (Bereich == "hilfskraefte")
+    {
+        <FinanzHilfskraefte TeamId="Id" Toepfe="@AktiveToepfe" Jahr="@cockpit.Heute.Year" Geaendert="LadenAsync" />
+    }
+    else if (Bereich == "toepfe")
+    {
+        <section class="pm-card">
+            <h2>Töpfe</h2>
+            <div class="pm-tbl">
+                <table>
+                    <thead><tr><th>Art</th><th>Kennung</th><th>Bezeichnung</th><th class="pm-geld">Bewilligt</th><th>Stichtag</th><th>Stand</th></tr></thead>
+                    <tbody>
+                        @foreach (var t in toepfe)
+                        {
+                            <tr class="@(t.Archiviert ? "pm-alt" : null)">
+                                <td>@Artname(t.Art)</td>
+                                <td class="pm-nowrap"><a href="finanzen/@Id/toepfe/@t.Id">@t.Kennung</a></td>
+                                <td>@t.Bezeichnung</td>
+                                <td class="pm-geld">@(t.Zweckgebunden ? Geld.Text(t.Bewilligt) : "")</td>
+                                <td class="pm-nowrap">@(t.Stichtag?.ToString("dd.MM.yyyy") ?? (t.Art == Topfart.Kostenstelle ? "laufend" : "–"))</td>
+                                <td>@(t.Archiviert ? "archiviert" : "aktiv")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="pm-card">
+            <h2>Neuer Topf</h2>
+            <div class="pm-fields">
+                <div class="pm-field">
+                    <label class="pm-lbl" for="art">Art</label>
+                    <select id="art" class="pm-select" @bind="neuArt">
+                        <option value="@Topfart.Sqm">SQM-Maßnahme</option>
+                        <option value="@Topfart.Investition">Investitionsmaßnahme</option>
+                        <option value="@Topfart.Kostenstelle">Laborkostenstelle</option>
+                    </select>
+                </div>
+                <div class="pm-field">
+                    <label class="pm-lbl" for="kennung">@(neuArt == Topfart.Kostenstelle ? "Kostenstelle" : "Antragsnummer")</label>
+                    <input id="kennung" class="pm-input" @bind="neuKennung" @bind:event="oninput" maxlength="@Topf.KennungMaxLaenge" autocomplete="off"
+                           placeholder="@(neuArt switch { Topfart.Kostenstelle => "12103012", Topfart.Investition => "AUT-07-26", _ => "SQM-2026-15" })" />
+                </div>
+                <div class="pm-field pm-field-weit">
+                    <label class="pm-lbl" for="bez">Bezeichnung</label>
+                    <input id="bez" class="pm-input" @bind="neuBezeichnung" @bind:event="oninput" maxlength="@Topf.TextMaxLaenge" autocomplete="off"
+                           placeholder="@(neuArt == Topfart.Kostenstelle ? "Laborkostenstelle" : "wie im Antrag")" />
+                </div>
+                @if (neuArt == Topfart.Sqm)
+                {
+                    <div class="pm-field">
+                        <label class="pm-lbl" for="personal">Personalkosten bewilligt (€)</label>
+                        <input id="personal" class="pm-input" inputmode="decimal" @bind="neuPersonal" />
+                    </div>
+                }
+                @if (neuArt != Topfart.Kostenstelle)
+                {
+                    <div class="pm-field">
+                        <label class="pm-lbl" for="sach">Sachkosten bewilligt (€)</label>
+                        <input id="sach" class="pm-input" inputmode="decimal" @bind="neuSach" />
+                    </div>
+                }
+                @if (neuArt == Topfart.Investition)
+                {
+                    <div class="pm-field">
+                        <label class="pm-lbl" for="ia">Innenauftrag</label>
+                        <input id="ia" class="pm-input" @bind="neuInnenauftrag" maxlength="20" placeholder="z. B. 71211637" />
+                    </div>
+                }
+                @if (neuArt == Topfart.Sqm)
+                {
+                    <div class="pm-field">
+                        <label class="pm-lbl" for="kat">Kategorie</label>
+                        <select id="kat" class="pm-select" @bind="neuKategorie">
+                            <option value="">–</option>
+                            @foreach (var k in SqmKategorien)
+                            {
+                                <option value="@k">@k</option>
+                            }
+                        </select>
+                    </div>
+                }
+            </div>
+            <p class="pm-small pm-muted">@NeuHilfe</p>
+            <div>
+                <BegruendeterButton Text="Topf anlegen" Haupt="true" Click="TopfAnlegenAsync" Beschaeftigt="@beschaeftigt"
+                                    Freigabe="@(string.IsNullOrWhiteSpace(neuKennung) ? Freigabe.Nein("Bitte zuerst die Kennung eingeben.")
+                                               : neuArt != Topfart.Kostenstelle && string.IsNullOrWhiteSpace(neuBezeichnung) ? Freigabe.Nein("Bitte eine Bezeichnung eingeben.") : Freigabe.Ja)" />
+            </div>
+        </section>
+    }
+    else if (Bereich == "import")
+    {
+        <section class="pm-card">
+            <h2>SAP-Auszüge der Kostenstelle</h2>
+            <p>Die monatlichen Auszüge („20260622 12103012 Tabelle.xls“) enthalten jeweils den ganzen Jahresstand ab 01.01. Der neueste Stand
+                <b>ersetzt</b> die Buchungen seines Jahres. Sie können alle Dateien eines Ordners auf einmal wählen: Je Jahr wird nur der neueste
+                Stand übernommen, Teilauszüge ohne Budgetzeile werden übersprungen. Eine neue Kostenstelle wird dabei angelegt.</p>
+            <InputFile OnChange="DateienGewaehltAsync" multiple accept=".xls,.txt,.tsv,.csv" class="pm-input" />
+        </section>
+
+        @if (vorschau.Count > 0)
+        {
+            var bereit = vorschau.Where(v => v.Freigabe.Erlaubt && (!v.Aelter || aelterOk.Contains(v.Dateiname))).ToList();
+            <section class="pm-card">
+                <h2>Vorschau</h2>
+                <div class="pm-tbl">
+                    <table>
+                        <thead><tr><th>Datei</th><th>Jahr</th><th>bis</th><th class="pm-geld">Buchungen</th><th>Änderung</th><th class="pm-geld">Rest neu</th><th class="pm-geld">bisher</th><th></th></tr></thead>
+                        <tbody>
+                            @foreach (var v in vorschau)
+                            {
+                                <tr class="@(v.Freigabe.Erlaubt ? null : "pm-alt")">
+                                    <td>@v.Dateiname@(v.NeuerTopf && v.Freigabe.Erlaubt ? $" (legt Kostenstelle {v.Kostenstelle} an)" : "")</td>
+                                    <td>@v.Jahr</td>
+                                    <td class="pm-nowrap">@v.BisDatum?.ToString("dd.MM.yyyy")</td>
+                                    <td class="pm-geld">@(v.Kostenstelle is null ? "" : v.Anzahl.ToString())</td>
+                                    <td class="pm-nowrap">@(v.Kostenstelle is null ? "" : $"+{v.Neu} / −{v.Entfallen}")</td>
+                                    <td class="pm-geld">@Geld.Text(v.RestNeu)</td>
+                                    <td class="pm-geld">@Geld.Text(v.RestBisher)</td>
+                                    <td>
+                                        @if (!v.Freigabe.Erlaubt)
+                                        {
+                                            <span class="pm-small pm-muted">@v.Freigabe.Begruendung</span>
+                                        }
+                                        else
+                                        {
+                                            @if (v.Aelter)
+                                            {
+                                                <label class="pm-check pm-small"><input type="checkbox" checked="@aelterOk.Contains(v.Dateiname)" @onchange="e => AelterUmschalten(v.Dateiname, e)" />
+                                                    älter als der übernommene Stand – trotzdem übernehmen</label>
+                                            }
+
+                                            <BegruendeterButton Text="Übernehmen" Click="() => UebernehmenAsync([v])" Beschaeftigt="@beschaeftigt"
+                                                                Freigabe="@(v.Aelter && !aelterOk.Contains(v.Dateiname) ? Freigabe.Nein("Für dieses Jahr ist schon ein neuerer Stand übernommen – erst bestätigen.") : Freigabe.Ja)" />
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+                <div class="pm-row">
+                    <BegruendeterButton Text="@($"Alle übernehmen ({bereit.Count})")" Haupt="true" Click="() => UebernehmenAsync(bereit)" Beschaeftigt="@beschaeftigt"
+                                        Freigabe="@(bereit.Count > 0 ? Freigabe.Ja : Freigabe.Nein("Keine Datei ist zur Übernahme bereit."))" />
+                </div>
+            </section>
+        }
+
+        @if (uebernommen > 0)
+        {
+            <NaechsteSchritte Schritte="@([new NaechsterSchritt("Zum Cockpit", $"finanzen/{Id}?bereich=cockpit", Hauptschritt: true),
+                                           .. toepfe.Where(t => t.Art == Topfart.Kostenstelle).Select(t => new NaechsterSchritt($"Buchungen {t.Kennung}", $"finanzen/{Id}/toepfe/{t.Id}"))])" />
+        }
+
+        <FinanzMassnahmenImport TeamId="Id" Geaendert="LadenAsync" />
+    }
+    else if (Bereich == "team")
+    {
+        <section class="pm-card">
+            <h2>Mitglieder</h2>
+            <p class="pm-small pm-muted">Alle Mitglieder sind gleichberechtigt: Sie sehen und ändern alle Finanzdaten des Teams und können weitere Personen aufnehmen.</p>
+            <div class="pm-list">
+                @foreach (var m in team.Mitglieder)
+                {
+                    var ich = m.KontoId == wer?.KontoId;
+                    <div>
+                        <span class="pm-grow">@m.Name@(ich ? " (Sie)" : "")</span>
+                        <span class="pm-small pm-muted">seit @m.Seit.ToString("dd.MM.yyyy")</span>
+                        <BegruendeterButton Text="@(ich ? "Austreten" : "Entfernen")" Gefahr="true" Click="() => EntfernenAsync(m)"
+                                            Freigabe="@team.Team.Entfernbar(m.KontoId)" />
+                    </div>
+                }
+            </div>
+        </section>
+        <section class="pm-card">
+            <h2>Person aufnehmen</h2>
+            <div class="pm-row">
+                <select class="pm-select" @bind="aufnehmen" aria-label="Person auswählen">
+                    <option value="">– Person wählen –</option>
+                    @foreach (var k in kandidaten)
+                    {
+                        <option value="@k.KontoId">@k.Name</option>
+                    }
+                </select>
+                <BegruendeterButton Text="Aufnehmen" Haupt="true" Click="AufnehmenAsync" Beschaeftigt="@beschaeftigt"
+                                    Freigabe="@(Guid.TryParse(aufnehmen, out _) ? Freigabe.Ja : Freigabe.Nein("Bitte zuerst eine Person wählen."))" />
+            </div>
+        </section>
+        <section class="pm-card">
+            <h2>Erinnerungen an Fristen</h2>
+            <p class="pm-small pm-muted">ProfOMat erinnert alle Mitglieder per Mail an Fristen: Rechnungsabgabe und Bestellschluss, wenn im Topf noch Mittel frei sind,
+                das Jahresende der Kostenstelle bei einem Überhang über der Übertragsgrenze sowie die Antragsfristen der Fakultät – jede Frist einmal.</p>
+            <div class="pm-row">
+                <label class="pm-lbl" for="vorlauf">Tage vorher (0 = keine Erinnerungen)</label>
+                <input id="vorlauf" class="pm-input pm-fin-kurz" inputmode="numeric" @bind="vorlauf" />
+                <BegruendeterButton Text="Speichern" Click="VorlaufAsync"
+                                    Freigabe="@(int.TryParse(vorlauf, out var v) && v != team.Team.ErinnerungVorlaufTage ? Freigabe.Ja : Freigabe.Nein("Erst einen anderen Wert eingeben."))" />
+            </div>
+        </section>
+        <section class="pm-card">
+            <h2>Name des Teams</h2>
+            <div class="pm-row">
+                <input class="pm-input pm-grow" @bind="teamname" maxlength="@Laborteam.NameMaxLaenge" aria-label="Name des Teams" />
+                <BegruendeterButton Text="Umbenennen" Click="UmbenennenAsync"
+                                    Freigabe="@(string.IsNullOrWhiteSpace(teamname) || teamname == team.Team.Name ? Freigabe.Nein("Erst einen neuen Namen eingeben.") : Freigabe.Ja)" />
+            </div>
+        </section>
+    }
+}
+
+@code {
+    [Parameter]
+    public Guid Id { get; set; }
+
+    [SupplyParameterFromQuery(Name = "bereich")]
+    public string? Bereich { get; set; }
+
+    internal static readonly string[] SqmKategorien =
+    [
+        "1 Fakultäts-Overhead", "2 Verbesserung des Lehrangebots (ohne Sprachen)", "3 Verbesserung des Lehrangebots (Sprachen)",
+        "4 Verbesserung der Laborausstattung", "5 Verbesserung der Lehrraumausstattung", "6 Projekte",
+        "7 Studienumfeld und Studienbedingungen", "8 Internationales",
+    ];
+
+    private Teamansicht? team;
+    private Cockpit? cockpit;
+    private Zeitachse? achse;
+    private IReadOnlyList<Topf> toepfe = [];
+    private IReadOnlyList<Mitgliedansicht> kandidaten = [];
+    private Benutzer? wer;
+    private string? fehler, ladefehler, aufnehmen, teamname, vorlauf;
+    private bool beschaeftigt;
+
+    private Topfart neuArt = Topfart.Sqm;
+    private string? neuKennung, neuBezeichnung, neuPersonal, neuSach, neuInnenauftrag, neuKategorie;
+
+    private readonly Dictionary<string, byte[]> dateien = new(StringComparer.Ordinal);
+    private IReadOnlyList<Importvorschau> vorschau = [];
+    private readonly HashSet<string> aelterOk = new(StringComparer.Ordinal);
+    private int uebernommen;
+
+    private IReadOnlyList<Topf> AktiveToepfe => [.. toepfe.Where(t => !t.Archiviert)];
+
+    private string NeuHilfe => neuArt switch
+    {
+        Topfart.Sqm => "Laufzeit nach dem Zeitraster der Fakultät: Mittelfreigabe 01.03., Rechnungsabgabe bis 31.01. des Folgejahres (aus dem Jahr der Antragsnummer; änderbar). Jeder SQM-Antrag ist ein eigener Topf, weil projektbezogen abgerechnet wird.",
+        Topfart.Investition => "Bestellschluss nach dem Zeitraster: 31.08. des Folgejahres (änderbar). Die Mittel sind an den Zweck des Antrags gebunden.",
+        _ => "Die Laborkostenstelle entsteht auch automatisch beim Import des ersten SAP-Auszugs.",
+    };
+
+    protected override async Task OnParametersSetAsync()
+    {
+        Bereich ??= "cockpit";
+        await LadenAsync();
+    }
+
+    private async Task LadenAsync()
+    {
+        try
+        {
+            wer = await Vorgang.BenutzerAsync();
+            team = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<FinanzDienst>().TeamAsync(Id));
+            cockpit = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<FinanzDienst>().CockpitAsync(Id));
+            achse = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<FinanzDienst>().ZeitachseAsync(Id));
+            toepfe = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<FinanzDienst>().ToepfeAsync(Id));
+            kandidaten = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<FinanzDienst>().KandidatenAsync(Id));
+            teamname ??= team.Team.Name;
+            vorlauf ??= team.Team.ErinnerungVorlaufTage.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+        catch (FachlicherFehler ex)
+        {
+            ladefehler = ex.Message;
+        }
+    }
+
+    internal static string Stil(Ampel a) => a switch { Ampel.Gut => "gut", Ampel.Warn => "warn", Ampel.Krit => "krit", _ => "neutral" };
+
+    internal static string Artname(Topfart a) => a switch { Topfart.Kostenstelle => "Kostenstelle", Topfart.Investition => "Investition", _ => "SQM" };
+
+    private static string Titel(Topf t) => t.Art == Topfart.Kostenstelle ? $"Kostenstelle {t.Kennung}" : t.Kennung;
+
+    private static string Unterzeile(Topf t) => t.Art switch
+    {
+        Topfart.Kostenstelle => $"{t.Bezeichnung} · frei verwendbar, Rest wird vorgetragen",
+        Topfart.Sqm => $"{t.Bezeichnung} · SQM bis {t.Stichtag:dd.MM.yyyy}",
+        _ => $"{t.Bezeichnung} · Investition, Bestellschluss {t.Stichtag:dd.MM.yyyy}",
+    };
+
+    private async Task AusfuehrenAsync(Func<FinanzDienst, Task> aktion, string? erfolg = null)
+    {
+        if (beschaeftigt)
+        {
+            return;
+        }
+
+        fehler = null;
+        beschaeftigt = true;
+        try
+        {
+            await Vorgang.AusfuehrenAsync(d => aktion(d.GetRequiredService<FinanzDienst>()));
+            if (erfolg is not null)
+            {
+                Hinweise.Notify(NotificationSeverity.Success, erfolg);
+            }
+
+            await LadenAsync();
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+        }
+        finally
+        {
+            beschaeftigt = false;
+        }
+    }
+
+    private Task TopfAnlegenAsync() => AusfuehrenAsync(async d =>
+    {
+        switch (neuArt)
+        {
+            case Topfart.Kostenstelle:
+                await d.KostenstelleAnlegenAsync(Id, neuKennung!, neuBezeichnung);
+                break;
+            case Topfart.Investition:
+                await d.InvestitionAnlegenAsync(Id, neuKennung!, neuBezeichnung!, Geld.Lesen(neuSach, "Sachkosten"), neuInnenauftrag);
+                break;
+            default:
+                await d.SqmAnlegenAsync(Id, neuKennung!, neuBezeichnung!, Geld.Lesen(neuPersonal, "Personalkosten"), Geld.Lesen(neuSach, "Sachkosten"),
+                    string.IsNullOrEmpty(neuKategorie) ? null : neuKategorie);
+                break;
+        }
+
+        (neuKennung, neuBezeichnung, neuPersonal, neuSach, neuInnenauftrag, neuKategorie) = (null, null, null, null, null, null);
+    }, "Topf angelegt.");
+
+    private async Task DateienGewaehltAsync(InputFileChangeEventArgs e)
+    {
+        fehler = null;
+        dateien.Clear();
+        aelterOk.Clear();
+        uebernommen = 0;
+        try
+        {
+            foreach (var f in e.GetMultipleFiles(60))
+            {
+                using var puffer = new MemoryStream();
+                await f.OpenReadStream(KostenstellenauszugLeser.MaxBytes).CopyToAsync(puffer);
+                dateien[f.Name] = puffer.ToArray();
+            }
+
+            await VorschauAsync();
+        }
+        catch (Exception ex) when (ex is FachlicherFehler or IOException or InvalidOperationException)
+        {
+            fehler = ex is FachlicherFehler ? ex.Message : $"Datei nicht lesbar: {ex.Message} (höchstens 60 Dateien zu je 5 MB).";
+        }
+    }
+
+    private async Task VorschauAsync()
+    {
+        var liste = dateien.OrderBy(d => d.Key, StringComparer.Ordinal).Select(d => (d.Key, d.Value)).ToList();
+        vorschau = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<FinanzDienst>().ImportVorschauAsync(Id, liste));
+    }
+
+    private void AelterUmschalten(string datei, ChangeEventArgs e)
+    {
+        if (e.Value is true)
+        {
+            aelterOk.Add(datei);
+        }
+        else
+        {
+            aelterOk.Remove(datei);
+        }
+    }
+
+    private async Task UebernehmenAsync(IReadOnlyList<Importvorschau> auswahl)
+    {
+        var anzahl = 0;
+        await AusfuehrenAsync(async d =>
+        {
+            foreach (var v in auswahl.OrderBy(v => v.Jahr))
+            {
+                await d.ImportUebernehmenAsync(Id, v.Dateiname, dateien[v.Dateiname], aelterOk.Contains(v.Dateiname));
+                anzahl++;
+            }
+        });
+        if (anzahl > 0)
+        {
+            uebernommen += anzahl;
+            Hinweise.Notify(NotificationSeverity.Success, anzahl == 1 ? "Jahresstand übernommen." : $"{anzahl} Jahresstände übernommen.");
+            foreach (var v in auswahl)
+            {
+                dateien.Remove(v.Dateiname);
+            }
+
+            await VorschauAsync();
+        }
+    }
+
+    private async Task AufnehmenAsync()
+    {
+        if (Guid.TryParse(aufnehmen, out var id))
+        {
+            await AusfuehrenAsync(d => d.AufnehmenAsync(Id, id), "Person aufgenommen.");
+            aufnehmen = fehler is null ? null : aufnehmen;
+        }
+    }
+
+    private async Task EntfernenAsync(Mitgliedansicht m)
+    {
+        var ich = m.KontoId == wer?.KontoId;
+        await AusfuehrenAsync(d => d.EntfernenAsync(Id, m.KontoId), ich ? "Sie sind aus dem Laborteam ausgetreten." : "Person entfernt.");
+        if (ich && fehler is null)
+        {
+            Navigation.NavigateTo("finanzen");
+        }
+    }
+
+    private Task VorlaufAsync() => AusfuehrenAsync(d => d.ErinnerungEinstellenAsync(Id, int.Parse(vorlauf!, System.Globalization.CultureInfo.InvariantCulture)),
+        "Erinnerungen eingestellt.");
+
+    private Task UmbenennenAsync() => AusfuehrenAsync(d => d.UmbenennenAsync(Id, teamname!), "Umbenannt.");
+}

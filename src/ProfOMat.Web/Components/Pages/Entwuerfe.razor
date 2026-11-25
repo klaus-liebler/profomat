@@ -1,0 +1,102 @@
+@page "/entwuerfe"
+@attribute [Authorize]
+@using ProfOMat.Application.Betrieb
+@using ProfOMat.Domain.Betrieb
+@inject Vorgang Vorgang
+@inject Ortszeit Zeit
+
+<PageTitle>Mails zum Versenden · ProfOMat</PageTitle>
+
+<div class="pm-head">
+    <div>
+        <h1>Mails zum Versenden</h1>
+        <p>Vorformulierte Mails, die Sie selbst aus Ihrem Desktop-Outlook verschicken: „In Outlook öffnen“ lädt die Mail herunter; ein Klick auf die
+            Datei öffnet sie als neue Mail mit Empfänger, Betreff, Text und Ihrer Signatur. Dann nur noch „Senden“.</p>
+    </div>
+</div>
+
+@if (!signaturDa)
+{
+    <div class="pm-alert pm-info" role="status">Noch keine Mailsignatur hinterlegt – die Mails enthalten dann nur den Text. <a href="profil#mailsignatur">Signatur im Profil hinterlegen</a></div>
+}
+
+<section class="pm-card">
+    <div class="pm-row">
+        <h2 class="pm-grow">@(auchErledigte ? "Alle Entwürfe" : "Offene Entwürfe") (@liste.Count)</h2>
+        <label class="pm-check"><input type="checkbox" checked="@auchErledigte" @onchange="ErledigteUmschaltenAsync" /> Erledigte zeigen</label>
+    </div>
+    @if (liste.Count == 0)
+    {
+        <p class="pm-muted">Keine. Entwürfe entstehen z. B. bei der Hausarbeit mit „Bestätigungsmails erstellen“.</p>
+    }
+    else
+    {
+        <div class="pm-tbl">
+            <table>
+                <thead><tr><th>An</th><th>Betreff</th><th>Stand</th><th></th></tr></thead>
+                <tbody>
+                    @foreach (var e in liste)
+                    {
+                        var entwurf = e;
+                        <tr>
+                            <td>@(e.AnName ?? e.An)<br /><span class="pm-small pm-muted">@e.An</span></td>
+                            <td>@e.Betreff<br /><span class="pm-small pm-muted">@e.Anlass · erstellt @Zeit.Kurz(e.Erstellt)</span></td>
+                            <td>
+                                @if (e.Erledigt is { } erl)
+                                {
+                                    <StatusPille Stil="gut">erledigt</StatusPille>
+                                }
+                                else if (geoeffnet.Contains(e.Id) || e.Geoeffnet is not null)
+                                {
+                                    <StatusPille Stil="gut">in Outlook geöffnet</StatusPille>
+                                }
+                                else
+                                {
+                                    <StatusPille Stil="warn">neu</StatusPille>
+                                }
+                            </td>
+                            <td class="pm-nowrap">
+                                <a class="@(e.Geoeffnet is null && !geoeffnet.Contains(e.Id) ? "pm-btn pm-btn-haupt" : "pm-btn")" href="entwuerfe/@e.Id/mail.eml"
+                                   data-enhance-nav="false" download @onclick="() => geoeffnet.Add(entwurf.Id)">In Outlook öffnen</a>
+                                @if (e.Erledigt is null)
+                                {
+                                    <button type="button" class="pm-btn" @onclick="() => ErledigtAsync(entwurf, true)">Erledigt</button>
+                                }
+                                else
+                                {
+                                    <button type="button" class="pm-btn" @onclick="() => ErledigtAsync(entwurf, false)">Wieder offen</button>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        <p class="pm-small pm-muted">Tipp: Im Download-Menü des Browsers bei der ersten .eml-Datei „Dateien dieses Typs immer öffnen“ wählen – dann öffnet
+            sich jede weitere Mail direkt in Outlook.</p>
+    }
+</section>
+
+@code {
+    private IReadOnlyList<Mailentwurf> liste = [];
+    private readonly HashSet<Guid> geoeffnet = [];
+    private bool auchErledigte, signaturDa = true;
+
+    protected override async Task OnInitializedAsync() => await LadenAsync();
+
+    private async Task LadenAsync()
+        => (liste, signaturDa) = await Vorgang.AusfuehrenAsync(async d =>
+            (await d.GetRequiredService<Mailentwuerfe>().MeineAsync(auchErledigte), await d.GetRequiredService<Mailsignaturen>().MeineAsync() is not null));
+
+    private async Task ErledigteUmschaltenAsync(ChangeEventArgs e)
+    {
+        auchErledigte = e.Value is true;
+        await LadenAsync();
+    }
+
+    private async Task ErledigtAsync(Mailentwurf e, bool erledigt)
+    {
+        await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<Mailentwuerfe>().ErledigtSetzenAsync(e.Id, erledigt));
+        await LadenAsync();
+    }
+}

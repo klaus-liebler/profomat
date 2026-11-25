@@ -1,0 +1,202 @@
+@*
+    Stände der Maßnahmen aus den Listen der Fakultät: SQM-Excel (FA-704) und Investitionen per KI-Chat (FA-703).
+*@
+@using ProfOMat.Application.Finanzen
+@inject Vorgang Vorgang
+@inject NotificationService Hinweise
+@inject IJSRuntime JS
+@inject NavigationManager Navigation
+@implements IAsyncDisposable
+
+<section class="pm-card">
+    <h2>SQM-Liste der Fakultät (Excel)</h2>
+    <p class="pm-small pm-muted">„SQM-…-Antraege-bewilligt-aktuell.xlsx“: Übernommen werden bewilligter Betrag und „verausgabt“ der SQM-Töpfe dieses Teams;
+        Anträge von Teammitgliedern, die noch kein Topf sind, lassen sich anlegen. Anträge anderer Personen werden nur gezählt – nicht angezeigt, nicht gespeichert.</p>
+    <div class="pm-fields">
+        <div class="pm-field">
+            <label class="pm-lbl" for="sqm-datei">Datei</label>
+            <InputFile id="sqm-datei" OnChange="SqmGewaehltAsync" accept=".xlsx" class="pm-input" />
+        </div>
+        <div class="pm-field">
+            <label class="pm-lbl" for="sqm-stichtag">Stand vom</label>
+            <input id="sqm-stichtag" type="date" class="pm-input" value="@sqmStichtag?.ToString("yyyy-MM-dd")" @onchange="SqmStichtagAsync" />
+            <span class="pm-hilfe">Vorbelegt mit dem Änderungsdatum der Datei.</span>
+        </div>
+    </div>
+    @if (sqm is not null)
+    {
+        <MassnahmenVorschau Import="sqm" Anlegen="sqmAnlegen" Geaendert="StateHasChanged" />
+        <BegruendeterButton Text="Übernehmen" Haupt="true" Click="SqmUebernehmenAsync" Beschaeftigt="@beschaeftigt"
+                            Freigabe="@(sqm.Massnahmen.Any(m => m.TopfId is not null || sqmAnlegen.Contains(m.Antragsnummer)) ? Freigabe.Ja : Freigabe.Nein("Keine Maßnahme dieses Teams ausgewählt."))" />
+    }
+</section>
+
+<section class="pm-card">
+    <h2>Investitionsstand per KI-Chat</h2>
+    <p class="pm-small pm-muted">Den Stand der Investitionen gibt es nur als PDF. ProfOMat liest kein PDF – das übernimmt ein KI-Chat Ihrer Wahl:
+        1. Prompt kopieren, 2. zusammen mit dem PDF „Stand Investitionen“ in den KI-Chat geben, 3. das JSON aus der Antwort hier einfügen und prüfen.
+        Das PDF erreicht ProfOMat nicht.</p>
+    <div class="pm-fields">
+        <div class="pm-field">
+            <label class="pm-lbl" for="ki-bereich">Laborbereich (optional)</label>
+            <input id="ki-bereich" class="pm-input" @bind="laborbereich" @bind:event="oninput" placeholder="z. B. Automatisierungstechnik" />
+        </div>
+    </div>
+    <details class="pm-za-tabelle">
+        <summary>Prompt anzeigen</summary>
+        <pre class="pm-signiertext">@InvestitionenJson.Prompt(laborbereich)</pre>
+    </details>
+    <div class="pm-row">
+        <button type="button" class="pm-btn" @onclick="KopierenAsync">Prompt kopieren</button>
+        @if (kopiert is { } k)
+        {
+            <span class="pm-small @(k ? "pm-muted" : "pm-za-krit")">@(k ? "In der Zwischenablage." : "Kopieren nicht möglich – den Prompt oben markieren und kopieren.")</span>
+        }
+    </div>
+    <div class="pm-field">
+        <label class="pm-lbl" for="ki-json">Antwort des KI-Chats (JSON)</label>
+        <textarea id="ki-json" class="pm-textarea pm-mono" rows="8" @bind="json" placeholder="{ &quot;format&quot;: &quot;profomat-investitionen-v1&quot;, … }"></textarea>
+    </div>
+    <div class="pm-row">
+        <BegruendeterButton Text="Prüfen" Click="KiPruefenAsync" Beschaeftigt="@beschaeftigt"
+                            Freigabe="@(string.IsNullOrWhiteSpace(json) ? Freigabe.Nein("Erst das JSON einfügen.") : Freigabe.Ja)" />
+    </div>
+    @if (ki is not null)
+    {
+        <MassnahmenVorschau Import="ki" Anlegen="kiAnlegen" Geaendert="StateHasChanged" />
+        <BegruendeterButton Text="Übernehmen" Haupt="true" Click="KiUebernehmenAsync" Beschaeftigt="@beschaeftigt"
+                            Freigabe="@(ki.Massnahmen.Any(m => m.TopfId is not null || kiAnlegen.Contains(m.Antragsnummer)) ? Freigabe.Ja : Freigabe.Nein("Keine Maßnahme ausgewählt – unbekannte bei „anlegen“ ankreuzen."))" />
+    }
+</section>
+
+@if (fehler is not null)
+{
+    <div class="pm-alert pm-crit" role="alert">@fehler</div>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public Guid TeamId { get; set; }
+
+    [Parameter]
+    public EventCallback Geaendert { get; set; }
+
+    private byte[]? sqmDatei;
+    private DateOnly? sqmStichtag;
+    private Massnahmenimport? sqm, ki;
+    private readonly HashSet<string> sqmAnlegen = new(StringComparer.Ordinal), kiAnlegen = new(StringComparer.Ordinal);
+    private string? json, laborbereich = "Automatisierungstechnik", fehler;
+    private bool beschaeftigt;
+    private bool? kopiert;
+    private IJSObjectReference? modul;
+
+    private async Task SqmGewaehltAsync(InputFileChangeEventArgs e)
+    {
+        fehler = null;
+        try
+        {
+            using var puffer = new MemoryStream();
+            await e.File.OpenReadStream(10 * 1024 * 1024).CopyToAsync(puffer);
+            sqmDatei = puffer.ToArray();
+            sqmStichtag = null;
+            sqmAnlegen.Clear();
+            await SqmVorschauAsync();
+            sqmStichtag = sqm?.Stichtag;
+        }
+        catch (Exception ex) when (ex is FachlicherFehler or IOException)
+        {
+            (fehler, sqm) = (ex.Message, null);
+        }
+    }
+
+    private async Task SqmStichtagAsync(ChangeEventArgs e)
+    {
+        sqmStichtag = DateOnly.TryParse(e.Value as string, System.Globalization.CultureInfo.InvariantCulture, out var d) ? d : null;
+        if (sqmDatei is not null)
+        {
+            await SqmVorschauAsync();
+        }
+    }
+
+    private async Task SqmVorschauAsync()
+    {
+        var datei = sqmDatei!;
+        var tag = sqmStichtag;
+        sqm = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<FinanzDienst>().SqmVorschauAsync(TeamId, datei, tag));
+    }
+
+    private async Task AusfuehrenAsync(Func<FinanzDienst, Task<int>> aktion, Action fertig)
+    {
+        fehler = null;
+        beschaeftigt = true;
+        try
+        {
+            var n = await Vorgang.AusfuehrenAsync(d => aktion(d.GetRequiredService<FinanzDienst>()));
+            Hinweise.Notify(NotificationSeverity.Success, $"{n} Maßnahme(n) übernommen.");
+            fertig();
+            await Geaendert.InvokeAsync();
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+        }
+        finally
+        {
+            beschaeftigt = false;
+        }
+    }
+
+    private Task SqmUebernehmenAsync()
+    {
+        var (datei, tag, anlegen) = (sqmDatei!, sqm!.Stichtag, sqmAnlegen.ToList());
+        return AusfuehrenAsync(d => d.SqmUebernehmenAsync(TeamId, datei, tag, anlegen), () => (sqm, sqmDatei) = (null, null));
+    }
+
+    private async Task KiPruefenAsync()
+    {
+        fehler = null;
+        kiAnlegen.Clear();
+        try
+        {
+            var text = json!;
+            ki = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<FinanzDienst>().InvestitionenVorschauAsync(TeamId, text));
+        }
+        catch (FachlicherFehler ex)
+        {
+            (fehler, ki) = (ex.Message, null);
+        }
+    }
+
+    private Task KiUebernehmenAsync()
+    {
+        var (text, anlegen) = (json!, kiAnlegen.ToList());
+        return AusfuehrenAsync(d => d.InvestitionenUebernehmenAsync(TeamId, text, anlegen), () => (ki, json) = (null, null));
+    }
+
+    private async Task KopierenAsync()
+    {
+        try
+        {
+            modul ??= await JS.InvokeAsync<IJSObjectReference>("import", Navigation.ToAbsoluteUri("finanzen.js").ToString());
+            kopiert = await modul.InvokeAsync<bool>("kopieren", InvestitionenJson.Prompt(laborbereich));
+        }
+        catch (JSException)
+        {
+            kopiert = false;
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (modul is not null)
+        {
+            try
+            {
+                await modul.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+            }
+        }
+    }
+}

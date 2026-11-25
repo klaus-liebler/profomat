@@ -44,14 +44,43 @@ public sealed class PruefungslisteTests
         l.Zeilen.Single().Vorname.ShouldBe("Jörg");
     }
 
+    /// <summary>Liste wie vom Berichtsserver der Hochschule: mehrere Prüfungen in einer Datei.</summary>
+    internal static byte[] MehrerePruefungen() => Encoding.UTF8.GetBytes($"{Kopf}\n"
+        + "Prof. A,PL,Regelungstechnik,11B1370-1-VL-MB,1,1111111,Alpha,Anna,anna.alpha@hs-osnabrueck.de\n"
+        + "Prof. A,PL,Projekt Mechatronik,11B1555-1-PJ-EuI,1,2222222,Beta,Bert,\n"
+        + "Prof. A,PL,Regelungstechnik,11B1370-1-VL-MB,2,3333333,Gamma,Gina,gina.gamma@hs-osnabrueck.de\n"
+        + "Prof. A,PL,Regelungstechnik,11B1370-1-VL-MB,3,12ab,Delta,Dora,\n"
+        + "Prof. A,PL,Projekt Mechatronik,11B1555-1-PJ-EuI,2,44x,Eta,Emil,\n");
+
     [Fact]
-    public void Ungueltige_Matrikelnummern_werden_gemeldet_mehrere_Pruefungen_abgelehnt()
+    public void Ungueltige_Matrikelnummern_werden_gemeldet()
     {
         var l = PruefungslisteLeser.Lesen(Encoding.UTF8.GetBytes($"{Kopf}\nP,E,N,X,1,12ab,A,B,\nP,E,N,X,2,1234567,C,D,\n"));
         l.Zeilen.Count.ShouldBe(1);
         l.Hinweise.Single().ShouldContain("12ab");
-        Should.Throw<FachlicherFehler>(() => PruefungslisteLeser.Lesen(Encoding.UTF8.GetBytes($"{Kopf}\nP,E,N,X,1,1234567,A,B,\nP,E,N,Y,2,7654321,C,D,\n")))
-            .Message.ShouldContain("mehrere Prüfungen");
+        l.AuswahlNoetig.ShouldBeFalse();
+        l.Pruefungsnummer.ShouldBe("X");
+    }
+
+    [Fact]
+    public void Mehrere_Pruefungen_werden_angeboten_und_nur_die_gewaehlte_gelesen()
+    {
+        var alle = PruefungslisteLeser.Lesen(MehrerePruefungen());
+        alle.AuswahlNoetig.ShouldBeTrue();
+        alle.Zeilen.ShouldBeEmpty();
+        alle.Angebot.Select(a => (a.Nummer, a.Name, a.Teilnehmende))
+            .ShouldBe([("11B1370-1-VL-MB", "Regelungstechnik", 3), ("11B1555-1-PJ-EuI", "Projekt Mechatronik", 2)]);
+
+        var rt = PruefungslisteLeser.Lesen(MehrerePruefungen(), "11B1555-1-PJ-EuI");
+        rt.AuswahlNoetig.ShouldBeFalse();
+        rt.Pruefungsnummer.ShouldBe("11B1555-1-PJ-EuI");
+        rt.Pruefungsname.ShouldBe("Projekt Mechatronik");
+        rt.Zeilen.Single().Matrikelnummer.ShouldBe("2222222");
+        rt.Hinweise.Single().ShouldContain("44x");      // nur Hinweise der gewählten Prüfung
+        rt.Angebot.Count.ShouldBe(2);
+
+        Should.Throw<FachlicherFehler>(() => PruefungslisteLeser.Lesen(MehrerePruefungen(), "11X9999"))
+            .Message.ShouldContain("11X9999");
     }
 
     [Fact]
@@ -148,6 +177,26 @@ public sealed class KlausurTests
         var zehn = zeit.AlsUtc(new DateTime(2026, 12, 3, 10, 0, 0));
         zeit.Klausurtermin(zehn).ShouldBe("Donnerstag, 03.12.2026, 10:00 Uhr");
         zeit.Klausuruhrzeit(zehn).ShouldBe("10:00");
+    }
+
+    [Fact]
+    public async Task Liste_mit_mehreren_Pruefungen_braucht_eine_Auswahl_Abgleich_nimmt_die_eigene()
+    {
+        await using var u = await TestUmgebung.StartenAsync();
+        await u.AlsAsync("mustermann");
+        var dienst = (Func<IServiceProvider, KlausurDienst>)(d => d.GetRequiredService<KlausurDienst>());
+        (await Should.ThrowAsync<FachlicherFehler>(() => u.InBereichAsync(d => dienst(d).AusListeAnlegenAsync(
+            PruefungslisteTests.MehrerePruefungen(), null, "RT", null)))).Message.ShouldContain("bitte eine auswählen");
+
+        var (k, ergebnis, _) = await u.InBereichAsync(d => dienst(d).AusListeAnlegenAsync(
+            PruefungslisteTests.MehrerePruefungen(), null, "RT", null, "11B1370-1-VL-MB"));
+        k.Titel.ShouldBe("Regelungstechnik");
+        k.Pruefungsnummer.ShouldBe("11B1370-1-VL-MB");
+        ergebnis.Neu.ShouldBe(2);
+
+        // dieselbe Sammeldatei erneut: nur die Zeilen dieser Klausur zählen, nichts wird abgemeldet
+        var (abgleich, _) = await u.InBereichAsync(d => dienst(d).ListeAbgleichenAsync(k.Id, PruefungslisteTests.MehrerePruefungen()));
+        abgleich.ShouldBe(new ImportErgebnis(0, 0, 0, 0));
     }
 
     [Fact]

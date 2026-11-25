@@ -1,0 +1,187 @@
+@*
+    „Was wäre, wenn“ (FA-717): Betrag, Zweck und Monat eingeben, ProfOMat schlägt eine Aufteilung auf die Töpfe vor; Beträge änderbar,
+    die Zeitachse zeigt die Wirkung; übernehmen legt eine geplante Ausgabe mit Anteilen an.
+*@
+@using ProfOMat.Application.Finanzen
+@using ProfOMat.Domain.Finanzen
+@inject Vorgang Vorgang
+@inject NotificationService Hinweise
+
+<section class="pm-card">
+    <h2>Neue Ausgabe planen und aufteilen</h2>
+    <p class="pm-small pm-muted">Was wäre, wenn …? ProfOMat schlägt vor, aus welchen Töpfen eine neue Ausgabe bezahlt wird: zuerst Mittel, die sonst verfallen
+        oder über der Übertragsgrenze liegen, dann zweckgebundene Mittel, zuletzt die Kostenstelle. Die Aufteilung ist änderbar; gespeichert wird erst beim Übernehmen.</p>
+    <div class="pm-fields">
+        <div class="pm-field">
+            <label class="pm-lbl" for="wa-betrag">Betrag (€)</label>
+            <input id="wa-betrag" class="pm-input" inputmode="decimal" @bind="betrag" />
+        </div>
+        <div class="pm-field">
+            <label class="pm-lbl" for="wa-zweck">Wofür?</label>
+            <select id="wa-zweck" class="pm-select" @bind="zweck">
+                <option value="@Ausgabenzweck.Sachmittel">Sachmittel (Material, Kleingeräte)</option>
+                <option value="@Ausgabenzweck.Geraet">Gerät / Ausstattung (auch Investitionsmittel)</option>
+            </select>
+        </div>
+        <div class="pm-field">
+            <label class="pm-lbl" for="wa-monat">Monat</label>
+            <input id="wa-monat" type="month" class="pm-input" value="@monat" @onchange="e => monat = e.Value as string" />
+        </div>
+    </div>
+    <div class="pm-row">
+        <BegruendeterButton Text="Aufteilung vorschlagen" Haupt="@(vorschlag is null)" Click="VorschlagenAsync" Beschaeftigt="@beschaeftigt"
+                            Freigabe="@(string.IsNullOrWhiteSpace(betrag) || FinanzAnzeige.Monat(monat) is null ? Freigabe.Nein("Bitte Betrag und Monat angeben.") : Freigabe.Ja)" />
+    </div>
+    @if (fehler is not null)
+    {
+        <div class="pm-alert pm-crit" role="alert">@fehler</div>
+    }
+
+    @if (vorschlag is not null)
+    {
+        @foreach (var h in vorschlag.Hinweise)
+        {
+            <div class="pm-alert @(h.StartsWith("Im gewünschten Monat fehlen", StringComparison.Ordinal) ? "pm-warn" : "pm-info")" role="status">@h</div>
+        }
+        <div class="pm-tbl">
+            <table>
+                <thead><tr><th>Topf</th><th>Warum</th><th class="pm-geld">Anteil (€)</th></tr></thead>
+                <tbody>
+                    @foreach (var z in zeilen)
+                    {
+                        var zeile = z;
+                        <tr>
+                            <td class="pm-nowrap">@zeile.Topf.Anzeige</td>
+                            <td class="pm-small">@zeile.Grund</td>
+                            <td class="pm-geld"><input class="pm-input pm-fin-betrag" inputmode="decimal" value="@zeile.Betrag" @onchange="e => AnteilGeaendertAsync(zeile, e)"
+                                                       aria-label="@($"Anteil {zeile.Topf.Kennung}")" /></td>
+                        </tr>
+                    }
+                </tbody>
+                <tfoot><tr><td colspan="2"><b>Summe</b>@(Summe != Gesamt ? $" (gewünscht {Geld.Text(Gesamt)})" : "")</td><td class="pm-geld"><b>@Geld.Text(Summe)</b></td></tr></tfoot>
+            </table>
+        </div>
+        <p class="pm-small pm-muted">Weitere Töpfe mit 0 € stehen zur Auswahl in der Tabelle – Betrag eintragen, die Zeitachse rechnet neu.</p>
+
+        <h3>Wirkung auf die Zeitachse</h3>
+        <FinanzZeitachse Achse="@achse" AlleToepfe="@AlleToepfe" />
+
+        <div class="pm-fields">
+            <div class="pm-field pm-field-weit">
+                <label class="pm-lbl" for="wa-bez">Bezeichnung</label>
+                <input id="wa-bez" class="pm-input" @bind="bezeichnung" @bind:event="oninput" maxlength="@GeplanteAusgabe.TextMaxLaenge" placeholder="z. B. Oszilloskop für das Embedded-Labor" />
+            </div>
+        </div>
+        <div class="pm-row">
+            <BegruendeterButton Text="Als geplante Ausgabe übernehmen" Haupt="true" Click="UebernehmenAsync" Beschaeftigt="@beschaeftigt"
+                                Freigabe="@(string.IsNullOrWhiteSpace(bezeichnung) ? Freigabe.Nein("Bitte eine Bezeichnung eingeben.")
+                                           : Summe <= 0 ? Freigabe.Nein("Kein Topf hat einen Anteil.") : Freigabe.Ja)" />
+            <button type="button" class="pm-btn" @onclick="Verwerfen">Verwerfen</button>
+        </div>
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired]
+    public Guid TeamId { get; set; }
+
+    [Parameter, EditorRequired]
+    public IReadOnlyList<Topf> AlleToepfe { get; set; } = [];
+
+    [Parameter]
+    public EventCallback Geaendert { get; set; }
+
+    private sealed class Zeile
+    {
+        public required Topf Topf { get; init; }
+
+        public string Grund { get; init; } = "";
+
+        public string Betrag { get; set; } = "0";
+    }
+
+    private string? betrag, monat, bezeichnung, fehler;
+    private Ausgabenzweck zweck = Ausgabenzweck.Geraet;
+    private Aufteilung? vorschlag;
+    private List<Zeile> zeilen = [];
+    private Zeitachse? achse;
+    private bool beschaeftigt;
+
+    private decimal Summe => zeilen.Sum(z => decimal.TryParse(z.Betrag, System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.GetCultureInfo("de-DE"), out var d) ? d : 0);
+
+    private decimal Gesamt => decimal.TryParse(betrag, System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.GetCultureInfo("de-DE"), out var d) ? d : 0;
+
+    protected override void OnParametersSet() => monat ??= FinanzAnzeige.MonatWert(FinanzAnzeige.NaechsterMonat());
+
+    private async Task VorschlagenAsync()
+    {
+        fehler = null;
+        beschaeftigt = true;
+        try
+        {
+            var m = FinanzAnzeige.Monat(monat)!.Value;
+            vorschlag = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<FinanzDienst>().AufteilenAsync(TeamId, Geld.Lesen(betrag, "Betrag"), zweck, m));
+            var aktiv = AlleToepfe.Where(t => !t.Archiviert && Aufteilungsrechnung.Passt(t, zweck, m)).ToList();
+            zeilen = [.. vorschlag.Anteile.Select(a => new Zeile { Topf = a.Topf, Grund = a.Grund, Betrag = Geld.Eingabe(a.Betrag) }),
+                      .. aktiv.Where(t => vorschlag.Anteile.All(a => a.Topf.Id != t.Id)).Select(t => new Zeile { Topf = t, Grund = "nicht vorgeschlagen" })];
+            await WirkungAsync();
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+        }
+        finally
+        {
+            beschaeftigt = false;
+        }
+    }
+
+    private List<Anteil> Anteile() => [.. zeilen.Select(z => new Anteil(z.Topf.Id, Geld.Lesen(z.Betrag, $"Anteil {z.Topf.Kennung}"))).Where(a => a.Betrag > 0)];
+
+    private async Task WirkungAsync()
+    {
+        var m = FinanzAnzeige.Monat(monat)!.Value;
+        var anteile = Anteile();
+        achse = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<FinanzDienst>().ZeitachseAsync(TeamId, anteile, m));
+    }
+
+    private async Task AnteilGeaendertAsync(Zeile z, ChangeEventArgs e)
+    {
+        fehler = null;
+        z.Betrag = e.Value as string ?? "0";
+        try
+        {
+            await WirkungAsync();
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+        }
+    }
+
+    private void Verwerfen() => (vorschlag, achse, zeilen, bezeichnung) = (null, null, [], null);
+
+    private async Task UebernehmenAsync()
+    {
+        fehler = null;
+        beschaeftigt = true;
+        try
+        {
+            var m = FinanzAnzeige.Monat(monat)!.Value;
+            var anteile = Anteile();
+            await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<FinanzDienst>().AusgabeAnlegenAsync(TeamId, bezeichnung!, m, anteile, "aus „Neue Ausgabe planen und aufteilen“"));
+            Hinweise.Notify(NotificationSeverity.Success, "Als geplante Ausgabe übernommen.");
+            Verwerfen();
+            betrag = null;
+            await Geaendert.InvokeAsync();
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+        }
+        finally
+        {
+            beschaeftigt = false;
+        }
+    }
+}

@@ -113,3 +113,102 @@ Für die echte Quelle kommt infrage (mit dem IT-Service zu klären, welches Camp
   Optional später ein fertiges Deckblatt-PDF je Klausur mit QR-Code (Schlüssel) für das schnelle Punkte-Eintragen.
 - **Bewertung:** Aufgaben mit Höchstpunkten, Notenschlüssel als Tabelle (Untergrenzen), Berechnung im Fachmodell, Statistik wie in der
   bisherigen Excel-Vorlage; Ausgabe PDF (MigraDoc mit Balkendiagramm) und XLSX.
+
+## Finanzen (Iteration 6, Entwurf)
+
+### Regeln der Fakultät IuI (Quellen: Haushaltsinfos 2026, Budgetierungskonzept 2004, FR-Beschlüsse 2017/2020, Budgetierungsrichtlinie 2026)
+
+- **Sachmittelbudget der Laborkostenstelle** (im Januar verabschiedet, als „Budget Sachmittel Fak“, Kostenart 930300, zum 01.01. gebucht):
+  Vorjahresdaten mit 12,50 € je Studierendem und anrechenbarer SWS (Praktika, Projekte, Studienarbeiten; gezählt werden Anmeldungen
+  in Campusnet, nicht bestandene Leistungen; welche Veranstaltung mit wie vielen SWS anrechenbar ist, regelt die FR-Liste
+  „Budgetierungsfähige Lehrveranstaltungen“), 200 € je verfallener SWS (höchstens 800 € je Semester) und je nicht anrechenbarer SWS
+  aus Abschlussarbeiten, dazu personenbezogen 1.250 € je Prof./LfbA (nach Stellenhülsen) und 800 € je WM/MTV/Doktorand/in.
+  Frei verwendbar; der Rest wird vorgetragen (930601 „Budget aus Vorjahr“ bzw. 930600 „Saldo aus Vorjahren“, gebucht im Februar bis Juni).
+- **Investitionen:** Volumen und Aufteilung nach Stellenhülsen im Januar, Anträge der Laborbereiche (Bagatellgrenze 2.000 €), Beschluss
+  im Fakultätsrat (März bis Mai). Jede Maßnahme hat einen eigenen Innenauftrag (71…), zweckgebunden; Bestellschluss 31.08. des
+  Folgejahres. Reste gehen nach Abschluss an den Sammelauftrag der Fakultät zurück.
+- **Studienqualitätsmittel:** Anträge im Oktober für SoSe und WiSe des Folgejahres (Bagatellgrenze 2.000 €), Bewilligung durch das Präsidium
+  im Dezember/Januar, Mittelfreigabe 01.03., Verausgabung bis 31.01. des Folgejahres (Stichtag: Rechnungsabgabe). Projektbezogen abzurechnen,
+  keine Verrechnung innerhalb des Bereichs; deshalb ist **jeder Antrag ein eigener Topf**. Kategorien laut Antragsformular (1 Fakultäts-Overhead
+  … 8 Internationales); Personalkosten nach den „Verrechnungswerten“ bzw. der „Haushaltsbelastung“ je Stunde.
+
+### Modell
+
+- `Laborteam` (Name, Mitglieder = Konten) – Zugriff ausschließlich über die Mitgliedschaft (`FinanzDienst` prüft jede Aktion).
+- `Topf` (Art Kostenstelle | Investition | Sqm, Kennung = KST-Nummer bzw. Antragsnummer, Innenauftrag, Bezeichnung, bewilligt
+  Personal/Sach, Kategorie, Laufzeit von/bis, Bestellschluss, Rechnungsschluss, verantwortlich, archiviert).
+- `Buchung` (Topf, Jahr, Erfasst, Belegdatum, Buchungsdatum, Kostenart, Kostenartbezeichnung, Betrag, Text, Belegnummer) – nur
+  Kostenstelle und Investitionen; `Kostenstellenstand` je Topf und Jahr (Stand der Datei, Exportdatum aus dem Dateinamen, Prüfsumme).
+- `Massnahmenstand` (Topf, Stichtag, verausgabt, Quelle Excel | KI-JSON | Hand) – für SQM, deren Einzelbuchungen nicht vorliegen.
+- `GeplanteAusgabe` mit `Anteil`en je Topf, `Auslagenabrechnung` mit `Auslagenposition`en, `Hilfskraftbeschaeftigung` mit Anteilen,
+  `Stundensatz` (Jahr, Art, €/Std).
+
+### Rechenregeln
+
+- **Vorzeichen im SAP-Auszug:** positiv = Ausgabe, negativ = Zugang (Budget, Vortrag, Zuweisung, Gutschrift, Erlös). Rest = −Σ Beträge.
+- **Verfügbar** = −Σ Zugänge des Jahres (bei fehlendem Vortrag zusätzlich „Vortrag erwartet“ = Rest des Vorjahres, gekennzeichnet).
+  **Ausgegeben** = Σ Ausgaben. **Gebunden** = offene geplante Ausgaben + offene/eingereichte Auslagen + Hilfskraft-Monate nach dem
+  letzten Buchungsmonat des Ist-Stands. **Frei** = Verfügbar − Ausgegeben − Gebunden.
+- **Zuordnung zur Laufzeit nach Belegdatum**, nicht nach Buchungsdatum: SQM-Rechnungen bis 31.01. werden oft erst im Februar/März gebucht.
+- **Ersetzen statt Abgleichen:** Der SAP-Auszug hat keinen eindeutigen Schlüssel (Belegnummern fehlen oder gelten für mehrere Positionen,
+  Stornos und Neubuchungen). Weil jede Datei den ganzen Jahresstand enthält, ersetzt der neueste Stand das Jahr. Verknüpfungen geplanter
+  Ausgaben mit Buchungen werden über einen Fingerabdruck (Belegdatum, Kostenart, Betrag, Text, Belegnummer, laufende Nummer bei
+  Gleichheit) beim Ersetzen übernommen; was nicht mehr passt, wird zur Prüfung markiert.
+
+- **Übertragsgrenze (FA-715):** Grenze = 12 % × „Budget Sachmittel Fak“ des laufenden Jahres. Prognose zum 31.12. = Frei ohne die
+  Bindungen, die erst nach dem 31.12. fällig sind. Warnung, wenn die Prognose die Grenze übersteigt; Betrag = Prognose − Grenze.
+- **Zeitachse (FA-716):** Monatsraster; jeder Topf ist eine Reihe (Anfangswert = Frei heute + Bindungen, dann Abflüsse im Monat ihrer
+  Fälligkeit, Zugänge im Monat ihrer Freigabe). Erwartete Werte sind von gebuchten getrennt (andere Darstellung). Nach dem Laufzeitende
+  eines SQM-Topfs wird der Rest als „verfällt“ ausgewiesen und fällt auf 0; bei der Kostenstelle wird zum 01.01. der Übertrag über der
+  Grenze als „Einzug möglich“ markiert, aber nicht abgezogen. Darstellung mit `RadzenChart` (kein neues Paket), Tabelle darunter für
+  390 px und Barrierefreiheit.
+- **Aufteilen (FA-717):** reine Funktion im Fachmodell (`Aufteilung.Vorschlagen(betrag, zweck, monat, töpfe)`), Reihenfolge:
+  (1) Mittel mit Verfall vor dem übernächsten Monat bzw. Überhang über der Übertragsgrenze, (2) zweckgebundene Töpfe passenden Zwecks
+  mit früherem Laufzeitende zuerst, (3) Laborkostenstelle. Nur Töpfe, deren Laufzeit/Bestellschluss den gewünschten Monat abdeckt.
+
+- **Hilfskräfte (FA-708/709):** Monatskosten = Stunden × Satz des Jahres („Haushaltsbelastung“; eigener Wert des Teams für das Jahr
+  oder den letzten früheren, sonst Fakultät 2026) × Anteil. Gebunden sind die Monate nach dem Ist-Stand des Topfs (Kostenstelle:
+  Monat der letzten Buchung; Maßnahme: Stichtag des Stands). Der Rechner verteilt ganze Monate, zuerst auf Töpfe, die früher
+  auslaufen, die Kostenstelle zuletzt; übernommen wird je Abschnitt eine Beschäftigung zu 100 % aus diesem Topf.
+- **Auslagen (FA-707):** binden bis „erstattet“, fällig 30 Tage nach der Einreichung (bzw. ab heute, solange offen).
+
+- **SQM-Excel (FA-704):** Leser in der Infrastruktur (ClosedXML), Kopfzeile mit „Antrag-Nr.“ je Blatt. Übernommen werden nur Anträge, die
+  schon Töpfe des Teams sind, oder deren Antragsteller/in (Nachname) zum Team gehört – und diese nur auf Auswahl; alle anderen Zeilen
+  werden gezählt, aber weder angezeigt noch gespeichert. Ein neuer Stand entsteht nur bei geändertem Stichtag oder Betrag.
+
+- **Buchungsnotizen (FA-718):** Schlüssel (Topf, Fingerabdruck); Fingerabdruck = Belegdatum, Kostenart, Betrag, Text, Belegnummer. Gleiche Buchungen
+  teilen sich eine Notiz. Nach einem Import ohne passende Buchung „verwaist“ die Notiz (bleibt sichtbar, löschbar).
+- **Einzelbuchungen (FA-705):** zählen zum Stand einer Maßnahme hinzu, soweit ihr Datum nach dessen Stichtag liegt (frühere sind im Stand enthalten).
+- **Budgetprognose (FA-713):** je Kostenstelle und Budgetjahr; die gespeicherte Prognose des Folgejahres ersetzt in der Zeitachse den Vorjahreswert
+  des Januar-Budgets. Neue Prognosen übernehmen Personen, Veranstaltungen (Semester weitergezählt) und Sätze aus dem Vorjahr als Vorlage.
+- **Erinnerungen (FA-712):** Quartz-Job täglich 7:00 (`Finanzen:ErinnerungCron`), Schlüssel je Frist (Datum + Topf bzw. Text) in `Finanzerinnerungen`.
+- **Berufungsmittel:** Auftrag 58216001 (Berufungs- und Bleibemittel, Richtlinie Ziffer 5.4 Abs. 5) fließt über den Vortrag in die Kostenstelle;
+  er zählt nicht zur Bezugsgröße der Übertragsgrenze.
+
+### Stand per KI-Chat (FA-703)
+
+Die Investitionsliste gibt es nur als PDF. Statt eines eigenen PDF-Parsers liefert ProfOMat einen Prompt; die Auswertung macht ein
+KI-Chat nach Wahl der Lehrenden, ProfOMat prüft nur das Ergebnis. Format (Beträge in Euro als Zahl, Rest positiv = noch verfügbar):
+
+```json
+{
+  "format": "profomat-investitionen-v1",
+  "stichtag": "2026-10-27",
+  "massnahmen": [
+    {
+      "antragsnummer": "AUT-07-26",
+      "laborbereich": "Automatisierungstechnik",
+      "budget": 3200.00,
+      "ausgegeben": 0.00,
+      "rest": 3200.00,
+      "buchungen": [
+        { "datum": "2026-07-17", "kostenart": "980800", "betrag": 7482.36, "text": "Dell/6x PC …" }
+      ]
+    }
+  ]
+}
+```
+
+Prüfungen: Format und Stichtag, `budget − ausgegeben = rest` (auf 1 ct), Summe der Buchungen = `ausgegeben`; Abweichungen werden
+gezeigt, nicht still korrigiert. Im Prompt steht ausdrücklich, dass im PDF negative Salden noch verfügbare Mittel bedeuten und dass die
+Budgetzeilen (930300) keine Ausgaben sind.

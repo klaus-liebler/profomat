@@ -1,0 +1,126 @@
+@*
+    Optische Mailsignatur: Outlook-Signaturdateien hochladen; ProfOMat hängt sie an jeden Mailentwurf (.eml). S/MIME setzt Outlook beim Senden.
+*@
+@using ProfOMat.Application.Betrieb
+@using ProfOMat.Domain.Betrieb
+@inject Vorgang Vorgang
+@inject Ortszeit Zeit
+@inject NotificationService Hinweise
+
+<section class="pm-card" id="mailsignatur">
+    <h2>Mailsignatur für Mailentwürfe</h2>
+    <p>Mails, die ProfOMat für Sie vorbereitet (z. B. Themenbestätigungen der Hausarbeit), öffnen sich in Ihrem Desktop-Outlook als neue Mail –
+        mit dieser Signatur am Ende. Sie müssen nur noch auf „Senden“ klicken.</p>
+    @if (signatur is { } s)
+    {
+        <p><StatusPille Stil="gut">hinterlegt</StatusPille> <span class="pm-small pm-muted">am @Zeit.Kurz(s.Aktualisiert) · @s.Bilder.Count Bild(er)</span></p>
+        <pre class="pm-signiertext">@s.Text</pre>
+    }
+    else
+    {
+        <p><StatusPille Stil="neutral">noch keine</StatusPille> Ohne Signatur enthalten die Mails nur den Text.</p>
+    }
+
+    <ol class="pm-small">
+        <li>Im Explorer <span class="pm-mono">%APPDATA%\Microsoft\Signatures</span> öffnen.</li>
+        <li>Bei <b>Signaturdatei</b> die <span class="pm-mono">.htm</span>-Datei Ihrer Signatur wählen (gern zusätzlich die gleichnamige <span class="pm-mono">.txt</span>).</li>
+        <li>Bei <b>Bilder</b> alle Bilder aus dem gleichnamigen Ordner „…-Dateien“ wählen (schadet nie; enthält die .htm-Datei die Bilder schon selbst,
+            werden sie nicht gebraucht).</li>
+    </ol>
+    <div class="pm-fields">
+        <div class="pm-field">
+            <label class="pm-lbl" for="sig-htm">Signaturdatei (.htm, optional .txt)</label>
+            <InputFile id="sig-htm" OnChange="HtmlGewaehltAsync" accept=".htm,.html,.txt" multiple class="pm-input" />
+        </div>
+        <div class="pm-field">
+            <label class="pm-lbl" for="sig-bilder">Bilder (.png, .jpg, .gif)</label>
+            <InputFile id="sig-bilder" OnChange="BilderGewaehltAsync" accept=".png,.jpg,.jpeg,.gif" multiple class="pm-input" />
+        </div>
+    </div>
+    @if (fehler is not null)
+    {
+        <div class="pm-alert pm-crit" role="alert">@fehler</div>
+    }
+    @if (hinweise.Count > 0)
+    {
+        <ul class="pm-small">@foreach (var h in hinweise) { <li>@h</li> }</ul>
+    }
+    <div class="pm-row">
+        <BegruendeterButton Text="Signatur übernehmen" Haupt="true" Click="UebernehmenAsync" Beschaeftigt="@beschaeftigt"
+                            Freigabe="@(texte.Any(d => !d.Name.EndsWith(".txt", StringComparison.OrdinalIgnoreCase)) ? Freigabe.Ja : Freigabe.Nein("Bitte zuerst die .htm-Datei wählen."))" />
+        @if (signatur is not null)
+        {
+            <a class="pm-btn" href="profil/testmail.eml" data-enhance-nav="false" download>Testmail an mich in Outlook öffnen</a>
+            <BegruendeterButton Text="Signatur entfernen" Gefahr="true" Click="EntfernenAsync" />
+        }
+    </div>
+    <p class="pm-small pm-muted">Die digitale Unterschrift (S/MIME) setzt Outlook beim Senden, wenn unter <i>Datei → Optionen → Trust Center →
+        E-Mail-Sicherheit</i> „Ausgehenden Nachrichten digitale Signatur hinzufügen“ eingeschaltet ist. Mit der Testmail prüfen Sie beides.</p>
+</section>
+
+@code {
+    private Mailsignatur? signatur;
+    private List<HochgeladeneDatei> texte = [], bilder = [];
+    private List<string> hinweise = [];
+    private string? fehler;
+    private bool beschaeftigt;
+
+    protected override async Task OnInitializedAsync() => await LadenAsync();
+
+    private async Task LadenAsync() => signatur = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<Mailsignaturen>().MeineAsync());
+
+    private async Task HtmlGewaehltAsync(InputFileChangeEventArgs e) => texte = await LesenAsync(e, Mailsignaturen.HtmlMaxBytes, 2);
+
+    private async Task BilderGewaehltAsync(InputFileChangeEventArgs e) => bilder = await LesenAsync(e, Mailsignatur.BildMaxBytes, Mailsignatur.MaxBilder);
+
+    private async Task<List<HochgeladeneDatei>> LesenAsync(InputFileChangeEventArgs e, long maxBytes, int maxDateien)
+    {
+        fehler = null;
+        var ergebnis = new List<HochgeladeneDatei>();
+        try
+        {
+            foreach (var datei in e.GetMultipleFiles(maxDateien))
+            {
+                using var puffer = new MemoryStream();
+                await datei.OpenReadStream(maxBytes).CopyToAsync(puffer);
+                ergebnis.Add(new HochgeladeneDatei(datei.Name, puffer.ToArray()));
+            }
+        }
+        catch (Exception ex) when (ex is IOException or InvalidOperationException)
+        {
+            fehler = $"Zu viele oder zu große Dateien (höchstens {maxDateien} Dateien, je {maxBytes / 1024} KB).";
+            ergebnis.Clear();
+        }
+
+        return ergebnis;
+    }
+
+    private async Task UebernehmenAsync()
+    {
+        fehler = null;
+        beschaeftigt = true;
+        try
+        {
+            var dateien = texte.Concat(bilder).ToList();
+            var ergebnis = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<Mailsignaturen>().HochladenAsync(dateien));
+            hinweise = ergebnis.Hinweise.ToList();
+            Hinweise.Notify(NotificationSeverity.Success, $"Signatur übernommen ({ergebnis.Bilder} Bild(er) eingebettet).");
+            await LadenAsync();
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+        }
+        finally
+        {
+            beschaeftigt = false;
+        }
+    }
+
+    private async Task EntfernenAsync()
+    {
+        await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<Mailsignaturen>().EntfernenAsync());
+        hinweise = [];
+        await LadenAsync();
+    }
+}

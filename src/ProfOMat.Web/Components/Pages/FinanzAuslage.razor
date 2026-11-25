@@ -1,0 +1,261 @@
+@page "/finanzen/{TeamId:guid}/auslagen/{Id:guid}"
+@attribute [Authorize]
+@using ProfOMat.Application.Finanzen
+@using ProfOMat.Domain.Finanzen
+@inject Vorgang Vorgang
+@inject NotificationService Hinweise
+@inject NavigationManager Navigation
+
+<PageTitle>@(ansicht?.Abrechnung.Bezeichnung ?? "Auslagen") · Finanzen · ProfOMat</PageTitle>
+
+@if (ladefehler is not null)
+{
+    <section class="pm-card"><h1>Auslagenabrechnung</h1><div class="pm-alert pm-crit" role="alert">@ladefehler</div><p><a href="finanzen">Zur Übersicht</a></p></section>
+}
+else if (ansicht is not null)
+{
+    var a = ansicht.Abrechnung;
+    <p class="pm-small"><a href="finanzen/@TeamId?bereich=auslagen">← Zu den Auslagen</a></p>
+    <div class="pm-head">
+        <div>
+            <h1>@a.Bezeichnung</h1>
+            <p>Vorfinanziert von @ansicht.Person · @a.Positionen.Count Position(en) · @Geld.Text(a.Summe)</p>
+        </div>
+        <div class="pm-row">
+            <StatusPille Stil="@FinanzAuslagen.Stil(a.Stand)">@FinanzAuslagen.StandText(a)</StatusPille>
+        </div>
+    </div>
+
+    @if (fehler is not null)
+    {
+        <div class="pm-alert pm-crit" role="alert">@fehler</div>
+    }
+
+    @foreach (var h in ansicht.Hinweise)
+    {
+        <div class="pm-alert pm-warn" role="status">@h.Text</div>
+    }
+
+    <section class="pm-card">
+        <h2>Positionen</h2>
+        @if (a.Positionen.Count == 0)
+        {
+            <p class="pm-muted">Noch keine – unten die erste Position eintragen.</p>
+        }
+        else
+        {
+            <div class="pm-tbl">
+                <table>
+                    <thead><tr><th>Nr.</th><th>Kauf</th><th>Händler</th><th>Artikel</th><th>Topf</th><th class="pm-geld">Betrag</th><th></th></tr></thead>
+                    <tbody>
+                        @foreach (var p in a.PositionenSortiert)
+                        {
+                            <tr class="@(ansicht.Hinweise.Any(h => h.PositionId == p.Id) ? "pm-hervor" : null)">
+                                <td>@p.Nr</td>
+                                <td class="pm-nowrap">@p.Kaufdatum.ToString("dd.MM.yyyy")</td>
+                                <td>@p.Haendler</td>
+                                <td>@p.Artikel</td>
+                                <td class="pm-nowrap">@Kennung(p.TopfId)</td>
+                                <td class="pm-geld">@Geld.Text(p.Betrag)</td>
+                                <td class="pm-nowrap">
+                                    @if (a.Aenderbar.Erlaubt)
+                                    {
+                                        <button type="button" class="pm-linkbutton" @onclick="() => Bearbeiten(p)">ändern</button>
+                                        <button type="button" class="pm-linkbutton" @onclick="() => EntfernenAsync(p)">entfernen</button>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                    <tfoot>
+                        @foreach (var g in a.Positionen.GroupBy(p => p.TopfId).OrderBy(g => Kennung(g.Key), StringComparer.Ordinal))
+                        {
+                            <tr><td colspan="5">Summe @Kennung(g.Key)</td><td class="pm-geld">@Geld.Text(g.Sum(p => p.Betrag))</td><td></td></tr>
+                        }
+                        <tr><td colspan="5"><b>Gesamt</b></td><td class="pm-geld"><b>@Geld.Text(a.Summe)</b></td><td></td></tr>
+                    </tfoot>
+                </table>
+            </div>
+        }
+
+        @if (a.Aenderbar.Erlaubt)
+        {
+            <h3>@(bearbeitet is null ? "Position eintragen" : $"Position {bearbeitet.Nr} ändern")</h3>
+            <div class="pm-fields">
+                <div class="pm-field">
+                    <label class="pm-lbl" for="p-datum">Kaufdatum</label>
+                    <input id="p-datum" type="date" class="pm-input" @bind="kaufdatum" />
+                </div>
+                <div class="pm-field">
+                    <label class="pm-lbl" for="p-haendler">Händler</label>
+                    <input id="p-haendler" class="pm-input" @bind="haendler" maxlength="100" placeholder="z. B. Reichelt" />
+                </div>
+                <div class="pm-field pm-field-weit">
+                    <label class="pm-lbl" for="p-artikel">Artikel</label>
+                    <input id="p-artikel" class="pm-input" @bind="artikel" maxlength="200" />
+                </div>
+                <div class="pm-field">
+                    <label class="pm-lbl" for="p-betrag">Betrag brutto (€)</label>
+                    <input id="p-betrag" class="pm-input" inputmode="decimal" @bind="betrag" />
+                </div>
+                <div class="pm-field">
+                    <label class="pm-lbl" for="p-topf">Topf</label>
+                    <select id="p-topf" class="pm-select" @bind="topfId">
+                        <option value="">– Topf wählen –</option>
+                        @foreach (var t in toepfe.Where(t => !t.Archiviert))
+                        {
+                            <option value="@t.Id">@t.Anzeige</option>
+                        }
+                    </select>
+                </div>
+            </div>
+            <div class="pm-row">
+                <BegruendeterButton Text="@(bearbeitet is null ? "Position eintragen" : "Speichern")" Haupt="true" Click="PositionAsync" Beschaeftigt="@beschaeftigt"
+                                    Freigabe="@(kaufdatum is null || string.IsNullOrWhiteSpace(haendler) || string.IsNullOrWhiteSpace(artikel) || string.IsNullOrWhiteSpace(betrag) || !Guid.TryParse(topfId, out _)
+                                               ? Freigabe.Nein("Bitte Kaufdatum, Händler, Artikel, Betrag und Topf angeben.") : Freigabe.Ja)" />
+                @if (bearbeitet is not null)
+                {
+                    <button type="button" class="pm-btn" @onclick="Leeren">Abbrechen</button>
+                }
+            </div>
+        }
+    </section>
+
+    <section class="pm-card">
+        <h2>Stand der Abrechnung</h2>
+        <div class="pm-row">
+            @if (a.Stand == Auslagenstand.Offen)
+            {
+                <BegruendeterButton Text="Als eingereicht markieren" Haupt="true" Click="() => StandAsync(Auslagenstand.Eingereicht)" Beschaeftigt="@beschaeftigt"
+                                    Freigabe="@(a.Positionen.Count == 0 ? Freigabe.Nein("Erst Positionen eintragen.") : Freigabe.Ja)" />
+                <BegruendeterButton Text="Löschen" Gefahr="true" Click="LoeschenAsync" Beschaeftigt="@beschaeftigt" />
+            }
+            else
+            {
+                <BegruendeterButton Text="Wieder öffnen" Click="() => StandAsync(Auslagenstand.Offen)" Beschaeftigt="@beschaeftigt" />
+                @if (a.Stand == Auslagenstand.Eingereicht)
+                {
+                    <BegruendeterButton Text="Erstattet (steht im Ist-Stand)" Haupt="true" Click="() => StandAsync(Auslagenstand.Erstattet)" Beschaeftigt="@beschaeftigt" />
+                }
+            }
+        </div>
+        <p class="pm-small pm-muted">„Erstattet“ erst setzen, wenn die Beträge in der Kostenstelle bzw. im Stand der Maßnahmen stehen – bis dahin binden sie Mittel.</p>
+        <NaechsteSchritte Schritte="@([new NaechsterSchritt("Aufstellung je Topf (Excel)", $"finanzen/{TeamId}/auslagen/{Id}/aufstellung.xlsx",
+                                           "Übersicht und je Topf ein Blatt – Anlage zum Abrechnungsformular",
+                                           a.Positionen.Count == 0 ? Freigabe.Nein("Erst Positionen eintragen.") : null, Hauptschritt: a.Stand == Auslagenstand.Offen),
+                                       new NaechsterSchritt("Zum Cockpit", $"finanzen/{TeamId}")])" />
+    </section>
+}
+
+@code {
+    [Parameter]
+    public Guid TeamId { get; set; }
+
+    [Parameter]
+    public Guid Id { get; set; }
+
+    private Auslagenansicht? ansicht;
+    private IReadOnlyList<Topf> toepfe = [];
+    private Auslagenposition? bearbeitet;
+    private DateOnly? kaufdatum;
+    private string? haendler, artikel, betrag, topfId, fehler, ladefehler;
+    private bool beschaeftigt;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        try
+        {
+            await LadenAsync();
+        }
+        catch (FachlicherFehler ex)
+        {
+            ladefehler = ex.Message;
+        }
+    }
+
+    private async Task LadenAsync()
+    {
+        ansicht = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<FinanzDienst>().AuslageAsync(TeamId, Id));
+        toepfe = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<FinanzDienst>().ToepfeAsync(TeamId));
+    }
+
+    private string Kennung(Guid id) => toepfe.FirstOrDefault(t => t.Id == id)?.Kennung ?? "unbekannt";
+
+    private void Leeren() => (bearbeitet, kaufdatum, artikel, betrag) = (null, null, null, null);
+
+    private void Bearbeiten(Auslagenposition p)
+    {
+        bearbeitet = p;
+        (kaufdatum, haendler, artikel, betrag, topfId) = (p.Kaufdatum, p.Haendler, p.Artikel, Geld.Eingabe(p.Betrag), p.TopfId.ToString());
+    }
+
+    private async Task AusfuehrenAsync(Func<FinanzDienst, Task> aktion, string? erfolg = null)
+    {
+        if (beschaeftigt)
+        {
+            return;
+        }
+
+        fehler = null;
+        beschaeftigt = true;
+        try
+        {
+            await Vorgang.AusfuehrenAsync(d => aktion(d.GetRequiredService<FinanzDienst>()));
+            if (erfolg is not null)
+            {
+                Hinweise.Notify(NotificationSeverity.Success, erfolg);
+            }
+
+            await LadenAsync();
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+        }
+        finally
+        {
+            beschaeftigt = false;
+        }
+    }
+
+    private async Task PositionAsync()
+    {
+        var pos = bearbeitet?.Id;
+        // Händler bleibt für die nächste Position stehen (oft mehrere Käufe beim selben Händler)
+        await AusfuehrenAsync(d =>
+        {
+            var b = Geld.Lesen(betrag, "Betrag");
+            var t = Guid.Parse(topfId!);
+            return pos is { } p ? d.PositionAendernAsync(TeamId, Id, p, kaufdatum!.Value, haendler!, artikel!, b, t)
+                : d.PositionHinzufuegenAsync(TeamId, Id, kaufdatum!.Value, haendler!, artikel!, b, t);
+        });
+        if (fehler is null)
+        {
+            Leeren();
+        }
+    }
+
+    private Task EntfernenAsync(Auslagenposition p) => AusfuehrenAsync(d => d.PositionEntfernenAsync(TeamId, Id, p.Id), $"Position {p.Nr} entfernt.");
+
+    private Task StandAsync(Auslagenstand s) => AusfuehrenAsync(d => d.AuslageStandAsync(TeamId, Id, s), s switch
+    {
+        Auslagenstand.Eingereicht => "Als eingereicht markiert.",
+        Auslagenstand.Erstattet => "Erstattet – bindet keine Mittel mehr.",
+        _ => "Wieder offen.",
+    });
+
+    private async Task LoeschenAsync()
+    {
+        fehler = null;
+        try
+        {
+            await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<FinanzDienst>().AuslageLoeschenAsync(TeamId, Id));
+            Hinweise.Notify(NotificationSeverity.Success, "Abrechnung gelöscht.");
+            Navigation.NavigateTo($"finanzen/{TeamId}?bereich=auslagen");
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+        }
+    }
+}

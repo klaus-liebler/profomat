@@ -53,13 +53,18 @@ public sealed class KlausurDienst(IDaten daten, IAktuellerBenutzer aktuell, IKla
         return await daten.ListeAsync(abfrage.OrderByDescending(k => k.Id), abbruch);
     }
 
-    /// <summary>Neue Klausur aus einer Prüfungsliste.</summary>
+    /// <summary>Neue Klausur aus einer Prüfungsliste; enthält sie mehrere Prüfungen, muss eine gewählt sein.</summary>
     public async Task<(Klausur Klausur, ImportErgebnis Ergebnis, IReadOnlyList<string> Hinweise)> AusListeAnlegenAsync(byte[] csv, string? titel, string kuerzel,
-        DateTimeOffset? termin, CancellationToken abbruch = default)
+        DateTimeOffset? termin, string? pruefungsnummer = null, CancellationToken abbruch = default)
     {
         var wer = await aktuell.ErmittelnAsync(abbruch);
         KlausurenAnlegen(wer).Sicherstellen();
-        var liste = PruefungslisteLeser.Lesen(csv);
+        var liste = PruefungslisteLeser.Lesen(csv, string.IsNullOrWhiteSpace(pruefungsnummer) ? null : pruefungsnummer);
+        if (liste.AuswahlNoetig)
+        {
+            throw new FachlicherFehler("Die Datei enthält mehrere Prüfungen – bitte eine auswählen.");
+        }
+
         var k = new Klausur(wer.KontoIdPflicht, string.IsNullOrWhiteSpace(titel) ? liste.Pruefungsname ?? "Klausur" : titel, kuerzel, liste.Pruefungsnummer,
             liste.Pruefer, termin);
         var ergebnis = k.Abgleichen(liste.Zeilen);
@@ -74,6 +79,12 @@ public sealed class KlausurDienst(IDaten daten, IAktuellerBenutzer aktuell, IKla
     {
         var (wer, k) = await LadenMitRechtAsync(id, abbruch);
         var liste = PruefungslisteLeser.Lesen(csv);
+        if (liste.AuswahlNoetig)
+        {
+            // Liste mit mehreren Prüfungen: nur die Zeilen der Prüfung dieser Klausur
+            liste = k.Pruefungsnummer is { } eigene ? PruefungslisteLeser.Lesen(csv, eigene)
+                : throw new FachlicherFehler("Die Datei enthält mehrere Prüfungen, diese Klausur hat aber keine Prüfungsnummer – bitte zuerst eintragen.");
+        }
         if (k.Pruefungsnummer is { } nr && liste.Pruefungsnummer is { } neu && nr != neu)
         {
             throw new FachlicherFehler($"Die Liste gehört zur Prüfung {neu}, diese Klausur zu {nr}.");

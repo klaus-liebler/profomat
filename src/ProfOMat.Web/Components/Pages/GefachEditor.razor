@@ -1,0 +1,643 @@
+@page "/gefache/{Id:guid}"
+@attribute [Authorize]
+@using System.Globalization
+@using ProfOMat.Application.Gefache
+@using ProfOMat.Domain.Gefache
+@implements IAsyncDisposable
+@inject Vorgang Vorgang
+@inject IJSRuntime JS
+@inject NavigationManager Navigation
+
+<PageTitle>@(gefach?.Bezeichnung ?? "Gefach") · Gefache lasern · ProfOMat</PageTitle>
+
+<a class="pm-zurueck" href="gefache">← Zu den Gefachen</a>
+
+@if (ladefehler is not null)
+{
+    <section class="pm-card" role="alert"><h1>Gefach nicht verfügbar</h1><p>@ladefehler</p></section>
+}
+else if (gefach is null || plan is null)
+{
+    <p class="pm-muted">Wird geladen …</p>
+}
+else
+{
+    var g = gefach;
+    var p = plan;
+    var a = p.Angaben;
+    <div class="pm-head">
+        <div>
+            <h1>@g.Bezeichnung</h1>
+            <p>
+                @if (!eigenes)
+                {
+                    <span>Öffentlich von @von ·</span>
+                }
+                Kiste innen @Mm(a.InnenLaengeMm) × @Mm(a.InnenBreiteMm) mm, Gefach @Mm(a.HoeheMm) mm hoch ·
+                @if (p.Freigabe.Erlaubt)
+                {
+                    <span>@p.FaecherLaenge.Count × @p.FaecherBreite.Count Fächer · @p.Waende.Count @(p.Waende.Count == 1 ? "Wand" : "Wände") ·
+                        @p.Platten.Count @(p.Platten.Count == 1 ? "Platte" : "Platten") @Mm(a.PlatteLaengeMm) × @Mm(a.PlatteBreiteMm) mm, @Mm(a.DickeMm) mm</span>
+                }
+                else
+                {
+                    <span>so nicht schneidbar</span>
+                }
+            </p>
+        </div>
+    </div>
+
+    @if (!eigenes)
+    {
+        <section class="pm-alert pm-gf-fremd" role="status">
+            <p><b>Öffentliches Gefach von @von – nur zum Ansehen.</b> Sie können alle Werte ausprobieren; gespeichert wird nichts.
+                @(geaendert ? "Ihre Änderungen gehen beim Verlassen der Seite verloren." : "")
+                Zum dauerhaften Ändern als Vorlage zu Ihren Gefachen übernehmen@(geaendert ? " – mit den gerade eingestellten Werten" : "").</p>
+            <div class="pm-row">
+                <BegruendeterButton Text="Als Vorlage übernehmen" Haupt="true" Click="UebernehmenAsync" Beschaeftigt="@beschaeftigt" Freigabe="@UebernehmenFreigabe()" />
+                @if (geaendert)
+                {
+                    <button type="button" class="pm-btn" @onclick="ZuruecksetzenAsync">Änderungen verwerfen</button>
+                }
+            </div>
+        </section>
+    }
+
+    <div class="pm-gf">
+        <div class="pm-gf-links">
+            <section class="pm-card" id="kiste">
+                <h2>Kiste</h2>
+                <div class="pm-fields">
+                    <div class="pm-field pm-field-weit">
+                        <label class="pm-lbl" for="gf-bez">Bezeichnung</label>
+                        <input id="gf-bez" class="pm-input" value="@g.Bezeichnung" maxlength="@Gefach.BezeichnungMaxLaenge" disabled="@(!eigenes)"
+                               title="@(eigenes ? null : "Die Bezeichnung ändern Sie nach dem Übernehmen.")" @onchange="e => UmbenennenAsync(e.Value as string)" />
+                    </div>
+                    @Zahlfeld("il", "Innenlänge oben (mm)", "Euro-Lagerbox 60 × 40 cm: 570 mm.")
+                    @Zahlfeld("ib", "Innenbreite oben (mm)", "Euro-Lagerbox: 370 mm.")
+                    @Zahlfeld("hs", "Nutzbare Innenhöhe im Stapel (mm)", "Bis hierhin, ohne dass die nächste Kiste aufsitzt (Euro-Lagerbox 22 cm: 204 mm).")
+                    @Zahlfeld("r", "Radius der Rundung am Boden (mm)", "Übergang Boden – Wand; die unteren Ecken der Wände werden so abgerundet. Nachmessen, 0 = eckig.")
+                </div>
+                <label class="pm-check">
+                    <input type="checkbox" id="gf-schraeg" checked="@schraeg" @onchange="e => SchraegAsync(e.Value is true)" />
+                    Wände schräg – Kiste am Boden innen kleiner
+                </label>
+                @if (schraeg)
+                {
+                    <div class="pm-fields">
+                        @Zahlfeld("bl", "Innenlänge am Boden (mm)", "Die Wände des Gefachs werden dann trapezförmig.")
+                        @Zahlfeld("bb", "Innenbreite am Boden (mm)")
+                    </div>
+                }
+            </section>
+
+            <section class="pm-card" id="faecher">
+                <h2>Gefach</h2>
+                <div class="pm-fields">
+                    @Zahlfeld("h", "Höhe des Gefachs (mm)", $"Höchstens die Stapelhöhe ({Mm(a.StapelhoeheMm)} mm).")
+                </div>
+                @Teilungsfeld("l", "Fächer entlang der Länge", "getrennt durch Querwände", p.FaecherLaenge)
+                @Teilungsfeld("b", "Fächer entlang der Breite", "getrennt durch Längswände", p.FaecherBreite)
+                <p class="pm-small pm-muted">Fachgrößen sind lichte Weiten oben, gemessen von der Kistenwand bzw. Wandfläche. „*“ teilt den Rest gleichmäßig
+                    auf (z. B. <kbd>100 * *</kbd>); ohne „*“ bekommt der Rest ein eigenes Fach am Ende.</p>
+            </section>
+
+            <section class="pm-card" id="material">
+                <h2>Material und Laser</h2>
+                <div class="pm-fields">
+                    @Zahlfeld("t", "Holzdicke (mm)", "MDF-Platte nachmessen (3-mm-Platten sind oft 2,8–3,2 mm).")
+                    @Zahlfeld("pl", "Plattenlänge (mm)")
+                    @Zahlfeld("pb", "Plattenbreite (mm)")
+                    @Zahlfeld("sp", "Spiel zur Kistenwand je Seite (mm)", "Damit sich das Gefach leicht einsetzen lässt.")
+                    @Zahlfeld("sz", "Schlitzzugabe (mm)", "Schlitzbreite = Holzdicke + Zugabe. Klemmt es, Zugabe erhöhen; wackelt es, verringern.")
+                    @Zahlfeld("ab", "Abstand der Teile und zum Rand (mm)")
+                </div>
+                <label class="pm-check">
+                    <input type="checkbox" id="gf-gravur" checked="@gravur" @onchange="e => AendernAsync(() => gravur = e.Value is true)" />
+                    Teilenummer und Einbaurichtung gravieren (z. B. „L1 links“, „Q2 vorn“)
+                </label>
+            </section>
+        </div>
+
+        <aside class="pm-gf-rechts" aria-label="3D-Vorschau">
+            <section class="pm-card">
+                <div class="pm-row" style="justify-content: space-between;">
+                    <h2>Vorschau</h2>
+                    <label class="pm-check"><input type="checkbox" id="gf-mitkiste" checked="@mitKiste" @onchange="e => KisteZeigenAsync(e.Value is true)" /> mit Kiste</label>
+                </div>
+                <div class="pm-gf-3d" @ref="ansicht"></div>
+                <p class="pm-small pm-muted">Ziehen dreht, Mausrad bzw. zwei Finger zoomen, rechte Maustaste verschiebt. Vorn ist die offene Seite der Kiste;
+                    „links“ ist das linke Ende der Längswände.</p>
+                @if (fehler is not null)
+                {
+                    <div class="pm-alert pm-crit" role="alert">@fehler</div>
+                }
+                else if (!p.Freigabe.Erlaubt)
+                {
+                    <div class="pm-alert pm-crit" role="alert">@p.Freigabe.Begruendung</div>
+                }
+            </section>
+        </aside>
+    </div>
+
+    <section class="pm-card" id="vorlagen">
+        <h2>Schnittvorlagen</h2>
+        @if (!p.Freigabe.Erlaubt)
+        {
+            <p class="pm-muted">@p.Freigabe.Begruendung</p>
+            <BegruendeterButton Text="Alle Platten herunterladen (ZIP)" Haupt="true" Freigabe="p.Freigabe" />
+        }
+        else if (!eigenes && geaendert)
+        {
+            <p class="pm-muted">Die Vorschau zeigt Ihre ausprobierten Werte. Herunterladen lassen sich nur gespeicherte Gefache.</p>
+            <BegruendeterButton Text="Alle Platten herunterladen (ZIP)" Haupt="true"
+                                Freigabe="@Freigabe.Nein("Ihre Änderungen sind nicht gespeichert – erst als Vorlage übernehmen (oder Änderungen verwerfen).")" />
+            <div class="pm-gf-platten">
+                @foreach (var platte in p.Platten)
+                {
+                    <figure class="pm-gf-plattenkarte">
+                        @((MarkupString)Schnittvorlage.Svg(p, platte, g.Bezeichnung, vorschau: true))
+                        <figcaption class="pm-row pm-small"><b>Platte @platte.Nr</b> <span class="pm-muted">@string.Join(", ", platte.Teile.Select(t => t.Wand.Name))</span></figcaption>
+                    </figure>
+                }
+            </div>
+        }
+        else
+        {
+            <p class="pm-muted">
+                @foreach (var gruppe in p.Waende.GroupBy(w => w.Art))
+                {
+                    var w = gruppe.First();
+                    <span>@gruppe.Count() × @(w.Art == Wandart.Laengswand ? "Längswand" : "Querwand") @Mm(w.Laenge) × @Mm(w.Hoehe) mm
+                        (Schlitze @(w.Art == Wandart.Laengswand ? "von oben" : "von unten"))@(gruppe.Key == p.Waende.Last().Art ? "" : " · ")</span>
+                }
+                – auf @p.Platten.Count @(p.Platten.Count == 1 ? "Platte" : "Platten").
+                Im Lasercutter: <b style="color:#C00000">Rot</b> schneiden, <b style="color:#0000C0">Blau</b> gravieren. Die SVG-Dateien sind in mm und so groß wie die Platte.
+            </p>
+            <div class="pm-row">
+                <a class="pm-btn pm-btn-haupt" href="gefache/@g.Id/schnittvorlagen.zip" download data-enhance-nav="false">Alle Platten herunterladen (ZIP mit SVG und DXF)</a>
+            </div>
+            <div class="pm-gf-platten">
+                @foreach (var platte in p.Platten)
+                {
+                    <figure class="pm-gf-plattenkarte">
+                        @((MarkupString)Schnittvorlage.Svg(p, platte, g.Bezeichnung, vorschau: true))
+                        <figcaption class="pm-row pm-small">
+                            <b>Platte @platte.Nr</b>
+                            <span class="pm-muted">@string.Join(", ", platte.Teile.Select(t => t.Wand.Name))</span>
+                            <a href="gefache/@g.Id/platte-@(platte.Nr).svg" download data-enhance-nav="false">SVG</a>
+                            <a href="gefache/@g.Id/platte-@(platte.Nr).dxf" download data-enhance-nav="false">DXF</a>
+                        </figcaption>
+                    </figure>
+                }
+            </div>
+            <p class="pm-small pm-muted">Zusammenstecken: Querwände (Schlitze unten) von oben über die Längswände (Schlitze oben) schieben.
+                Vor dem ersten Gefach einen Probeschnitt mit zwei Wänden machen und die Schlitzzugabe anpassen.</p>
+        }
+    </section>
+
+    @if (p.Freigabe.Erlaubt && eigenes)
+    {
+        <NaechsteSchritte Schritte="@([
+            new NaechsterSchritt("Schnittvorlagen herunterladen", "#vorlagen", "SVG und DXF je Platte", Hauptschritt: true),
+            new NaechsterSchritt("Weiteres Gefach anlegen", "gefache", "Zur Übersicht"),
+        ])" />
+    }
+
+    @if (eigenes)
+    {
+    <section class="pm-card" id="teilen">
+        <h2>Teilen, kopieren oder löschen</h2>
+        <label class="pm-check">
+            <input type="checkbox" id="gf-oeffentlich" checked="@g.Oeffentlich" @onchange="e => SichtbarkeitAsync(e.Value is true)" />
+            Öffentlich sichtbar – alle angemeldeten Personen sehen dieses Gefach und können es als Vorlage übernehmen (ändern können nur Sie)
+        </label>
+        <div class="pm-row">
+            <button type="button" class="pm-btn" @onclick="KopierenAsync">Kopie anlegen</button>
+            @if (!loeschenBestaetigen)
+            {
+                <button type="button" class="pm-btn" @onclick="() => loeschenBestaetigen = true">Gefach löschen …</button>
+            }
+            else
+            {
+                <span>„@g.Bezeichnung“ wird endgültig gelöscht.</span>
+                <button type="button" class="pm-btn pm-btn-gefahr" @onclick="LoeschenAsync">Ja, endgültig löschen</button>
+                <button type="button" class="pm-btn" @onclick="() => loeschenBestaetigen = false">Abbrechen</button>
+            }
+        </div>
+    </section>
+    }
+}
+
+@code {
+    private static readonly CultureInfo Deutsch = CultureInfo.GetCultureInfo("de-DE");
+
+    /// <summary>Feldbeschriftungen für Fehlermeldungen.</summary>
+    private static readonly Dictionary<string, string> Titel = new()
+    {
+        ["il"] = "Innenlänge", ["ib"] = "Innenbreite", ["hs"] = "Innenhöhe im Stapel", ["h"] = "Höhe des Gefachs", ["r"] = "Radius",
+        ["bl"] = "Innenlänge am Boden", ["bb"] = "Innenbreite am Boden", ["t"] = "Holzdicke", ["pl"] = "Plattenlänge", ["pb"] = "Plattenbreite",
+        ["sp"] = "Spiel", ["sz"] = "Schlitzzugabe", ["ab"] = "Abstand",
+    };
+
+    [Parameter]
+    public Guid Id { get; set; }
+
+    private Gefach? gefach;
+    private Gefachplan? plan;
+    private string? ladefehler, fehler;
+    private readonly Dictionary<string, string?> eingabe = [];
+    private Teilungsart laengeArt, breiteArt;
+    private string? laengeAnzahl, breiteAnzahl, laengeMasse, breiteMasse;
+    private bool schraeg, gravur, mitKiste = true, loeschenBestaetigen, eingerichtet, beschaeftigt;
+
+    /// <summary>Eigenes Gefach (Änderungen werden gespeichert) oder öffentliches einer anderen Person (nur ausprobieren).</summary>
+    private bool eigenes = true, geaendert;
+    private string von = "";
+    private ElementReference ansicht;
+    private IJSObjectReference? modul;
+
+    private RenderFragment Zahlfeld(string id, string titel, string? hilfe = null) => @<div class="pm-field">
+        <label class="pm-lbl" for="@($"gf-{id}")">@titel</label>
+        <input id="@($"gf-{id}")" class="pm-input" inputmode="decimal" autocomplete="off" value="@eingabe.GetValueOrDefault(id)"
+               @onchange="e => AendernAsync(() => Setzen(id, e.Value as string))" />
+        @if (hilfe is not null)
+        {
+            <span class="pm-hilfe">@hilfe</span>
+        }
+    </div>;
+
+    private RenderFragment Teilungsfeld(string id, string titel, string zusatz, IReadOnlyList<double> faecher)
+    {
+        var art = id == "l" ? laengeArt : breiteArt;
+        return @<fieldset class="pm-gf-teilung">
+            <legend>@titel <span class="pm-muted pm-small">(@zusatz)</span></legend>
+            <div class="pm-gf-art" role="radiogroup">
+                <label class="pm-check"><input type="radio" name="@($"gf-art-{id}")" id="@($"gf-{id}-anzahl")" checked="@(art == Teilungsart.Anzahl)"
+                                               @onchange="() => AendernAsync(() => ArtSetzen(id, Teilungsart.Anzahl))" /> gleich große Fächer</label>
+                <label class="pm-check"><input type="radio" name="@($"gf-art-{id}")" id="@($"gf-{id}-masse")" checked="@(art == Teilungsart.Masse)"
+                                               @onchange="() => AendernAsync(() => ArtSetzen(id, Teilungsart.Masse))" /> Fachgrößen in mm</label>
+            </div>
+            @if (art == Teilungsart.Anzahl)
+            {
+                <div class="pm-field">
+                    <label class="pm-lbl" for="@($"gf-{id}-n")">Anzahl Fächer</label>
+                    <input id="@($"gf-{id}-n")" class="pm-input" type="number" min="1" max="@Teilung.MaxFaecher" value="@(id == "l" ? laengeAnzahl : breiteAnzahl)"
+                           @onchange="@(e => AendernAsync(() => TextSetzen(id, anzahl: true, e.Value as string)))" />
+                </div>
+            }
+            else
+            {
+                <div class="pm-field">
+                    <label class="pm-lbl" for="@($"gf-{id}-m")">Fachgrößen (mm)</label>
+                    <input id="@($"gf-{id}-m")" class="pm-input" autocomplete="off" placeholder="z. B. 120 * 80" maxlength="@Teilung.MasseMaxLaenge"
+                           value="@(id == "l" ? laengeMasse : breiteMasse)"
+                           @onchange="@(e => AendernAsync(() => TextSetzen(id, anzahl: false, e.Value as string)))" />
+                </div>
+            }
+            @if (faecher.Count > 0)
+            {
+                <span class="pm-gf-masse pm-muted">@faecher.Count @(faecher.Count == 1 ? "Fach" : "Fächer"): @string.Join(" · ", faecher.Select(f => Mm(f))) mm</span>
+            }
+        </fieldset>;
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        try
+        {
+            var sicht = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<GefachDienst>().AnsehenAsync(Id));
+            (eigenes, von, geaendert, loeschenBestaetigen) = (sicht.Eigenes, sicht.Von, false, false);
+            Uebernehmen(sicht.Gefach);
+            await ZeigenAsync();   // nach „Kopie anlegen“ bleibt die Seite dieselbe, nur das Gefach wechselt
+        }
+        catch (FachlicherFehler ex)
+        {
+            ladefehler = ex.Message;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (plan is null || eingerichtet)
+        {
+            return;
+        }
+
+        eingerichtet = true;
+        try
+        {
+            modul ??= await JS.InvokeAsync<IJSObjectReference>("import", Navigation.ToAbsoluteUri("gefach.js").ToString());
+            await ZeigenAsync();
+        }
+        catch (JSException ex)
+        {
+            fehler = $"Die 3D-Vorschau konnte nicht geladen werden ({ex.Message}). Die Schnittvorlagen sind davon nicht betroffen.";
+            StateHasChanged();
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (modul is not null)
+        {
+            try
+            {
+                await modul.InvokeVoidAsync("abbauen", ansicht);
+                await modul.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+            }
+        }
+    }
+
+    private void Uebernehmen(Gefach g)
+    {
+        gefach = g;
+        Anzeigen(g.Angaben);
+    }
+
+    private void Anzeigen(Gefachangaben a)
+    {
+        plan = Gefachplan.Berechnen(a);
+        eingabe["il"] = Mm(a.InnenLaengeMm);
+        eingabe["ib"] = Mm(a.InnenBreiteMm);
+        eingabe["hs"] = Mm(a.StapelhoeheMm);
+        eingabe["h"] = Mm(a.HoeheMm);
+        eingabe["bl"] = Mm(a.BodenLaengeMm);
+        eingabe["bb"] = Mm(a.BodenBreiteMm);
+        eingabe["r"] = Mm(a.RadiusMm);
+        eingabe["t"] = Mm(a.DickeMm);
+        eingabe["pl"] = Mm(a.PlatteLaengeMm);
+        eingabe["pb"] = Mm(a.PlatteBreiteMm);
+        eingabe["sp"] = Mm(a.SpielMm);
+        eingabe["sz"] = Mm(a.SchlitzzugabeMm);
+        eingabe["ab"] = Mm(a.AbstandMm);
+        (laengeArt, laengeAnzahl, laengeMasse) = (a.Laenge.Art, a.Laenge.Anzahl.ToString(CultureInfo.InvariantCulture), a.Laenge.Masse);
+        (breiteArt, breiteAnzahl, breiteMasse) = (a.Breite.Art, a.Breite.Anzahl.ToString(CultureInfo.InvariantCulture), a.Breite.Masse);
+        schraeg = a.BodenLaengeMm != a.InnenLaengeMm || a.BodenBreiteMm != a.InnenBreiteMm;
+        gravur = a.Gravur;
+    }
+
+    /// <summary>Feldwert setzen; die Gefachhöhe folgt der Stapelhöhe, solange sie ihr gleich ist (oder sonst darüber läge).</summary>
+    private void Setzen(string id, string? wert)
+    {
+        if (id == "hs" && Zahl(eingabe["hs"]) is { } alt && Zahl(wert) is { } neu && Zahl(eingabe["h"]) is { } h && (h == alt || h > neu))
+        {
+            eingabe["h"] = wert;
+        }
+
+        eingabe[id] = wert;
+    }
+
+    private void TextSetzen(string id, bool anzahl, string? wert)
+    {
+        switch ((id, anzahl))
+        {
+            case ("l", true): laengeAnzahl = wert; break;
+            case ("l", false): laengeMasse = wert; break;
+            case (_, true): breiteAnzahl = wert; break;
+            default: breiteMasse = wert; break;
+        }
+    }
+
+    private void ArtSetzen(string id, Teilungsart art)
+    {
+        if (id == "l")
+        {
+            laengeArt = art;
+            laengeMasse ??= Vorschlag(plan?.FaecherLaenge);
+        }
+        else
+        {
+            breiteArt = art;
+            breiteMasse ??= Vorschlag(plan?.FaecherBreite);
+        }
+    }
+
+    /// <summary>Beim Wechsel auf Fachgrößen: die bisherigen Fächer als Ausgangspunkt (letztes als „*“).</summary>
+    private static string? Vorschlag(IReadOnlyList<double>? faecher)
+        => faecher is { Count: > 0 } f ? string.Join(" ", f.Take(f.Count - 1).Select(x => Math.Round(x).ToString(CultureInfo.InvariantCulture)).Append("*")) : null;
+
+    private Task SchraegAsync(bool an) => AendernAsync(() =>
+    {
+        schraeg = an;
+        if (an && Zahl(eingabe["bl"]) == Zahl(eingabe["il"]) && Zahl(eingabe["bb"]) == Zahl(eingabe["ib"]))
+        {
+            // Vorschlag: Euro-Lagerbox-typisch etwa 2 cm kleiner am Boden
+            eingabe["bl"] = Mm((Zahl(eingabe["il"]) ?? 570m) - 20m);
+            eingabe["bb"] = Mm((Zahl(eingabe["ib"]) ?? 370m) - 20m);
+        }
+    });
+
+    /// <summary>Liest alle Eingaben, speichert sie und aktualisiert Vorschau und Plan. Bei einem Fehler bleibt die Eingabe stehen.</summary>
+    private async Task AendernAsync(Action aenderung)
+    {
+        aenderung();
+        if (!schraeg)
+        {
+            eingabe["bl"] = eingabe["il"];
+            eingabe["bb"] = eingabe["ib"];
+        }
+
+        if (Titel.Keys.FirstOrDefault(k => Zahl(eingabe.GetValueOrDefault(k)) is null) is { } falsch)
+        {
+            fehler = $"{Titel[falsch]}: bitte eine Zahl in mm angeben (z. B. 3 oder 2,8).";
+            return;
+        }
+
+        decimal W(string k) => Zahl(eingabe[k])!.Value;
+        int N(string? s) => int.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var n) ? n : 0;
+        var angaben = new Gefachangaben
+        {
+            InnenLaengeMm = W("il"),
+            InnenBreiteMm = W("ib"),
+            StapelhoeheMm = W("hs"),
+            HoeheMm = W("h"),
+            BodenLaengeMm = W("bl"),
+            BodenBreiteMm = W("bb"),
+            RadiusMm = W("r"),
+            DickeMm = W("t"),
+            PlatteLaengeMm = W("pl"),
+            PlatteBreiteMm = W("pb"),
+            SpielMm = W("sp"),
+            SchlitzzugabeMm = W("sz"),
+            AbstandMm = W("ab"),
+            Laenge = new Teilung(laengeArt, N(laengeAnzahl), laengeMasse),
+            Breite = new Teilung(breiteArt, N(breiteAnzahl), breiteMasse),
+            Gravur = gravur,
+        };
+        try
+        {
+            if (angaben.Laenge.Art == Teilungsart.Masse)
+            {
+                Teilung.MasseZerlegen(angaben.Laenge.Masse);
+            }
+
+            if (angaben.Breite.Art == Teilungsart.Masse)
+            {
+                Teilung.MasseZerlegen(angaben.Breite.Masse);
+            }
+
+            if (eigenes)
+            {
+                Uebernehmen(await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<GefachDienst>().EinstellenAsync(Id, angaben)));
+            }
+            else
+            {
+                // fremdes öffentliches Gefach: nur prüfen und anzeigen, nichts speichern
+                Anzeigen(angaben.Geprueft());
+                geaendert = plan!.Angaben != gefach!.Angaben;
+            }
+
+            fehler = null;
+            await ZeigenAsync();
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+        }
+    }
+
+    private async Task UmbenennenAsync(string? bezeichnung)
+    {
+        try
+        {
+            gefach = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<GefachDienst>().UmbenennenAsync(Id, bezeichnung ?? ""));
+            fehler = null;
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+        }
+    }
+
+    private async Task ZeigenAsync()
+    {
+        if (modul is null || gefach is null || plan is null)
+        {
+            return;
+        }
+
+        var a = plan.Angaben;
+        var daten = new
+        {
+            kiste = new { lt = a.InnenLaengeMm, bt = a.InnenBreiteMm, lb = a.BodenLaengeMm, bb = a.BodenBreiteMm, hs = a.StapelhoeheMm },
+            dicke = a.DickeMm,
+            spiel = a.SpielMm,
+            waende = plan.Waende.Select(w => new
+            {
+                art = w.Art == Wandart.Laengswand ? "L" : "Q",
+                lage = w.Lage,
+                kontur = w.Kontur.Select(e => new[] { Math.Round(e.X, 3), Math.Round(e.Y, 3), Math.Round(e.Bulge, 6) }),
+            }),
+        };
+        try
+        {
+            await modul.InvokeAsync<bool>("zeigen", ansicht, daten, mitKiste);
+        }
+        catch (JSException ex)
+        {
+            fehler = $"Die 3D-Vorschau konnte nicht gezeichnet werden ({ex.Message}).";
+        }
+    }
+
+    private async Task KisteZeigenAsync(bool an)
+    {
+        mitKiste = an;
+        try
+        {
+            if (modul is not null)
+            {
+                await modul.InvokeVoidAsync("kisteZeigen", ansicht, an);
+            }
+        }
+        catch (JSException)
+        {
+        }
+    }
+
+    private Freigabe UebernehmenFreigabe() => fehler is not null
+        ? Freigabe.Nein("Erst die Eingabe korrigieren (siehe Meldung bei der Vorschau) – oder Änderungen verwerfen.")
+        : Freigabe.Ja;
+
+    /// <summary>Fremdes öffentliches Gefach als eigenes anlegen – mit den gerade ausprobierten Werten.</summary>
+    private async Task UebernehmenAsync()
+    {
+        if (beschaeftigt || plan is null)
+        {
+            return;
+        }
+
+        beschaeftigt = true;
+        try
+        {
+            var angaben = plan.Angaben;
+            var neu = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<GefachDienst>().UebernehmenAsync(Id, angaben));
+            Navigation.NavigateTo($"gefache/{neu.Id}");
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+        }
+        finally
+        {
+            beschaeftigt = false;
+        }
+    }
+
+    private async Task ZuruecksetzenAsync()
+    {
+        Uebernehmen(gefach!);
+        geaendert = false;
+        fehler = null;
+        await ZeigenAsync();
+    }
+
+    private async Task SichtbarkeitAsync(bool oeffentlich)
+    {
+        try
+        {
+            gefach = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<GefachDienst>().SichtbarkeitSetzenAsync(Id, oeffentlich));
+            fehler = null;
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+        }
+    }
+
+    private async Task KopierenAsync()
+    {
+        try
+        {
+            var kopie = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<GefachDienst>().KopierenAsync(Id));
+            Navigation.NavigateTo($"gefache/{kopie.Id}");
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+        }
+    }
+
+    private async Task LoeschenAsync()
+    {
+        try
+        {
+            await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<GefachDienst>().LoeschenAsync(Id));
+            Navigation.NavigateTo("gefache");
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+        }
+    }
+
+    private static string Mm(decimal d) => d.ToString("0.##", Deutsch);
+
+    private static string Mm(double d) => d.ToString("0.#", Deutsch);
+
+    private static decimal? Zahl(string? s) => decimal.TryParse(s?.Trim().Replace(',', '.'), NumberStyles.AllowDecimalPoint | NumberStyles.AllowLeadingSign,
+        CultureInfo.InvariantCulture, out var d) ? d : null;
+}

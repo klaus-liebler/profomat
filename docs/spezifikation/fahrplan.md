@@ -8,7 +8,12 @@
 | 2 | Klausuren: CSV-Import, Schlüssel (Ende der Matrikelnummer), Räume und Sitzplätze, Serienbrief-Datenquelle, Aufgaben/Punkte/Notenschlüssel, Veröffentlichung mit Statistik, Notenexport | fertig (21.11.2026) |
 | 2b | Grundriss-Editor, Tischnummerierung nach Muster, gestreute Platzvergabe, Serienbrief in Austeilreihenfolge, Sitzplan | fertig (21.11.2026) |
 | 2c | Persönliche Hilfe: Verteiler beschriften (Schrank nachbauen, Geräte einsetzen und beschriften, Streifen-PDF mit Schnittmarken) | fertig (23.11.2026) |
+| 2d | Persönliche Hilfe: Gefache lasern (Teilungseinsätze für Kisten, 3D-Vorschau, Schnittvorlagen SVG/DXF je Platte) | fertig (25.11.2026) |
 | 2a | Klausuren-Feinschliff: QR-Code auf dem Deckblatt und Scan beim Punkte-Eintragen, Mitarbeitende für die Korrektur freigeben, Klausur der Katalogprüfung zuordnen, Sitzplan als PDF zum Aushängen | offen |
+| 5 | Hausarbeiten: Prüfungsliste, Themenliste (aus dem Webseitentext), Teams mit Wünschen, Zuteilung, persönliche Themenbestätigung; persönlicher Postausgang (.eml fürs Desktop-Outlook) mit Mailsignatur aus Outlook | fertig (25.11.2026) |
+| 5b | Hausarbeiten: Wunschformular für Studierende (mit eigenem Thema und Datei), Gesprächstermine, Abgabe und Projektmesse abhaken, Bewertung mit Grundnote und individuellen Abschlägen, Notenexport | offen (Gesprächstermine bis 07.12.) |
+| 6 | Finanzen: Laborteams, Töpfe (Laborkostenstelle, Investitions- und SQM-Maßnahmen), Import der SAP-Jahresstände, Stand per KI-JSON und SQM-Excel, geplante Ausgaben, Sammel-Auslagenabrechnung, Hilfskräfte planen und Einstellungsmöglichkeiten, Finanzcockpit mit Warnung vor der Übertragsgrenze, Zeitachse aller Töpfe, neue Ausgabe planen und aufteilen, Verlauf und Buchungssuche (FA-700–711, FA-714–717) | fertig (25.11.2026) |
+| 6b | Finanzen: Fristerinnerungen per Mail (FA-712), Budgetprognose für das Folgejahr aus Teilnehmerzahlen, SWS und Personen (FA-713), Einzelbuchungen von Hand, Verlauf und Jahresvergleich, Kommentare und Markierungen je Buchung (FA-718) | fertig (25.11.2026) |
 | 3 | Anmeldung über das Hochschulsystem (SAML/Shibboleth), Vorausfüllen für Studierende | nach Klärung mit dem IT-Service |
 | 4 | Echte Katalogquelle (Webservice oder Exportdatei), PAdES-Siegel des Abschluss-PDFs, X.509-Zertifikate für Schlüssel | offen |
 | B | Server liebler.iui.hs-osnabrueck.de/profomat: Deploy-Kit (`deploy/`), Pfad-Basis, Sicherung inkl. Siegelschlüssel; Anmeldung wie Podium (Ersteinrichtung, Einladungs-/Passwort-Links, ohne nginx-Passwort), Captcha für das öffentliche Formular | fertig (23.11.2026) |
@@ -21,3 +26,11 @@
 - Zuständige Studiendekanate und Postfächer der Studierendensekretariate je Fakultät.
 - SSO: lokaler SP oder DFN-AAI, Freigabe der Matrikelnummer.
 - Missbrauchsschutz für das öffentliche Antragsformular: umgesetzt (FA-114); im Betrieb beobachten, ob die Grenzen reichen.
+- Finanzen, geklärt (25.11.2026): Bezugsgröße der Übertragsgrenze ist nur das „Budget Sachmittel Fak“; Klaus wünscht die Warnung (FA-715), auch wenn bei 12103012 bisher nichts eingezogen wurde.
+- Finanzen, geklärt: Auftrag 58216001 sind zusätzlich vereinbarte Berufungsmittel (im Vortrag 2025 → 2026 enthalten, daher die Abweichung zum Endstand).
+- Finanzen, geklärt: Hilfskraftkosten werden auf Kostenstelle und SQM aufgeteilt (in ProfOMat: Anteile je Beschäftigung).
+- Zurückgestellt (25.11.2026): Mailversand im Namen der angemeldeten Person (Office 365, SMTP `smtp.office365.com:587` STARTTLS bzw. Microsoft Graph, jeweils OAuth2):
+  braucht genau eine App-Registrierung für ProfOMat im Entra ID der Hochschule (selbst, falls Beschäftigte Apps registrieren dürfen, sonst IT-Service;
+  Zustimmung für `SMTP.Send` bzw. `Mail.Send`), je Person eine einmalige Microsoft-Anmeldung und ein verschlüsselt gespeichertes Refresh-Token;
+  SMTP mit XOAUTH2 bräuchte ein neues Paket (z. B. MailKit), Graph ginge ohne. S/MIME-Signaturen setzt dann nicht mehr Outlook. Bis dahin bleibt der
+  persönliche Postausgang mit .eml fürs Desktop-Outlook (FA-022).
