@@ -164,6 +164,19 @@ public sealed class Teammitglied
 
     public DateTimeOffset? Bestaetigt { get; private set; }
 
+    public const int EinschraenkungenMaxLaenge = 1000;
+
+    /// <summary>Terminliche Einschränkungen für das Erörterungsgespräch (bei der Bestätigung angegeben; leer = nichts gemeldet).</summary>
+    public string? Einschraenkungen { get; private set; }
+
+    /// <summary>Der Gesprächstermin, der dieser Person zuletzt per Mail mitgeteilt wurde (Ortszeit).</summary>
+    public DateTime? TerminMitgeteilt { get; private set; }
+
+    internal void EinschraenkungenSetzen(string? text)
+        => Einschraenkungen = string.IsNullOrWhiteSpace(text) ? null : text.Trim()[..Math.Min(text.Trim().Length, EinschraenkungenMaxLaenge)];
+
+    internal void TerminMitteilen(DateTime termin) => TerminMitgeteilt = termin;
+
     internal void Benachrichtigen(string tokenHash, DateTimeOffset jetzt) => (TokenHash, Benachrichtigt, Bestaetigt) = (tokenHash, jetzt, null);
 
     internal void Zuruecksetzen() => (TokenHash, Benachrichtigt, Bestaetigt) = (null, null, null);
@@ -207,7 +220,12 @@ public sealed class Team
 
     public string? Notiz { get; private set; }
 
+    /// <summary>Beginn des Erörterungsgesprächs (Ortszeit, Europe/Berlin).</summary>
+    public DateTime? Termin { get; private set; }
+
     public IReadOnlyList<Teammitglied> Mitglieder => mitglieder;
+
+    internal void TerminSetzen(DateTime? beginn) => Termin = beginn;
 
     public IReadOnlyList<Guid> Wuensche => new[] { Wunsch1, Wunsch2, Wunsch3 }.OfType<Guid>().ToList();
 
@@ -615,8 +633,8 @@ public sealed partial class Hausarbeit
         m.Benachrichtigen(tokenHash, jetzt);
     }
 
-    /// <summary>Persönliche Bestätigung (über den Link); wiederholtes Bestätigen ändert nichts.</summary>
-    public void Bestaetigen(Guid mitgliedId, DateTimeOffset jetzt)
+    /// <summary>Persönliche Bestätigung (über den Link); wiederholtes Bestätigen ändert nichts. Einschränkungen für den Gesprächstermin optional.</summary>
+    public void Bestaetigen(Guid mitgliedId, DateTimeOffset jetzt, string? einschraenkungen = null)
     {
         var (team, m) = Mitglied(mitgliedId);
         if (team.ThemaId is null || m.Benachrichtigt is null)
@@ -624,6 +642,23 @@ public sealed partial class Hausarbeit
             throw new FachlicherFehler("Für Sie liegt gerade kein Thema zur Bestätigung vor.");
         }
 
+        if (m.Bestaetigt is null)
+        {
+            m.EinschraenkungenSetzen(einschraenkungen);
+        }
+
         m.Bestaetigen(jetzt);
+    }
+
+    /// <summary>Einschränkungen nachträglich ändern (über den persönlichen Link, nach der Bestätigung).</summary>
+    public void EinschraenkungenAendern(Guid mitgliedId, string? einschraenkungen)
+    {
+        var (_, m) = Mitglied(mitgliedId);
+        if (m.Bestaetigt is null)
+        {
+            throw new FachlicherFehler("Bitte zuerst das Thema bestätigen.");
+        }
+
+        m.EinschraenkungenSetzen(einschraenkungen);
     }
 }

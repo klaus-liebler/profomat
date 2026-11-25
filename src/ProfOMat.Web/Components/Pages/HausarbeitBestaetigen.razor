@@ -41,15 +41,49 @@ else
         </dl>
     </section>
 
+    @if (a.Termin is { } termin)
+    {
+        <section class="pm-card">
+            <h2>Ihr Erörterungsgespräch</h2>
+            <dl class="pm-dl">
+                <dt>Termin</dt><dd>@termin.ToString("dddd, dd.MM.yyyy, HH:mm", De)–@termin.AddMinutes(a.Dauer).ToString("HH:mm", De) Uhr</dd>
+                <dt>Ort</dt><dd>@(a.Ort ?? "wird noch bekannt gegeben")</dd>
+            </dl>
+        </section>
+    }
+
     @if (a.Bestaetigt is { } wann)
     {
         <div class="pm-alert pm-gut" role="status">Danke! Sie haben das Thema am @Zeit.Kurz(wann) angenommen. Jedes Teammitglied bestätigt über den eigenen Link.</div>
+        <section class="pm-card">
+            <h2>Terminliche Einschränkungen für das Erörterungsgespräch</h2>
+            @if (aendern)
+            {
+                <textarea id="einschraenkungen" class="pm-textarea" rows="3" maxlength="@ProfOMat.Domain.Hausarbeiten.Teammitglied.EinschraenkungenMaxLaenge" @bind="einschraenkungen"
+                          aria-label="Terminliche Einschränkungen"></textarea>
+                <div class="pm-row">
+                    <BegruendeterButton Text="Speichern" Haupt="true" Click="EinschraenkungenAsync" />
+                    <button type="button" class="pm-btn" @onclick="() => aendern = false">Abbrechen</button>
+                </div>
+            }
+            else
+            {
+                <p>@(a.Einschraenkungen ?? "Keine angegeben.")</p>
+                <button type="button" class="pm-btn" @onclick="Aendern">Einschränkungen ändern</button>
+            }
+        </section>
     }
     else
     {
         <section class="pm-card">
             <h2>Thema annehmen</h2>
             <p>Mit der Bestätigung nehmen Sie dieses Thema für Ihre Hausarbeit an. Jedes Teammitglied bestätigt einzeln.</p>
+            <div class="pm-field">
+                <label class="pm-lbl" for="einschraenkungen">Terminliche Einschränkungen für das Erörterungsgespräch (optional)</label>
+                <textarea id="einschraenkungen" class="pm-textarea" rows="3" maxlength="@ProfOMat.Domain.Hausarbeiten.Teammitglied.EinschraenkungenMaxLaenge" @bind="einschraenkungen"
+                          placeholder="z. B. dienstags nicht; am 01.03. erst ab 11 Uhr"></textarea>
+                <span class="pm-hilfe">Wann können Sie im Gesprächszeitraum nicht? Die Angabe hilft bei der Terminplanung und lässt sich später über diesen Link ändern.</span>
+            </div>
             <div><BegruendeterButton Text="Thema verbindlich annehmen" Haupt="true" Click="BestaetigenAsync" /></div>
         </section>
     }
@@ -62,11 +96,27 @@ else
     [Parameter]
     public string Token { get; set; } = string.Empty;
 
+    private static readonly System.Globalization.CultureInfo De = System.Globalization.CultureInfo.GetCultureInfo("de-DE");
+
     private Themenbestaetigung? ansicht;
+    private string? einschraenkungen;
+    private bool aendern;
 
     protected override async Task OnParametersSetAsync()
         => ansicht = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<HausarbeitDienst>().BestaetigungAnsichtAsync(Id, Token));
 
     private async Task BestaetigenAsync()
-        => ansicht = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<HausarbeitDienst>().BestaetigenAsync(Id, Token));
+    {
+        var text = einschraenkungen;
+        ansicht = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<HausarbeitDienst>().BestaetigenAsync(Id, Token, text));
+    }
+
+    private void Aendern() => (einschraenkungen, aendern) = (ansicht?.Einschraenkungen, true);
+
+    private async Task EinschraenkungenAsync()
+    {
+        var text = einschraenkungen;
+        ansicht = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<HausarbeitDienst>().EinschraenkungenAendernAsync(Id, Token, text));
+        aendern = false;
+    }
 }

@@ -58,7 +58,7 @@ node tests\Browser\klausur.mjs http://localhost:5310 <Ordner> # Klausurablauf (f
 node tests\Browser\muendlich.mjs http://localhost:5310 <Ordner> # Mündliche Prüfung live: Tastatur, Bemerkung, Protokoll-PDF, 390 px
 node tests\Browser\beschriftung.mjs http://localhost:5310 <Ordner> # Verteiler beschriften: Klick, Ziehen, Pfeiltasten, PDF, 390 px
 node tests\Browser\gefach.mjs http://localhost:5310 <Ordner>       # Gefache lasern: 3D, Höhe ≤ Stapelhöhe, Fachgrößen, SVG/DXF/ZIP, öffentlich/Vorlage, 390 px
-node tests\Browser\hausarbeit.mjs http://localhost:5310 <Ordner>  # Hausarbeit: Signatur, Themen, Teams, .eml, Bestätigungslink, 390 px (frische Datenbank)
+node tests\Browser\hausarbeit.mjs http://localhost:5310 <Ordner>  # Hausarbeit: Signatur, Themen, Teams, .eml, Bestätigung mit Einschränkungen, Gesprächskalender, Terminmails, ZIP, .ics/Abo, 390 px (frische Datenbank)
 node tests\Browser\finanzen.mjs http://localhost:5310 <Ordner>    # Finanzen: Team, SAP-Auszüge, Cockpit, Zeitachse, Aufteilen, Planung, Auslagen (XLSX), Hilfskräfte, SQM-Excel, KI-JSON, 390 px
 node tests\Browserinanzen.mjs http://localhost:5310 <Ordner>    # Finanzen: Team, SAP-Auszüge, Cockpit, Zeitachse, Aufteilen, Planung, Auslagen (XLSX), Hilfskräfte, SQM-Excel, KI-JSON, 390 px
 ```

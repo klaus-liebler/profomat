@@ -1,0 +1,96 @@
+@*
+    Editierbare Mailvorlage mit Platzhaltern: Betreff und Text, Liste der Platzhalter, Prüfung unbekannter Platzhalter, Vorschau mit echten Werten,
+    Speichern und „Standardtext“.
+*@
+
+<div class="pm-fields">
+    <div class="pm-field pm-field-weit">
+        <label class="pm-lbl" for="@($"{Kennung}-betreff")">Betreff</label>
+        <input id="@($"{Kennung}-betreff")" class="pm-input" @bind="betreff" @bind:event="oninput" maxlength="300" />
+    </div>
+    <div class="pm-field pm-field-weit">
+        <label class="pm-lbl" for="@($"{Kennung}-text")">Text</label>
+        <textarea id="@($"{Kennung}-text")" class="pm-textarea" rows="14" @bind="text" @bind:event="oninput"></textarea>
+    </div>
+</div>
+<p class="pm-small">Platzhalter:
+    @foreach (var (name, beschreibung) in Platzhalter)
+    {
+        <span class="pm-chip pm-mono" title="@beschreibung">{@name}</span>
+    }
+</p>
+@if (Unbekannt.Count > 0)
+{
+    <div class="pm-alert pm-warn" role="status">Unbekannte Platzhalter: @string.Join(", ", Unbekannt.Select(u => "{" + u + "}"))</div>
+}
+@if (Vorschau?.Invoke(betreff ?? "", text ?? "") is { } v)
+{
+    <details class="pm-za-tabelle" open>
+        <summary>Vorschau für @v.An</summary>
+        <pre class="pm-signiertext"><b>@v.Betreff</b>
+
+@v.Text</pre>
+    </details>
+}
+<div class="pm-row">
+    <BegruendeterButton Text="Vorlage speichern" Click="SpeichernAsync" Beschaeftigt="@Beschaeftigt"
+                        Freigabe="@(!Geaendert ? Freigabe.Nein("Keine Änderung.") : Unbekannt.Count > 0 ? Freigabe.Nein("Erst die unbekannten Platzhalter korrigieren.") : Freigabe.Ja)" />
+    <button type="button" class="pm-linkbutton" @onclick="Standard">Standardtext</button>
+</div>
+
+@code {
+    /// <summary>Eindeutiger Präfix für die Feld-Ids.</summary>
+    [Parameter, EditorRequired]
+    public string Kennung { get; set; } = "vorlage";
+
+    /// <summary>Gespeicherter Betreff (bzw. Standard).</summary>
+    [Parameter, EditorRequired]
+    public string Betreff { get; set; } = "";
+
+    /// <summary>Gespeicherter Text (bzw. Standard).</summary>
+    [Parameter, EditorRequired]
+    public string Text { get; set; } = "";
+
+    [Parameter, EditorRequired]
+    public string StandardBetreff { get; set; } = "";
+
+    [Parameter, EditorRequired]
+    public string StandardText { get; set; } = "";
+
+    [Parameter, EditorRequired]
+    public IReadOnlyDictionary<string, string> Platzhalter { get; set; } = new Dictionary<string, string>();
+
+    /// <summary>Unbekannte Platzhalter eines Textes.</summary>
+    [Parameter, EditorRequired]
+    public Func<string?, IReadOnlyList<string>> Pruefen { get; set; } = _ => [];
+
+    /// <summary>Vorschau (Empfänger, Betreff, Text) zur aktuellen, noch nicht gespeicherten Fassung; null = keine.</summary>
+    [Parameter]
+    public Func<string, string, (string An, string Betreff, string Text)?>? Vorschau { get; set; }
+
+    [Parameter, EditorRequired]
+    public EventCallback<(string Betreff, string Text)> Speichern { get; set; }
+
+    [Parameter]
+    public bool Beschaeftigt { get; set; }
+
+    private string? betreff, text, gespeichertBetreff, gespeichertText;
+
+    /// <summary>Weicht die Eingabe von der gespeicherten Fassung ab?</summary>
+    public bool Geaendert => (betreff ?? "") != Betreff || (text ?? "").ReplaceLineEndings("\n").Trim() != Text.ReplaceLineEndings("\n").Trim();
+
+    private IReadOnlyList<string> Unbekannt => [.. Pruefen(betreff).Concat(Pruefen(text)).Distinct()];
+
+    protected override void OnParametersSet()
+    {
+        // Nur übernehmen, wenn sich die gespeicherte Fassung geändert hat (sonst gingen Eingaben bei jedem Neuzeichnen verloren)
+        if (gespeichertBetreff != Betreff || gespeichertText != Text)
+        {
+            (betreff, text, gespeichertBetreff, gespeichertText) = (Betreff, Text, Betreff, Text);
+        }
+    }
+
+    private void Standard() => (betreff, text) = (StandardBetreff, StandardText);
+
+    private Task SpeichernAsync() => Speichern.InvokeAsync((betreff ?? "", text ?? ""));
+}

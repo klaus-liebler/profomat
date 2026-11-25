@@ -28,7 +28,10 @@
     [Parameter, EditorRequired]
     public IReadOnlyList<NaechsterSchritt> Schritte { get; set; } = [];
 
-    /// <summary>Downloads (PDF, CSV, XLSX) brauchen einen echten Seitenaufruf statt der Blazor-Navigation.</summary>
-    private static bool IstDatei(string ziel) => ziel.EndsWith("pdf", StringComparison.Ordinal) || ziel.EndsWith(".csv", StringComparison.Ordinal)
-                                                 || ziel.EndsWith(".xlsx", StringComparison.Ordinal) || ziel.EndsWith(".eml", StringComparison.Ordinal);
+    /// <summary>Downloads (PDF, CSV, XLSX, EML, ZIP, ICS) brauchen einen echten Seitenaufruf statt der Blazor-Navigation.</summary>
+    private static bool IstDatei(string ziel)
+    {
+        var pfad = ziel.Split('?')[0];
+        return new[] { "pdf", ".csv", ".xlsx", ".eml", ".zip", ".ics" }.Any(e => pfad.EndsWith(e, StringComparison.Ordinal));
+    }
 }

@@ -58,6 +58,55 @@ public sealed class Mailentwuerfe(IDaten daten, IAktuellerBenutzer aktuell, Mail
         return (Eml.Erzeugen(e.An, e.AnName, e.Betreff, e.Text, signatur), Eml.Dateiname(e.Betreff, e.AnName ?? e.An));
     }
 
+    /// <summary>
+    /// Alle offenen eigenen Entwürfe (optional nur eines Anlasses) als ZIP mit je einer .eml-Datei; merkt sich das Öffnen.
+    /// Gleiche Dateinamen bekommen eine laufende Nummer.
+    /// </summary>
+    public async Task<(byte[] Inhalt, string Dateiname, int Anzahl)> ZipAsync(string? anlass = null, CancellationToken abbruch = default)
+    {
+        var wer = await aktuell.ErmittelnAsync(abbruch);
+        Rechte.Angemeldet(wer).Sicherstellen();
+        var abfrage = daten.Menge<Mailentwurf>().Where(e => e.KontoId == wer.KontoId && e.Erledigt == null);
+        if (!string.IsNullOrWhiteSpace(anlass))
+        {
+            abfrage = abfrage.Where(e => e.Anlass == anlass);
+        }
+
+        var liste = await daten.ListeAsync(abfrage.OrderBy(e => e.Erstellt).ThenBy(e => e.An), abbruch);
+        if (liste.Count == 0)
+        {
+            throw new FachlicherFehler("Keine offenen Mails zum Herunterladen.");
+        }
+
+        var signatur = await signaturen.VonAsync(wer.KontoIdPflicht, abbruch);
+        var jetzt = uhr.GetUtcNow();
+        var namen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        using var ziel = new MemoryStream();
+        using (var zip = new System.IO.Compression.ZipArchive(ziel, System.IO.Compression.ZipArchiveMode.Create, leaveOpen: true))
+        {
+            foreach (var e in liste)
+            {
+                var name = Eml.Dateiname(e.Betreff, e.AnName ?? e.An);
+                var basis = Path.GetFileNameWithoutExtension(name);
+                for (var i = 2; !namen.Add(name); i++)
+                {
+                    name = $"{basis}-{i}.eml";
+                }
+
+                var eintrag = zip.CreateEntry(name, System.IO.Compression.CompressionLevel.Optimal);
+                await using (var s = eintrag.Open())
+                {
+                    await s.WriteAsync(Eml.Erzeugen(e.An, e.AnName, e.Betreff, e.Text, signatur), abbruch);
+                }
+
+                e.AlsGeoeffnetMarkieren(jetzt);
+            }
+        }
+
+        await daten.SpeichernAsync(abbruch);
+        return (ziel.ToArray(), "mails.zip", liste.Count);
+    }
+
     public async Task ErledigtSetzenAsync(Guid id, bool erledigt, CancellationToken abbruch = default)
     {
         var e = await EigenerAsync(id, abbruch);

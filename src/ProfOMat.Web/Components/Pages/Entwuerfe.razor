@@ -23,6 +23,10 @@
 <section class="pm-card">
     <div class="pm-row">
         <h2 class="pm-grow">@(auchErledigte ? "Alle Entwürfe" : "Offene Entwürfe") (@liste.Count)</h2>
+        @if (liste.Any(e => e.Erledigt is null))
+        {
+            <a class="pm-btn" href="entwuerfe/mails.zip" data-enhance-nav="false" download title="Alle offenen Entwürfe als .eml-Dateien in einem ZIP; gelten danach als geöffnet">Alle offenen als ZIP</a>
+        }
         <label class="pm-check"><input type="checkbox" checked="@auchErledigte" @onchange="ErledigteUmschaltenAsync" /> Erledigte zeigen</label>
     </div>
     @if (liste.Count == 0)

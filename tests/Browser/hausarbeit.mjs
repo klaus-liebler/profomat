@@ -1,5 +1,6 @@
 // Browserprüfung Hausarbeit: Signatur hochladen, Liste mit mehreren Prüfungen, Themen einlesen, Teams mit Wünschen, Zuteilung,
-// Bestätigungsmails als .eml (Outlook-Entwurf mit Signatur), Bestätigung über den persönlichen Link, 390 px.
+// Bestätigungsmails als .eml (Outlook-Entwurf mit Signatur), Bestätigung mit terminlichen Einschränkungen über den persönlichen Link,
+// Gesprächstermine (Kalender, Einplanen per Klick und automatisch, Mailvorlage mit Platzhaltern, Terminmails, ZIP, .ics, Abo-Link), 390 px.
 // Aufruf:  node tests/Browser/hausarbeit.mjs http://localhost:5310 <Ordner für Bildschirmfotos>   (frische Datenbank)
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -89,6 +90,14 @@ try {
     schritt('Nach Wünschen zuteilen, Bestätigungsmails erstellen');
     await seite.klickText('button', 'Themen nach Wünschen zuteilen');
     await seite.warteAuf(`[...document.querySelectorAll('td select')].every(s => s.value !== '')`);
+    await seite.eval(`document.querySelector('details.pm-vorlage').open = true`);
+    await seite.warteAuf(`document.querySelector('details.pm-vorlage pre')?.textContent.includes('terminlichen Einschränkungen')`);
+    await seite.eingeben('#bv-text', 'Hallo {Name}, ohne Link');
+    await seite.warteAuf(`document.querySelector('details.pm-vorlage pre').textContent.includes('ohne Link')`);
+    await seite.klickText('button', 'Vorlage speichern');
+    await seite.warteAuf(`document.body.innerText.includes('braucht den Platzhalter {Link}')`);
+    await seite.klickText('button', 'Standardtext');
+    await seite.warteAuf(`document.querySelector('#bv-text').value.includes('{Link}')`);
     await seite.klickText('button', 'Bestätigungsmails erstellen (3)');
     await seite.warteAuf(`document.body.innerText.includes('3 Mail(s) in Outlook öffnen und senden')`);
     await foto('teams');
@@ -105,7 +114,7 @@ try {
     pruefen(eml.status === 200 && eml.text.startsWith('X-Unsent: 1') && eml.text.includes('multipart/related'), '.eml ohne Entwurfskennung oder Signatur');
     const textTeil = eml.text.split('Content-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: base64\r\n\r\n')[1].split('\r\n--')[0];
     const text = Buffer.from(textTeil.replace(/\r\n/g, ''), 'base64').toString('utf8');
-    pruefen(text.includes('Roboterarm') && text.includes('mit Paul Wolf') && text.includes('Prof. Dr. Erika Mustermann'), 'Mailtext unvollständig');
+    pruefen(text.includes('Roboterarm') && text.includes('mit Paul Wolf') && text.includes('Prof. Dr. Erika Mustermann') && text.includes('terminlichen Einschränkungen'), 'Mailtext unvollständig');
     const link = text.match(/https?:\/\/\S+\/hausarbeit\/bestaetigen\/\S+/)[0];
     await seite.oeffnen(basis + 'entwuerfe');
     await seite.warteAuf(`document.body.innerText.includes('in Outlook geöffnet')`);
@@ -118,6 +127,7 @@ try {
     await seite.oeffnen(basis + link.split('/').slice(-4).join('/'));
     await seite.breite(390, 844);
     await seite.warteAuf(`document.body.innerText.includes('Ihr Thema für die Hausarbeit') && document.body.innerText.includes('Lena Becker')`);
+    await seite.eingeben('#einschraenkungen', 'Montags erst ab 10 Uhr');
     await seite.klickText('button', 'Thema verbindlich annehmen');
     await seite.warteAuf(`document.body.innerText.includes('Danke!')`);
     await foto('bestaetigt-390px');
@@ -129,6 +139,58 @@ try {
     schritt('Stand in der Hausarbeit');
     await seite.oeffnen(basis + seitePfad.replace(/^\/+/, ''));
     await seite.warteAuf(`document.body.innerText.includes('1 / 3 bestätigt')`);
+
+    schritt('Gesprächstermine: Tag einstellen, per Klick und automatisch einplanen');
+    await seite.klickText('button[role=tab]', 'Gesprächstermine');
+    await seite.warteAuf(`!!document.querySelector('#g-tag')`);
+    await seite.eval(`(() => { const e = document.querySelector('#g-tag'); e.value = '2027-03-01'; e.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+    await seite.warteAuf(`[...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Tag hinzufügen' && !b.disabled)`);
+    await seite.klickText('button', 'Tag hinzufügen');
+    await seite.warteAuf(`document.body.innerText.includes('01.03.2027')`);
+    await seite.eingeben('#g-ort', 'SI 0110');
+    await seite.klickText('button', 'Einstellungen speichern');
+    await seite.warteAuf(`!!document.querySelector('.pm-kal-slot')`);
+    pruefen(await seite.eval(`document.querySelectorAll('.pm-kal-tag').length === 1 && document.querySelectorAll('.pm-kal-tag .pm-kal-slot').length === 40`), 'Kalender 08–18 Uhr im 15-Minuten-Raster fehlt');
+    pruefen(await seite.eval(`[...document.querySelectorAll('.pm-kal-karte')].every(k => k.getAttribute('draggable') === 'true')`), 'Teams nicht ziehbar');
+    await seite.eval(`[...document.querySelectorAll('.pm-kal-karte')].find(k => k.textContent.includes('Becker')).click()`);
+    await seite.warteAuf(`document.body.innerText.includes('Montags erst ab 10 Uhr')`);   // Einschränkungen in der Auswahl
+    await seite.eval(`document.querySelectorAll('.pm-kal-tag .pm-kal-slot')[8].click()`);  // 10:00
+    await seite.warteAuf(`document.querySelectorAll('.pm-kal-block').length === 1 && document.querySelector('.pm-kal-block').textContent.includes('10:00')`);
+    await seite.klickText('button', 'Ohne Termin automatisch einplanen (1)');
+    await seite.warteAuf(`document.querySelectorAll('.pm-kal-block').length === 2`);
+    pruefen(await seite.eval(`document.querySelectorAll('.pm-kal-konflikt').length === 0`), 'automatisch eingeplant, aber überschneidend');
+    await foto('kalender');
+    await seite.breite(390, 844);
+    await foto('kalender-390px');
+    await quer('Gesprächstermine');
+    await seite.breite(1280, 1000);
+
+    schritt('Terminmails mit Platzhaltern, ZIP, Kalenderdatei und Abo-Link');
+    await seite.eingeben('#v-betreff', 'Gespräch am {Datum} um {Uhrzeit} Uhr');
+    await seite.warteAuf(`document.body.innerText.includes('Gespräch am 01.03.2027 um')`);   // Vorschau
+    await seite.eingeben('#v-betreff', 'Gespräch {Raum}');
+    await seite.warteAuf(`document.body.innerText.includes('Unbekannte Platzhalter: {Raum}')`);
+    await seite.eingeben('#v-betreff', 'Gespräch am {Datum} um {Uhrzeit} Uhr');
+    await seite.klickText('button', 'Vorlage speichern');
+    await seite.warteAuf(`document.body.innerText.includes('Vorlage gespeichert')`);
+    await seite.klickText('button', 'Terminmails erstellen (3)');
+    await seite.warteAuf(`document.body.innerText.includes('Alle Terminmails als ZIP')`);
+    const zipHref = await seite.eval(`[...document.querySelectorAll('a')].find(a => a.textContent.includes('Alle Terminmails als ZIP')).getAttribute('href')`);
+    const zip = await seite.eval(`(async () => { const r = await fetch(${JSON.stringify(zipHref)}); const b = new Uint8Array(await r.arrayBuffer());
+        return { status: r.status, typ: r.headers.get('content-type') ?? '', pk: b[0] === 80 && b[1] === 75 }; })()`);
+    pruefen(zip.status === 200 && zip.typ.includes('zip') && zip.pk, 'ZIP der Terminmails fehlt');
+    const ics = await laden(seitePfad.replace(/^\/+/, '') + '/gespraeche.ics');
+    pruefen(ics.status === 200 && ics.typ.startsWith('text/calendar') && (ics.text.match(/BEGIN:VEVENT/g) ?? []).length === 2 && ics.text.includes('LOCATION:SI 0110'), 'Kalenderdatei unvollständig');
+    await seite.klickText('button', 'Abo-Link für Outlook erzeugen');
+    await seite.warteAuf(`!!document.querySelector('input[aria-label=Abo-Link]')`);
+    const abo = await seite.eval(`document.querySelector('input[aria-label=Abo-Link]').value`);
+    const aboAbruf = await laden(abo.replace(/^https?:\/\/[^/]+\//, ''));
+    pruefen(aboAbruf.status === 200 && aboAbruf.text.includes('BEGIN:VCALENDAR'), 'Abo-Link liefert keinen Kalender');
+    const falsch = await laden(abo.replace(/^https?:\/\/[^/]+\//, '').replace('.ics', 'x.ics'));
+    pruefen(falsch.status === 404, 'falscher Abo-Link nicht abgewiesen');
+    await foto('terminmails');
+    await seite.oeffnen(basis + 'entwuerfe');
+    await seite.warteAuf(`document.body.innerText.includes('Alle offenen als ZIP')`);
     console.log('\nHausarbeit vollständig. Bildschirmfotos: ' + bilder);
 } catch (e) {
     await foto('fehler');

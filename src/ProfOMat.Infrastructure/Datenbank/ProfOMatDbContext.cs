@@ -20,7 +20,7 @@ namespace ProfOMat.Infrastructure.Datenbank;
 public sealed class ProfOMatDbContext(DbContextOptions<ProfOMatDbContext> optionen) : DbContext(optionen)
 {
     /// <summary>Erhöhen, wenn sich das Modell ändert: eine ältere Datei wird dann beim Start abgelehnt (statt still falsch zu laufen).</summary>
-    public const int Schemaversion = 15;
+    public const int Schemaversion = 16;
 
     /// <summary>Tabellen, die mit Version 10 dazugekommen sind (Aufwertung 9 → 10 legt nur diese an).</summary>
     internal static readonly string[] TabellenAbVersion10 = ["Hausarbeiten", "HausarbeitThemen", "HausarbeitPersonen", "HausarbeitTeams", "Teammitglieder", "Mailentwuerfe", "Mailsignaturen", "MailsignaturBilder"];
@@ -292,6 +292,14 @@ public sealed class ProfOMatDbContext(DbContextOptions<ProfOMatDbContext> option
             e.Ignore(h => h.PersonenSortiert);
             e.Ignore(h => h.OhneTeam);
             e.Ignore(h => h.NaechsteThemennummer);
+            e.Ignore(h => h.Gespraechstage);
+            e.Ignore(h => h.BetreffVorlage);
+            e.Ignore(h => h.TextVorlage);
+            e.Ignore(h => h.MitTermin);
+            e.Ignore(h => h.OhneTermin);
+            e.Ignore(h => h.BestaetigungBetreffVorlage);
+            e.Ignore(h => h.BestaetigungTextVorlage);
+            e.Property(h => h.GespraechOrt).HasMaxLength(Hausarbeit.OrtMaxLaenge);
             e.Property(h => h.Titel).HasMaxLength(Hausarbeit.TitelMaxLaenge);
             e.HasOne<Konto>().WithMany().HasForeignKey(h => h.KontoId).OnDelete(DeleteBehavior.Restrict);
             e.HasMany(h => h.Themen).WithOne().HasForeignKey(t => t.HausarbeitId).OnDelete(DeleteBehavior.Cascade);

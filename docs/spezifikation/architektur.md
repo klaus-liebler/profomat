@@ -212,3 +212,19 @@ KI-Chat nach Wahl der Lehrenden, ProfOMat prüft nur das Ergebnis. Format (Betr�
 Prüfungen: Format und Stichtag, `budget − ausgegeben = rest` (auf 1 ct), Summe der Buchungen = `ausgegeben`; Abweichungen werden
 gezeigt, nicht still korrigiert. Im Prompt steht ausdrücklich, dass im PDF negative Salden noch verfügbare Mittel bedeuten und dass die
 Budgetzeilen (930300) keine Ausgaben sind.
+
+## Hausarbeiten: Erörterungsgespräche (Iteration 5b)
+
+- **Termin am Team, Einschränkungen am Teammitglied:** ein Gespräch je Team (`Team.Termin`, Ortszeit Europe/Berlin als `DateTime`); jede Person meldet
+  über ihren eigenen Link, wann sie nicht kann (`Teammitglied.Einschraenkungen`). `Teammitglied.TerminMitgeteilt` merkt sich den zuletzt per Mail
+  mitgeteilten Teamtermin – weicht er ab, braucht die Person eine neue Mail.
+- **Kalender ohne eigenes Skript für die Logik:** HTML5-Ziehen über Blazor-Ereignisse (`ondragstart`/`ondrop`); `termine.js` setzt nur
+  `dataTransfer` (Firefox startet sonst kein Ziehen). Gleichwertig per Klick und Tastatur. Während des Ziehens ignorieren Blöcke Mausereignisse, damit
+  die Zeitfelder darunter das Ablegen bekommen.
+- **Mailvorlagen** (Bestätigung FA-613, Termin FA-610) liegen je Hausarbeit; gespeichert wird nur eine Abweichung vom Standardtext (sonst null),
+  damit spätere Verbesserungen des Standardtexts alle erreichen, die nichts geändert haben. Platzhalter `{Name}`; unbekannte werden abgelehnt.
+- **Terminmails** sind Entwürfe des persönlichen Postausgangs mit eigenem Bezug (abgeleitet aus der Mitglieds-Id), damit sie den Bestätigungsentwurf
+  nicht ersetzen. ZIP: `/entwuerfe/mails.zip?anlass=…`.
+- **Kalender:** RFC 5545, Zeiten in UTC, Text maskiert und auf 75 Oktette umbrochen, UID je Team (Outlook aktualisiert verschobene Termine).
+  Abo-Link `/hausarbeit/kalender/{id}/{token}.ics` ohne Anmeldung, nur mit gültigem Token (gespeichert als SHA-256), `noindex`.
+

@@ -109,6 +109,12 @@ public static class DatenbankInitialisierung
             version = 15;
         }
 
+        if (version == 15)
+        {
+            await AufVersion16Async(db, abbruch);
+            version = 16;
+        }
+
         if (version != ProfOMatDbContext.Schemaversion)
         {
             throw new InvalidOperationException(
@@ -156,6 +162,48 @@ public static class DatenbankInitialisierung
 
         var info = await db.Set<Schemainfo>().SingleAsync(abbruch);
         info.Version = 12;
+        await db.SaveChangesAsync(abbruch);
+        await transaktion.CommitAsync(abbruch);
+    }
+
+    /// <summary>
+    /// 15 → 16 ohne Datenverlust: Gesprächsplanung der Hausarbeiten (Einschränkungen und mitgeteilter Termin je Teammitglied, Termin je Team,
+    /// Dauer/Tage/Zeitfenster/Ort/Mailvorlagen für Termin und Bestätigung/Kalender-Token je Hausarbeit). Bisherige Bestätigungen: keine Einschränkungen gemeldet.
+    /// </summary>
+    private static async Task AufVersion16Async(ProfOMatDbContext db, CancellationToken abbruch)
+    {
+        await using var transaktion = await db.Database.BeginTransactionAsync(abbruch);
+        (Type Typ, string Eigenschaft, string Sql)[] spalten =
+        [
+            (typeof(ProfOMat.Domain.Hausarbeiten.Teammitglied), nameof(ProfOMat.Domain.Hausarbeiten.Teammitglied.Einschraenkungen), "TEXT NULL"),
+            (typeof(ProfOMat.Domain.Hausarbeiten.Teammitglied), nameof(ProfOMat.Domain.Hausarbeiten.Teammitglied.TerminMitgeteilt), "TEXT NULL"),
+            (typeof(ProfOMat.Domain.Hausarbeiten.Team), nameof(ProfOMat.Domain.Hausarbeiten.Team.Termin), "TEXT NULL"),
+            (typeof(ProfOMat.Domain.Hausarbeiten.Hausarbeit), nameof(ProfOMat.Domain.Hausarbeiten.Hausarbeit.GespraechMinuten), "INTEGER NOT NULL DEFAULT 30"),
+            (typeof(ProfOMat.Domain.Hausarbeiten.Hausarbeit), nameof(ProfOMat.Domain.Hausarbeiten.Hausarbeit.GespraechTageText), "TEXT NULL"),
+            (typeof(ProfOMat.Domain.Hausarbeiten.Hausarbeit), nameof(ProfOMat.Domain.Hausarbeiten.Hausarbeit.TagBeginnMinuten), "INTEGER NOT NULL DEFAULT 480"),
+            (typeof(ProfOMat.Domain.Hausarbeiten.Hausarbeit), nameof(ProfOMat.Domain.Hausarbeiten.Hausarbeit.TagEndeMinuten), "INTEGER NOT NULL DEFAULT 1080"),
+            (typeof(ProfOMat.Domain.Hausarbeiten.Hausarbeit), nameof(ProfOMat.Domain.Hausarbeiten.Hausarbeit.GespraechOrt), "TEXT NULL"),
+            (typeof(ProfOMat.Domain.Hausarbeiten.Hausarbeit), nameof(ProfOMat.Domain.Hausarbeiten.Hausarbeit.TerminBetreff), "TEXT NULL"),
+            (typeof(ProfOMat.Domain.Hausarbeiten.Hausarbeit), nameof(ProfOMat.Domain.Hausarbeiten.Hausarbeit.TerminVorlage), "TEXT NULL"),
+            (typeof(ProfOMat.Domain.Hausarbeiten.Hausarbeit), nameof(ProfOMat.Domain.Hausarbeiten.Hausarbeit.KalenderTokenHash), "TEXT NULL"),
+            (typeof(ProfOMat.Domain.Hausarbeiten.Hausarbeit), nameof(ProfOMat.Domain.Hausarbeiten.Hausarbeit.BestaetigungBetreff), "TEXT NULL"),
+            (typeof(ProfOMat.Domain.Hausarbeiten.Hausarbeit), nameof(ProfOMat.Domain.Hausarbeiten.Hausarbeit.BestaetigungVorlage), "TEXT NULL"),
+        ];
+        foreach (var (typ, eigenschaft, sqlTyp) in spalten)
+        {
+            var et = db.Model.FindEntityType(typ)!;
+            var tabelle = et.GetTableName()!;
+            var spalte = et.FindProperty(eigenschaft)!.GetColumnName();
+            var vorhanden = await db.Database.SqlQuery<int>($"SELECT COUNT(*) AS \"Value\" FROM pragma_table_info({tabelle}) WHERE name = {spalte}").SingleAsync(abbruch);
+            if (vorhanden == 0)
+            {
+                var sql = "ALTER TABLE \"" + tabelle + "\" ADD COLUMN \"" + spalte + "\" " + sqlTyp + ";";
+                await db.Database.ExecuteSqlRawAsync(sql, abbruch);
+            }
+        }
+
+        var info = await db.Set<Schemainfo>().SingleAsync(abbruch);
+        info.Version = 16;
         await db.SaveChangesAsync(abbruch);
         await transaktion.CommitAsync(abbruch);
     }

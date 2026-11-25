@@ -291,6 +291,50 @@ app.MapGet("/klausuren/{id:guid}/{datei}", async (Guid id, string datei, ProfOMa
     }
 }).RequireAuthorization();
 
+// Alle offenen eigenen Mailentwürfe (optional eines Anlasses) als ZIP mit .eml-Dateien
+app.MapGet("/entwuerfe/mails.zip", async (string? anlass, ProfOMat.Application.Betrieb.Mailentwuerfe dienst, HttpContext http) =>
+{
+    try
+    {
+        var (inhalt, name, _) = await dienst.ZipAsync(anlass);
+        http.Response.Headers.CacheControl = "no-store";
+        return Results.File(inhalt, "application/zip", name);
+    }
+    catch (FachlicherFehler ex)
+    {
+        return Results.Text(ex.Message, "text/plain; charset=utf-8", statusCode: StatusCodes.Status409Conflict);
+    }
+}).RequireAuthorization();
+
+// Gesprächstermine einer Hausarbeit als Kalenderdatei (nur Betreuende; prüft der Dienst)
+app.MapGet("/hausarbeiten/{id:guid}/gespraeche.ics", async (Guid id, ProfOMat.Application.Hausarbeiten.HausarbeitDienst dienst, HttpContext http) =>
+{
+    try
+    {
+        var (inhalt, name) = await dienst.KalenderAsync(id);
+        http.Response.Headers.CacheControl = "no-store";
+        return Results.File(inhalt, "text/calendar; charset=utf-8", name);
+    }
+    catch (FachlicherFehler ex)
+    {
+        return Results.Text(ex.Message, "text/plain; charset=utf-8", statusCode: StatusCodes.Status409Conflict);
+    }
+}).RequireAuthorization();
+
+// Kalender-Abo ohne Anmeldung über den geheimen Link (Outlook: „Kalender aus dem Internet“); falscher Link → 404
+app.MapGet("/hausarbeit/kalender/{id:guid}/{token}.ics", async (Guid id, string token, ProfOMat.Application.Hausarbeiten.HausarbeitDienst dienst, HttpContext http) =>
+{
+    var inhalt = await dienst.KalenderAboAsync(id, token);
+    if (inhalt is null)
+    {
+        return Results.NotFound();
+    }
+
+    http.Response.Headers.CacheControl = "no-store";
+    http.Response.Headers["X-Robots-Tag"] = "noindex";
+    return Results.File(inhalt, "text/calendar; charset=utf-8");
+}).AllowAnonymous();
+
 // Mailentwürfe als .eml: das Desktop-Outlook öffnet sie als neue Mail (nur der eigene Entwurf; prüft der Dienst)
 app.MapGet("/entwuerfe/{id:guid}/mail.eml", async (Guid id, ProfOMat.Application.Betrieb.Mailentwuerfe dienst, HttpContext http) =>
 {

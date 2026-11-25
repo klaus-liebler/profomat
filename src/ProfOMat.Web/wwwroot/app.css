@@ -354,3 +354,34 @@ kbd { font-family: var(--pm-mono); font-size: 11.5px; border: 1px solid var(--pm
 .pm-fin-balken i { display: block; height: 7px; border-radius: 0 4px 4px 0; margin: 2px 0; min-width: 0; }
 .pm-fin-ist { background: #257de0; }
 .pm-fin-plan { background: #f47230; }
+
+/* Kalender der Gesprächstermine (Hausarbeit) */
+.pm-kal-rahmen { display: grid; grid-template-columns: minmax(180px, 220px) minmax(0, 1fr); gap: 14px; align-items: start; margin: 10px 0; }
+.pm-kal-liste { border: 1px dashed var(--pm-line); border-radius: 8px; padding: 8px; display: flex; flex-direction: column; gap: 6px; max-height: 70vh; overflow-y: auto; }
+.pm-kal-liste h3 { margin: 0 0 4px; font-size: 14px; }
+.pm-kal-liste.pm-kal-ablage { border-color: var(--pm-accent); background: var(--pm-accent-weak); }
+.pm-kal-karte { border: 1px solid var(--pm-line); border-left: 4px solid #257de0; border-radius: 6px; padding: 6px 8px; background: var(--pm-surface); cursor: grab; display: flex; flex-direction: column; }
+.pm-kal-karte.on, .pm-kal-block.on { outline: 2px solid var(--pm-fg); outline-offset: 1px; }
+.pm-kal { --zeile: 18px; display: flex; overflow-x: auto; border: 1px solid var(--pm-line); border-radius: 8px; background: var(--pm-surface); }
+.pm-kal-zeiten { flex: none; width: 52px; border-right: 1px solid var(--pm-line); }
+.pm-kal-kopf { height: 30px; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; border-bottom: 1px solid var(--pm-line); white-space: nowrap; position: sticky; top: 0; background: var(--pm-surface); }
+.pm-kal-zeit { height: var(--zeile); font-size: 11px; color: var(--pm-muted); text-align: right; padding-right: 6px; line-height: 1; }
+.pm-kal-tag { flex: 1 0 140px; border-right: 1px solid var(--pm-line); }
+.pm-kal-tag:last-child { border-right: 0; }
+.pm-kal-spalte { position: relative; }
+.pm-kal-slot { display: block; width: 100%; height: var(--zeile); border: 0; border-top: 1px dotted var(--pm-line); background: transparent; padding: 0; cursor: pointer; }
+.pm-kal-slot.pm-kal-stunde { border-top: 1px solid var(--pm-line); }
+.pm-kal-slot:hover, .pm-kal-slot:focus-visible { background: var(--pm-accent-weak); outline: none; }
+.pm-kal-block { position: absolute; left: 3px; right: 3px; border-radius: 5px; background: #dbe9fb; border-left: 4px solid #257de0; padding: 1px 6px; font-size: 11px; line-height: 1.25;
+    overflow: hidden; cursor: grab; display: flex; flex-direction: column; color: var(--pm-fg); }
+.pm-kal-block span { color: var(--pm-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pm-kal-block.pm-kal-konflikt { background: var(--pm-crit-weak); border-left-color: var(--pm-crit); }
+.pm-kal-ziehen .pm-kal-block { pointer-events: none; opacity: 0.55; }
+.pm-kal-auswahl { border: 1px solid var(--pm-line); border-radius: 8px; padding: 10px 12px; margin: 10px 0; background: var(--pm-surface-2); }
+.pm-kal-auswahl h3 { margin-top: 0; }
+@media (max-width: 720px) {
+    .pm-kal-rahmen { grid-template-columns: minmax(0, 1fr); }
+    .pm-kal-liste { max-height: none; }
+}
+.pm-vorlage summary { cursor: pointer; padding: 2px 0; }
+.pm-vorlage[open] summary { margin-bottom: 8px; }

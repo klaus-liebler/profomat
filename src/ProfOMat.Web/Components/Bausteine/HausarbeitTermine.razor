@@ -1,0 +1,462 @@
+@*
+    Erörterungsgespräche (FA-609–FA-612): Einstellungen, Kalender im 15-Minuten-Raster (Teams als Blöcke ziehen oder per Klick setzen),
+    Einschränkungen der Studierenden, Terminmails mit Platzhaltern, ZIP aller .eml, Kalender für Outlook (Datei und Abo-Link).
+*@
+@using System.Globalization
+@using ProfOMat.Application.Hausarbeiten
+@using ProfOMat.Domain.Hausarbeiten
+@inject Vorgang Vorgang
+@inject NotificationService Hinweise
+@inject IJSRuntime JS
+@inject NavigationManager Navigation
+@implements IAsyncDisposable
+
+@if (fehler is not null)
+{
+    <div class="pm-alert pm-crit" role="alert">@fehler</div>
+}
+
+<section class="pm-card">
+    <h2>Gespräche einstellen</h2>
+    <div class="pm-fields">
+        <div class="pm-field">
+            <label class="pm-lbl" for="g-dauer">Dauer je Gespräch</label>
+            <select id="g-dauer" class="pm-select" @bind="dauer">
+                @for (var m = 15; m <= 120; m += 15)
+                {
+                    <option value="@m">@m Minuten</option>
+                }
+            </select>
+        </div>
+        <div class="pm-field">
+            <label class="pm-lbl" for="g-von">Tagesbeginn</label>
+            <input id="g-von" type="time" step="900" class="pm-input" @bind="beginn" />
+        </div>
+        <div class="pm-field">
+            <label class="pm-lbl" for="g-bis">Tagesende</label>
+            <input id="g-bis" type="time" step="900" class="pm-input" @bind="ende" />
+        </div>
+        <div class="pm-field">
+            <label class="pm-lbl" for="g-ort">Ort</label>
+            <input id="g-ort" class="pm-input" @bind="ort" maxlength="@Hausarbeit.OrtMaxLaenge" placeholder="z. B. SI 0110 oder Zoom-Link" />
+        </div>
+        <div class="pm-field pm-field-weit">
+            <label class="pm-lbl" for="g-tag">Gesprächstage</label>
+            <div class="pm-row">
+                <input id="g-tag" type="date" class="pm-input pm-fin-kurz" @bind="neuerTag" />
+                <button type="button" class="pm-btn" @onclick="TagHinzu" disabled="@(neuerTag is null)">Tag hinzufügen</button>
+                @foreach (var t in tage.Order())
+                {
+                    var tag = t;
+                    <span class="pm-chip">@tag.ToString("ddd dd.MM.yyyy", De) <button type="button" class="pm-linkbutton" @onclick="() => tage.Remove(tag)" aria-label="@($"{tag:dd.MM.} entfernen")">✕</button></span>
+                }
+            </div>
+        </div>
+    </div>
+    <BegruendeterButton Text="Einstellungen speichern" Haupt="@(tage.Count > 0 && H.Gespraechstage.Count == 0)" Click="EinstellenAsync" Beschaeftigt="@beschaeftigt"
+                        Freigabe="@(tage.Count == 0 ? Freigabe.Nein("Bitte mindestens einen Gesprächstag hinzufügen.") : Freigabe.Ja)" />
+</section>
+
+@if (H.Gespraechstage.Count > 0)
+{
+    var konflikte = H.Ueberschneidungen();
+    var konfliktTeams = konflikte.SelectMany(k => new[] { k.A.Id, k.B.Id }).ToHashSet();
+    var slots = (H.TagEndeMinuten - H.TagBeginnMinuten) / Hausarbeit.Raster;
+    <section class="pm-card">
+        <div class="pm-row" style="justify-content: space-between">
+            <h2>Kalender</h2>
+            <div class="pm-row">
+                <BegruendeterButton Text="@($"Ohne Termin automatisch einplanen ({H.OhneTermin.Count()})")" Click="VerteilenAsync" Beschaeftigt="@beschaeftigt"
+                                    Freigabe="@(H.OhneTermin.Any() ? Freigabe.Ja : Freigabe.Nein("Alle Teams mit Thema haben einen Termin."))" />
+            </div>
+        </div>
+        <p class="pm-small pm-muted">Teams mit der Maus auf eine Uhrzeit ziehen – oder ein Team anklicken und dann die Uhrzeit. Ein Team zurück in die Liste ziehen entfernt den Termin.
+            ⚑ = Einschränkungen gemeldet (Details beim Anklicken).</p>
+        @foreach (var (a, b) in konflikte)
+        {
+            <div class="pm-alert pm-warn" role="status">Überschneidung: Team @a.Nr (@a.Termin!.Value.ToString("ddd HH:mm", De)) und Team @b.Nr (@b.Termin!.Value.ToString("ddd HH:mm", De)).</div>
+        }
+
+        <div class="pm-kal-rahmen">
+            <div class="pm-kal-liste @(ziehen is not null ? "pm-kal-ablage" : null)" @ondragover:preventDefault @ondrop="ZurueckAsync" aria-label="Teams ohne Termin">
+                <h3>Ohne Termin (@H.OhneTermin.Count())</h3>
+                @foreach (var t in H.OhneTermin)
+                {
+                    var team = t;
+                    <div class="pm-kal-karte @(gewaehlt == team.Id ? "on" : null)" draggable="true" data-zieh="@team.Id" @ondragstart="() => ziehen = team.Id" @ondragend="() => ziehen = null"
+                         @onclick="() => Waehlen(team.Id)" role="button" tabindex="0" @onkeydown="e => TasteWaehlen(e, team.Id)">
+                        <b>Team @team.Nr</b>@(Einschraenkungen(team).Count > 0 ? " ⚑" : "")
+                        <span class="pm-small">@Namen(team)</span>
+                    </div>
+                }
+                @if (!H.OhneTermin.Any())
+                {
+                    <p class="pm-small pm-muted">Alle eingeplant.</p>
+                }
+            </div>
+
+            <div class="pm-kal @(ziehen is not null ? "pm-kal-ziehen" : null)" style="--slots: @slots">
+                <div class="pm-kal-zeiten" aria-hidden="true">
+                    <div class="pm-kal-kopf"></div>
+                    @for (var i = 0; i < slots; i++)
+                    {
+                        var min = H.TagBeginnMinuten + (i * Hausarbeit.Raster);
+                        <div class="pm-kal-zeit">@(min % 60 == 0 ? Hausarbeit.Uhr(min) : "")</div>
+                    }
+                </div>
+                @foreach (var tag in H.Gespraechstage)
+                {
+                    var tagLokal = tag;
+                    <div class="pm-kal-tag">
+                        <div class="pm-kal-kopf">@tagLokal.ToString("ddd dd.MM.", De)</div>
+                        <div class="pm-kal-spalte">
+                            @for (var i = 0; i < slots; i++)
+                            {
+                                var min = H.TagBeginnMinuten + (i * Hausarbeit.Raster);
+                                var beginnSlot = tagLokal.ToDateTime(TimeOnly.MinValue).AddMinutes(min);
+                                <button type="button" class="pm-kal-slot @(min % 60 == 0 ? "pm-kal-stunde" : null)" aria-label="@($"{tagLokal:ddd dd.MM.} {Hausarbeit.Uhr(min)}")"
+                                        @onclick="() => SlotAsync(beginnSlot)" @ondragover:preventDefault @ondrop="() => AblegenAsync(beginnSlot)"></button>
+                            }
+                            @foreach (var t in H.MitTermin.Where(x => DateOnly.FromDateTime(x.Termin!.Value) == tagLokal))
+                            {
+                                var team = t;
+                                var oben = ((team.Termin!.Value.Hour * 60) + team.Termin.Value.Minute - H.TagBeginnMinuten) / Hausarbeit.Raster;
+                                <div class="pm-kal-block @(gewaehlt == team.Id ? "on" : null) @(konfliktTeams.Contains(team.Id) ? "pm-kal-konflikt" : null)"
+                                     style="top: calc(var(--zeile) * @oben); height: calc(var(--zeile) * @(H.GespraechMinuten / Hausarbeit.Raster) - 2px)"
+                                     draggable="true" data-zieh="@team.Id" @ondragstart="() => ziehen = team.Id" @ondragend="() => ziehen = null"
+                                     @onclick="() => Waehlen(team.Id)" role="button" tabindex="0" @onkeydown="e => TasteWaehlen(e, team.Id)"
+                                     title="@($"Team {team.Nr}: {Namen(team)}{string.Concat(Einschraenkungen(team).Select(x => $"\n{x.Name}: {x.Text}"))}")">
+                                    <b>@team.Termin.Value.ToString("HH:mm") Team @team.Nr@(Einschraenkungen(team).Count > 0 ? " ⚑" : "")</b>
+                                    <span>@Namen(team)</span>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+
+        @if (gewaehlt is { } gid && H.Teams.FirstOrDefault(t => t.Id == gid) is { } gt)
+        {
+            <div class="pm-kal-auswahl">
+                <h3>Team @gt.Nr · @(H.Thema(gt.ThemaId)?.Anzeige ?? "ohne Thema")</h3>
+                <dl class="pm-dl">
+                    <dt>Termin</dt>
+                    <dd>@(gt.Termin is { } tt ? $"{tt.ToString("dddd, dd.MM.yyyy, HH:mm", De)}–{H.Ende(gt)!.Value:HH:mm} Uhr" : "noch keiner – jetzt eine Uhrzeit im Kalender anklicken")</dd>
+                    @foreach (var m in gt.Mitglieder)
+                    {
+                        var p = H.Person(m.PersonId);
+                        <dt>@p.VollerName</dt>
+                        <dd>@(m.Bestaetigt is null ? "Thema noch nicht bestätigt" : m.Einschraenkungen ?? "keine Einschränkungen gemeldet")
+                            @(gt.Termin is not null && m.TerminMitgeteilt == gt.Termin ? " · Termin mitgeteilt" : gt.Termin is not null ? " · Termin noch nicht mitgeteilt" : "")</dd>
+                    }
+                </dl>
+                <div class="pm-row">
+                    <BegruendeterButton Text="Termin entfernen" Click="() => TerminAsync(gt.Id, null)" Beschaeftigt="@beschaeftigt"
+                                        Freigabe="@(gt.Termin is null ? Freigabe.Nein("Das Team hat keinen Termin.") : Freigabe.Ja)" />
+                    <button type="button" class="pm-btn" @onclick="() => gewaehlt = null">Auswahl aufheben</button>
+                </div>
+            </div>
+        }
+
+        <div class="pm-row">
+            <a class="pm-btn" href="hausarbeiten/@H.Id/gespraeche.ics" data-enhance-nav="false" download>Alle Termine als Kalenderdatei (.ics)</a>
+            <BegruendeterButton Text="@(H.KalenderTokenHash is null ? "Abo-Link für Outlook erzeugen" : "Neuen Abo-Link erzeugen")" Click="AboAsync" Beschaeftigt="@beschaeftigt" />
+            @if (H.KalenderTokenHash is not null)
+            {
+                <BegruendeterButton Text="Abo-Link zurückziehen" Gefahr="true" Click="AboBeendenAsync" Beschaeftigt="@beschaeftigt" />
+            }
+        </div>
+        @if (aboLink is not null)
+        {
+            <div class="pm-alert pm-info" role="status">
+                <p>Abo-Link (nur jetzt sichtbar – bitte gleich in Outlook eintragen: <i>Kalender hinzufügen → Aus dem Internet abonnieren</i>). Outlook holt die Termine
+                    regelmäßig neu, verschobene Gespräche erscheinen dort ohne neuen Import. Wer den Link kennt, sieht Namen und Themen – nicht weitergeben.</p>
+                <div class="pm-row"><input class="pm-input pm-grow pm-mono" readonly value="@aboLink" aria-label="Abo-Link" /><button type="button" class="pm-btn" @onclick="KopierenAsync">Kopieren</button></div>
+            </div>
+        }
+        else if (H.KalenderTokenHash is not null)
+        {
+            <p class="pm-small pm-muted">Ein Abo-Link ist aktiv. Er wird nicht gespeichert und lässt sich nicht erneut anzeigen – bei Verlust einen neuen erzeugen (der alte gilt dann nicht mehr).</p>
+        }
+    </section>
+
+    <section class="pm-card">
+        <h2>Termine mitteilen</h2>
+        <div class="pm-fields">
+            <div class="pm-field pm-field-weit">
+                <label class="pm-lbl" for="v-betreff">Betreff</label>
+                <input id="v-betreff" class="pm-input" @bind="betreff" @bind:event="oninput" maxlength="300" />
+            </div>
+            <div class="pm-field pm-field-weit">
+                <label class="pm-lbl" for="v-text">Text</label>
+                <textarea id="v-text" class="pm-textarea" rows="14" @bind="vorlage" @bind:event="oninput"></textarea>
+            </div>
+        </div>
+        <p class="pm-small">Platzhalter:
+            @foreach (var (name, text) in Terminplatzhalter.Beschreibung)
+            {
+                <span class="pm-chip pm-mono" title="@text">{@name}</span>
+            }
+        </p>
+        @if (Unbekannte.Count > 0)
+        {
+            <div class="pm-alert pm-warn" role="status">Unbekannte Platzhalter: @string.Join(", ", Unbekannte.Select(u => "{" + u + "}"))</div>
+        }
+        @if (Vorschau is { } v)
+        {
+            <details class="pm-za-tabelle" open>
+                <summary>Vorschau für @v.An</summary>
+                <pre class="pm-signiertext"><b>@v.Betreff</b>
+
+@v.Text</pre>
+            </details>
+        }
+        @{
+            var offen = H.TerminZuBenachrichtigen().Count;
+        }
+        <div class="pm-row">
+            <BegruendeterButton Text="Vorlage speichern" Click="VorlageAsync" Beschaeftigt="@beschaeftigt"
+                                Freigabe="@(!Geaendert0 ? Freigabe.Nein("Keine Änderung.") : Unbekannte.Count > 0 ? Freigabe.Nein("Erst die unbekannten Platzhalter korrigieren.") : Freigabe.Ja)" />
+            <BegruendeterButton Text="@($"Terminmails erstellen ({offen})")" Haupt="true" Click="MailsAsync" Beschaeftigt="@beschaeftigt"
+                                Freigabe="@(Geaendert0 ? Freigabe.Nein("Erst die geänderte Vorlage speichern.") : offen == 0 ? Freigabe.Nein("Allen mit Termin ist ihr aktueller Termin schon mitgeteilt (nach einem Verschieben erscheinen sie hier wieder).") : Freigabe.Ja)" />
+            <button type="button" class="pm-linkbutton" @onclick="Standard">Standardtext</button>
+        </div>
+        <p class="pm-small pm-muted">Die Mails entstehen als Entwürfe unter <a href="entwuerfe">Mails zum Versenden</a> (Versand aus Ihrem Outlook). Wird ein Team verschoben,
+            braucht es eine neue Mail; der alte Entwurf wird ersetzt.</p>
+        @if (erstellt > 0)
+        {
+            <NaechsteSchritte Schritte="@([new NaechsterSchritt("Alle Terminmails als ZIP (.eml)", $"entwuerfe/mails.zip?anlass={Uri.EscapeDataString(HausarbeitDienst.AnlassTermin)}", Hauptschritt: true),
+                                           new NaechsterSchritt("Mails zum Versenden", "entwuerfe")])" />
+        }
+    </section>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public Hausarbeit H { get; set; } = default!;
+
+    [Parameter]
+    public EventCallback Geaendert { get; set; }
+
+    private static readonly CultureInfo De = CultureInfo.GetCultureInfo("de-DE");
+
+    private int dauer = 30;
+    private TimeOnly beginn = new(8, 0), ende = new(18, 0);
+    private string? ort, fehler, betreff, vorlage, aboLink, absender;
+    private List<DateOnly> tage = [];
+    private DateOnly? neuerTag;
+    private Guid? gewaehlt, ziehen;
+    private bool beschaeftigt, geladen;
+    private int erstellt;
+    private IJSObjectReference? modul;
+
+    private bool Geaendert0 => (betreff ?? "") != H.BetreffVorlage || (vorlage ?? "").ReplaceLineEndings("\n").Trim() != H.TextVorlage.ReplaceLineEndings("\n").Trim();
+
+    private IReadOnlyList<string> Unbekannte => [.. Terminplatzhalter.Unbekannte(betreff).Concat(Terminplatzhalter.Unbekannte(vorlage)).Distinct()];
+
+    private (string An, string Betreff, string Text)? Vorschau
+    {
+        get
+        {
+            var team = H.MitTermin.FirstOrDefault();
+            if (team is null || team.Mitglieder.Count == 0)
+            {
+                return null;
+            }
+
+            var werte = H.Terminwerte(team, team.Mitglieder[0], absender ?? "");
+            return (H.Person(team.Mitglieder[0].PersonId).VollerName, Terminplatzhalter.Ersetzen(betreff ?? "", werte), Terminplatzhalter.Ersetzen(vorlage ?? "", werte));
+        }
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!geladen)
+        {
+            geladen = true;
+            absender = (await Vorgang.BenutzerAsync()).Name;
+            (dauer, ort, tage) = (H.GespraechMinuten, H.GespraechOrt, [.. H.Gespraechstage]);
+            (beginn, ende) = (new TimeOnly(H.TagBeginnMinuten / 60, H.TagBeginnMinuten % 60), new TimeOnly(H.TagEndeMinuten / 60, H.TagEndeMinuten % 60));
+            (betreff, vorlage) = (H.BetreffVorlage, H.TextVorlage);
+            neuerTag = tage.Count > 0 ? tage.Max().AddDays(1) : null;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            try
+            {
+                modul = await JS.InvokeAsync<IJSObjectReference>("import", Navigation.ToAbsoluteUri("termine.js").ToString());
+                await modul.InvokeVoidAsync("einrichten");
+            }
+            catch (JSException)
+            {
+            }
+        }
+    }
+
+    private string Namen(Team t) => string.Join(", ", t.Mitglieder.Select(m => H.Person(m.PersonId).Nachname));
+
+    private IReadOnlyList<(string Name, string Text)> Einschraenkungen(Team t)
+        => [.. t.Mitglieder.Where(m => m.Einschraenkungen is not null).Select(m => (H.Person(m.PersonId).VollerName, m.Einschraenkungen!))];
+
+    private void TagHinzu()
+    {
+        if (neuerTag is { } t && !tage.Contains(t))
+        {
+            tage.Add(t);
+            neuerTag = t.AddDays(1);
+        }
+    }
+
+    private void Waehlen(Guid id) => gewaehlt = gewaehlt == id ? null : id;
+
+    private void TasteWaehlen(KeyboardEventArgs e, Guid id)
+    {
+        if (e.Key is "Enter" or " ")
+        {
+            Waehlen(id);
+        }
+    }
+
+    private async Task AusfuehrenAsync(Func<HausarbeitDienst, Task> aktion, string? erfolg = null)
+    {
+        if (beschaeftigt)
+        {
+            return;
+        }
+
+        fehler = null;
+        beschaeftigt = true;
+        try
+        {
+            await Vorgang.AusfuehrenAsync(d => aktion(d.GetRequiredService<HausarbeitDienst>()));
+            if (erfolg is not null)
+            {
+                Hinweise.Notify(NotificationSeverity.Success, erfolg);
+            }
+
+            await Geaendert.InvokeAsync();
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+            Hinweise.Notify(NotificationSeverity.Warning, ex.Message);
+        }
+        finally
+        {
+            beschaeftigt = false;
+        }
+    }
+
+    private Task EinstellenAsync()
+    {
+        var liste = tage.ToList();
+        return AusfuehrenAsync(d => d.GespraecheEinstellenAsync(H.Id, dauer, liste, beginn, ende, ort), "Gespräche eingestellt.");
+    }
+
+    private Task TerminAsync(Guid teamId, DateTime? beginnZeit) => AusfuehrenAsync(d => d.TerminSetzenAsync(H.Id, teamId, beginnZeit));
+
+    private async Task SlotAsync(DateTime beginnZeit)
+    {
+        if (gewaehlt is { } id)
+        {
+            if (H.TerminSetzbar(id, beginnZeit) is { Erlaubt: false } nein)
+            {
+                fehler = nein.Begruendung;
+                return;
+            }
+
+            await TerminAsync(id, beginnZeit);
+        }
+    }
+
+    private async Task AblegenAsync(DateTime beginnZeit)
+    {
+        if (ziehen is { } id)
+        {
+            ziehen = null;
+            if (H.TerminSetzbar(id, beginnZeit) is { Erlaubt: false } nein)
+            {
+                fehler = nein.Begruendung;
+                return;
+            }
+
+            gewaehlt = id;
+            await TerminAsync(id, beginnZeit);
+        }
+    }
+
+    private async Task ZurueckAsync()
+    {
+        if (ziehen is { } id)
+        {
+            ziehen = null;
+            if (H.Teams.FirstOrDefault(t => t.Id == id)?.Termin is not null)
+            {
+                await TerminAsync(id, null);
+            }
+        }
+    }
+
+    private Task VerteilenAsync() => AusfuehrenAsync(async d =>
+    {
+        var n = await d.OhneTerminVerteilenAsync(H.Id);
+        Hinweise.Notify(n > 0 ? NotificationSeverity.Success : NotificationSeverity.Warning,
+            n > 0 ? $"{n} Team(s) in die frühesten freien Zeiten gelegt – bitte prüfen (Einschränkungen!)." : "Kein freier Platz mehr – weitere Tage oder ein längeres Zeitfenster einstellen.");
+    });
+
+    private Task VorlageAsync()
+    {
+        var (b, t) = (betreff, vorlage);
+        return AusfuehrenAsync(d => d.TerminvorlageSetzenAsync(H.Id, b, t), "Vorlage gespeichert.");
+    }
+
+    private void Standard() => (betreff, vorlage) = (Hausarbeit.StandardTerminBetreff, Hausarbeit.StandardTerminVorlage);
+
+    private Task MailsAsync() => AusfuehrenAsync(async d =>
+    {
+        erstellt = await d.TerminmailsErstellenAsync(H.Id);
+        Hinweise.Notify(NotificationSeverity.Success, $"{erstellt} Terminmail(s) als Entwurf erstellt.");
+    });
+
+    private Task AboAsync() => AusfuehrenAsync(async d => aboLink = await d.KalenderAboErzeugenAsync(H.Id), "Abo-Link erzeugt.");
+
+    private Task AboBeendenAsync() => AusfuehrenAsync(async d =>
+    {
+        await d.KalenderAboBeendenAsync(H.Id);
+        aboLink = null;
+    }, "Abo-Link zurückgezogen.");
+
+    private async Task KopierenAsync()
+    {
+        try
+        {
+            if (modul is not null && aboLink is not null && await modul.InvokeAsync<bool>("kopieren", aboLink))
+            {
+                Hinweise.Notify(NotificationSeverity.Success, "In der Zwischenablage.");
+            }
+        }
+        catch (JSException)
+        {
+            Hinweise.Notify(NotificationSeverity.Warning, "Kopieren nicht möglich – den Link markieren und kopieren.");
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (modul is not null)
+        {
+            try
+            {
+                await modul.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+            }
+        }
+    }
+}

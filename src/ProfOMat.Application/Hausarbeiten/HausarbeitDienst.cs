@@ -11,15 +11,17 @@ using ProfOMat.Domain.Konten;
 namespace ProfOMat.Application.Hausarbeiten;
 
 /// <summary>Was eine Person über ihren persönlichen Link sieht.</summary>
+/// <param name="Einschraenkungen">Gemeldete terminliche Einschränkungen für das Erörterungsgespräch.</param>
+/// <param name="Termin">Gesprächstermin, sobald mitgeteilt (Ortszeit).</param>
 public sealed record Themenbestaetigung(string Hausarbeit, string? Pruefer, string Name, IReadOnlyList<string> Team, HausarbeitThema Thema,
-    DateTimeOffset? Frist, DateTimeOffset? Bestaetigt);
+    DateTimeOffset? Frist, DateTimeOffset? Bestaetigt, string? Einschraenkungen = null, DateTime? Termin = null, int Dauer = 0, string? Ort = null);
 
 /// <summary>
 /// Hausarbeiten: Personen aus der Prüfungsliste, Themenliste, Teams mit Wünschen, Zuteilung und persönliche Themenbestätigung.
 /// Die Mails mit dem Bestätigungslink verschickt die betreuende Person selbst (Entwürfe im persönlichen Postausgang, Desktop-Outlook).
 /// Sichtbar für die betreuende Person und die Systemverwaltung.
 /// </summary>
-public sealed class HausarbeitDienst(IDaten daten, IAktuellerBenutzer aktuell, Mailentwuerfe entwuerfe, Protokoll protokoll, Ortszeit ortszeit,
+public sealed partial class HausarbeitDienst(IDaten daten, IAktuellerBenutzer aktuell, Mailentwuerfe entwuerfe, Protokoll protokoll, Ortszeit ortszeit,
     TimeProvider uhr, IOptions<ProfOMatOptionen> optionen)
 {
     public const string AnlassBestaetigung = "Hausarbeit: Themenbestätigung";
@@ -168,7 +170,8 @@ public sealed class HausarbeitDienst(IDaten daten, IAktuellerBenutzer aktuell, M
     public async Task<Themenbestaetigung?> BestaetigungAnsichtAsync(Guid mitgliedId, string token, CancellationToken abbruch = default)
         => await PerTokenAsync(mitgliedId, token, abbruch) is { } h ? Ansicht(h, mitgliedId) : null;
 
-    public async Task<Themenbestaetigung?> BestaetigenAsync(Guid mitgliedId, string token, CancellationToken abbruch = default)
+    /// <param name="einschraenkungen">Terminliche Einschränkungen für das Erörterungsgespräch (optional).</param>
+    public async Task<Themenbestaetigung?> BestaetigenAsync(Guid mitgliedId, string token, string? einschraenkungen = null, CancellationToken abbruch = default)
     {
         if (await PerTokenAsync(mitgliedId, token, abbruch) is not { } h)
         {
@@ -178,7 +181,7 @@ public sealed class HausarbeitDienst(IDaten daten, IAktuellerBenutzer aktuell, M
         var (_, m) = h.Mitglied(mitgliedId);
         if (m.Bestaetigt is null)
         {
-            h.Bestaetigen(mitgliedId, uhr.GetUtcNow());
+            h.Bestaetigen(mitgliedId, uhr.GetUtcNow(), einschraenkungen);
             protokoll.Eintragen(Benutzer.Niemand, "Hausarbeit.Bestaetigt", "Thema bestätigt (persönlicher Link)", h.Id);
             await daten.SpeichernAsync(abbruch);
         }
@@ -191,11 +194,12 @@ public sealed class HausarbeitDienst(IDaten daten, IAktuellerBenutzer aktuell, M
         var (team, m) = h.Mitglied(mitgliedId);
         var person = h.Person(m.PersonId);
         var thema = h.Thema(team.ThemaId) ?? throw new FachlicherFehler("Für Sie liegt gerade kein Thema zur Bestätigung vor.");
+        var termin = m.TerminMitgeteilt is not null && m.TerminMitgeteilt == team.Termin ? team.Termin : null;
         return new Themenbestaetigung(h.Titel, h.Pruefer, person.VollerName, team.Mitglieder.Select(x => h.Person(x.PersonId).VollerName).ToList(), thema,
-            h.Bestaetigungsfrist, m.Bestaetigt);
+            h.Bestaetigungsfrist, m.Bestaetigt, m.Einschraenkungen, termin, h.GespraechMinuten, h.GespraechOrt);
     }
 
-    private async Task<Hausarbeit?> PerTokenAsync(Guid mitgliedId, string token, CancellationToken abbruch)
+    internal async Task<Hausarbeit?> PerTokenAsync(Guid mitgliedId, string token, CancellationToken abbruch)
     {
         if (string.IsNullOrWhiteSpace(token) || token.Length > 100)
         {
@@ -221,10 +225,8 @@ public sealed class HausarbeitDienst(IDaten daten, IAktuellerBenutzer aktuell, M
         var token = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
         h.Benachrichtigen(m.Id, Signaturinhalt.Hash(token), uhr.GetUtcNow());
         var person = h.Person(m.PersonId);
-        var thema = h.Thema(team.ThemaId)!;
-        var partner = team.Mitglieder.Where(x => x.Id != m.Id).Select(x => h.Person(x.PersonId).VollerName).ToList();
         var link = $"{optionen.Value.OeffentlicheAdresse}hausarbeit/bestaetigen/{m.Id:D}/{token}";
-        var (betreff, text) = Hausarbeitsmails.Themenbestaetigung(h, person, partner, thema, link, h.Bestaetigungsfrist is { } f ? ortszeit.Datum(f) : null, wer.Name);
+        var (betreff, text) = h.Bestaetigungsmail(team, m, link, h.Bestaetigungsfrist is { } f ? ortszeit.Datum(f) : null, wer.Name);
         await entwuerfe.AnlegenAsync(wer.KontoIdPflicht, person.Email!, person.VollerName, betreff, text, AnlassBestaetigung, m.Id, abbruch);
     }
 
@@ -236,7 +238,7 @@ public sealed class HausarbeitDienst(IDaten daten, IAktuellerBenutzer aktuell, M
         await daten.SpeichernAsync(abbruch);
     }
 
-    private async Task<(Benutzer Wer, Hausarbeit Hausarbeit)> LadenMitRechtAsync(Guid id, CancellationToken abbruch)
+    internal async Task<(Benutzer Wer, Hausarbeit Hausarbeit)> LadenMitRechtAsync(Guid id, CancellationToken abbruch)
     {
         var wer = await aktuell.ErmittelnAsync(abbruch);
         HausarbeitenBetreuen(wer).Sicherstellen();
@@ -244,37 +246,5 @@ public sealed class HausarbeitDienst(IDaten daten, IAktuellerBenutzer aktuell, M
         return h.KontoId == wer.KontoId || wer.Hat(Rolle.Systemverwaltung)
             ? (wer, h)
             : throw new FachlicherFehler("Diese Hausarbeit sieht nur, wer sie betreut.");
-    }
-}
-
-/// <summary>Mailtexte der Hausarbeit (Sie-Form, wie auf der Modulseite).</summary>
-public static class Hausarbeitsmails
-{
-    public static (string Betreff, string Text) Themenbestaetigung(Hausarbeit h, Bearbeitende person, IReadOnlyList<string> partner, HausarbeitThema thema,
-        string link, string? frist, string absender)
-    {
-        ArgumentNullException.ThrowIfNull(h);
-        ArgumentNullException.ThrowIfNull(person);
-        ArgumentNullException.ThrowIfNull(partner);
-        ArgumentNullException.ThrowIfNull(thema);
-        var bis = frist is null ? "" : $" bis zum {frist}";
-        var team = partner.Count == 0 ? "Ihnen" : $"Ihrem Team (mit {string.Join(" und ", partner)})";
-        var beschreibung = thema.Beschreibung is { } b ? $"\n\n{b}" : "";
-        var text = $"""
-            Guten Tag {person.VollerName},
-
-            für die Hausarbeit im Modul „{h.Titel}“ habe ich {team} das folgende Thema zugeteilt:
-
-            {thema.Nr}. {thema.Titel} ({thema.Art}){beschreibung}
-
-            Bitte bestätigen Sie die Annahme des Themas{bis} über Ihren persönlichen Link:
-            {link}
-
-            Jedes Teammitglied bestätigt einzeln; der Link gilt nur für Sie. Wird das Thema nicht rechtzeitig bestätigt, kann dies zum Ausschluss von der Prüfung führen.
-
-            Viele Grüße
-            {absender}
-            """;
-        return ($"Hausarbeit {h.Titel}: Ihr Thema – bitte{bis} bestätigen", text.ReplaceLineEndings("\n"));
     }
 }

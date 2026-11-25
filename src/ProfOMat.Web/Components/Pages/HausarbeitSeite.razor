@@ -38,7 +38,7 @@ else if (h is not null)
     }
 
     <div class="pm-tabs" role="tablist">
-        @foreach (var (key, text) in new[] { ("teams", "Teams und Zuteilung"), ("themen", $"Themen ({h.Themen.Count})"), ("personen", "Personen"), ("angaben", "Angaben") })
+        @foreach (var (key, text) in new[] { ("teams", "Teams und Zuteilung"), ("themen", $"Themen ({h.Themen.Count})"), ("termine", $"Gesprächstermine ({h.MitTermin.Count()}/{h.Teams.Count(t => t.ThemaId is not null)})"), ("personen", "Personen"), ("angaben", "Angaben") })
         {
             <button type="button" role="tab" class="pm-tab @(bereich == key ? "on" : null)" aria-selected="@(bereich == key)" @onclick="() => bereich = key">@text</button>
         }
@@ -46,6 +46,16 @@ else if (h is not null)
 
     @if (bereich == "teams")
     {
+        <details class="pm-card pm-vorlage">
+            <summary><b>Vorlage der Bestätigungsmail</b> <span class="pm-small pm-muted">@(h.BestaetigungVorlage is null && h.BestaetigungBetreff is null ? "Standardtext" : "eigener Text")</span></summary>
+            <p class="pm-small pm-muted">Aus dieser Vorlage entsteht je Person die Mail mit dem persönlichen Bestätigungslink. {Link} ist Pflicht. Der Standardtext weist darauf hin,
+                dass bei der Bestätigung die terminlichen Einschränkungen für das Erörterungsgespräch angegeben werden können.</p>
+            <MailvorlageEditor Kennung="bv" Betreff="@h.BestaetigungBetreffVorlage" Text="@h.BestaetigungTextVorlage"
+                               StandardBetreff="@Hausarbeit.StandardBestaetigungBetreff" StandardText="@Hausarbeit.StandardBestaetigungVorlage"
+                               Platzhalter="@Bestaetigungsplatzhalter.Beschreibung" Pruefen="@Bestaetigungsplatzhalter.Unbekannte"
+                               Vorschau="@BestaetigungVorschau" Speichern="BestaetigungsvorlageAsync" Beschaeftigt="@beschaeftigt" />
+        </details>
+
         <section class="pm-card">
             <h2>Zuteilung und Bestätigung</h2>
             <div class="pm-row">
@@ -279,6 +289,10 @@ else if (h is not null)
                                      Freigabe="@(string.IsNullOrWhiteSpace(themenText) ? Freigabe.Nein("Bitte zuerst den Text einfügen.") : Freigabe.Ja)" /></div>
         </section>
     }
+    else if (bereich == "termine")
+    {
+        <HausarbeitTermine H="h" Geaendert="LadenAsync" />
+    }
     else if (bereich == "personen")
     {
         <section class="pm-card">
@@ -393,11 +407,48 @@ else if (h is not null)
         }
     }
 
+    private string? absender;
+
+    private (string An, string Betreff, string Text)? BestaetigungVorschau(string betreff, string text)
+    {
+        var team = h?.TeamsSortiert.FirstOrDefault(t => t.ThemaId is not null && t.Mitglieder.Count > 0);
+        if (h is null || team is null)
+        {
+            return null;
+        }
+
+        var m = team.Mitglieder[0];
+        var (b, t) = h.Bestaetigungsmail(team, m, "https://…/hausarbeit/bestaetigen/(persönlicher Link)", h.Bestaetigungsfrist is { } f ? Zeit.Datum(f) : null,
+            absender ?? "", betreff, text);
+        return (h.Person(m.PersonId).VollerName, b, t);
+    }
+
+    private async Task BestaetigungsvorlageAsync((string Betreff, string Text) v)
+    {
+        fehler = null;
+        beschaeftigt = true;
+        try
+        {
+            await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<HausarbeitDienst>().BestaetigungsvorlageSetzenAsync(Id, v.Betreff, v.Text));
+            Hinweise.Notify(NotificationSeverity.Success, "Vorlage der Bestätigungsmail gespeichert.");
+            await LadenAsync();
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+        }
+        finally
+        {
+            beschaeftigt = false;
+        }
+    }
+
     private async Task LadenAsync()
     {
         try
         {
             h = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<HausarbeitDienst>().LadenAsync(Id));
+            absender ??= (await Vorgang.BenutzerAsync()).Name;
         }
         catch (FachlicherFehler ex)
         {
