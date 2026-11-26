@@ -15,7 +15,7 @@ Stand: 26.11.2026, abgeglichen mit Code und Konfiguration im Repository (nicht m
 | Netz | Öffentlich erreichbar über `https://liebler.iui.hs-osnabrueck.de/profomat/`, kein VPN und keine IP-Beschränkung; SSH nur aus dem VPN. |
 | Webserver (nginx) | TLS 1.2/1.3, Umleitung auf HTTPS, `server_tokens off`; HSTS, CSP und Rate-Limits setzt die Anwendung, nicht nginx. |
 | Anwendung | Rechte im Dienst, EF Core, Antiforgery, strenge CSP; Kestrel nur auf `127.0.0.1:5082`. |
-| Anmeldung | Lokale Konten mit PBKDF2 und Anmeldebremse; **kein zweiter Faktor**, Hochschul-SSO (Shibboleth/SAML) geplant. |
+| Anmeldung | ASP.NET Core Identity: Verfahren je Instanz schaltbar (SAML, OIDC, Passwort + TOTP, Passkey); TOTP Pflicht für Systemverwaltung und Studiendekanat; Sperre nach Fehlversuchen. **SAML an den IdP der Hochschule noch nicht angebunden.** |
 | Daten | SQLite-Datei nur für den Dienstbenutzer lesbar; **keine Feldverschlüsselung**, Sicherungen unverschlüsselt. |
 | Betrieb | systemd mit Härtung, Sicherung vor jedem Update und täglich, automatischer Rückweg beim Ausrollen; Logs nur lokal. |
 
@@ -36,7 +36,7 @@ Stand: 26.11.2026, abgeglichen mit Code und Konfiguration im Repository (nicht m
 | HSTS | ⚠️ | In `liebler.conf` noch auskommentiert; die Anwendung setzt HSTS außerhalb der Entwicklung selbst. |
 | Security-Header (CSP, X-Frame-Options, nosniff) | ✅ | In der Anwendung (`Sicherheitsheader.cs`): CSP ohne `unsafe-inline` für Skripte, `frame-ancestors 'none'`. nginx setzt zusätzlich nur `nosniff`. |
 | `server_tokens off` | ✅ | `liebler.conf`. |
-| Rate-Limit | ⚠️ | Nur in der Anwendung (Anmeldebremse je IP und Kennung). Kein `limit_req` in nginx. |
+| Rate-Limit | ⚠️ | Nur in der Anwendung (Rate-Limit je IP für `/anmelden`, `/einladung`, `/Saml2`, `/signin-oidc` und die Studierendenlinks, Anmeldebremse je IP und Kennung, Sperre des Kontos). Kein `limit_req` in nginx. |
 | `client_max_body_size` | ✅ | 10 MB (`profomat-proxy.conf`). |
 | IP-Allowlist | ❌ | Nicht gesetzt (siehe Netz). |
 
@@ -52,14 +52,23 @@ Stand: 26.11.2026, abgeglichen mit Code und Konfiguration im Repository (nicht m
 
 ## 4. Anmeldung
 
+Grundlage ist ASP.NET Core Identity mit eigenem Speicher über das Kontomodell (Ablauf und Fundstellen:
+[architektur.md](spezifikation/architektur.md#anmeldung-aspnet-core-identity)).
+
 | Verfahren | Stand | Umsetzung / offen |
 |---|---|---|
-| Lokales Konto mit Passwort | ✅ | PBKDF2-HMAC-SHA512, 210 000 Iterationen, mind. 12 Zeichen; wachsende Wartezeit nach 5 Fehlversuchen; Sperren/Rollenwechsel beenden Sitzungen. Einladung und Passwort-Link nur als SHA-256 gespeichert. |
-| Zweiter Faktor (TOTP/Passkey) | ❌ | Nicht vorhanden. |
-| Hochschul-SSO (Shibboleth, SAML 2.0) | 🔜 | Vorgehen in [architektur.md](spezifikation/architektur.md#anmeldung-über-das-hochschulsystem-hochschule-osnabrück). |
-| Mehrere Verfahren je Instanz freischaltbar | 🔜 | Gemeinsamer Baustein für alle vier Systeme in Planung. |
-| Testanmeldung | ✅ gesperrt | `ausrollen.sh` bricht ab, wenn Testanmeldung oder Demodaten in `profomat.env` eingeschaltet sind. |
-| Ersteinrichtung | ⚠️ | Solange kein Konto existiert, kann jede Person das erste Konto anlegen; `ausrollen.sh` erinnert daran. |
+| Verfahren je Instanz freischaltbar | ✅ | `Anmeldung:Verfahren` (Saml, Oidc, Passwort, Passkey); getrennte Kacheln auf `/anmelden`. Unvollständige Konfiguration eines genannten Verfahrens verhindert den Start. Der gemeinsame Baustein für die anderen drei Systeme fehlt noch. |
+| Konto mit Passwort | ✅ | PBKDF2-HMAC-SHA512, 210 000 Iterationen (Identity-Format; ältere Hashes gelten weiter und werden erneuert), mind. 12 Zeichen; Einladung und Passwort-Link nur als SHA-256 gespeichert. |
+| Sperre nach Fehlversuchen | ✅ | Identity-Sperre: 5 Fehlversuche (Passwort oder Code) → 15 min gesperrt; zusätzlich wachsende Wartezeit je IP und Kennung (Anmeldebremse). |
+| Zweiter Faktor (TOTP) | ✅ | Authenticator-App, Pflicht für Systemverwaltung und Studiendekanat (Einrichtung erzwungen bei der ersten Anmeldung), freiwillig für andere; Geheimnis mit Data Protection verschlüsselt, Wiederherstellungscodes nur als Hash. Die Systemverwaltung kann zurücksetzen. |
+| Passkey (WebAuthn) | ✅ | Identity-Passkeys, Nutzerprüfung im Gerät Pflicht (gilt als zweiter Faktor), ohne Inline-JavaScript (`passkey.js`). Die Attestierung wird nicht gegen Herstellerlisten geprüft (Identity-Vorgabe). |
+| Hochschul-SSO (Shibboleth, SAML 2.0) | ⚠️ | Im Code fertig (Sustainsys.Saml2, SP-Metadaten unter `/profomat/Saml2`, Zugehörigkeitsfilter, Verknüpfung über subject-id/pairwise-id/eppn, REFEDS-MFA). **Offen:** Registrierung beim IdP der Hochschule und Attributfreigabe; auf dem Server ist SAML deshalb aus. |
+| Firmen-/Behördenkonto (OIDC) | ✅ | Code-Flow mit PKCE, MFA über `amr`/`acr`; Client-Geheimnis nur per Umgebung. Nicht gegen einen echten Anbieter geprüft. |
+| MFA-Nachweis bei SSO | ✅ | Für Systemverwaltung und Studiendekanat verlangt; fehlt er, fragt ProfOMat den eigenen TOTP-Faktor ab (`Anmeldung:MfaBeiSsoVerlangen`). |
+| Sitzungsende | ✅ | Identity-Sicherheitsstempel im Cookie; Prüfung bei jeder Anfrage und für offene Seiten jede Minute. |
+| Link per Mail für Externe | ❌ | Nur für Studierende in den Fachabläufen (persönliche Links), nicht als allgemeines Anmeldeverfahren. |
+| Testanmeldung | ✅ gesperrt | Nur in der Entwicklungsumgebung wirksam; `ausrollen.sh` bricht zusätzlich ab, wenn Testanmeldung oder Demodaten in `profomat.env` eingeschaltet sind. |
+| Ersteinrichtung | ⚠️ | Solange kein Konto existiert, kann jede Person das erste Konto anlegen (danach sofort TOTP-Pflicht); `ausrollen.sh` erinnert daran. |
 
 ## 5. Daten und Verschlüsselung
 
@@ -69,7 +78,7 @@ Stand: 26.11.2026, abgeglichen mit Code und Konfiguration im Repository (nicht m
 | Feldverschlüsselung | ❌ | Keine Spalte ist verschlüsselt. Kandidaten: Matrikelnummern, Noten, Bemerkungen aus mündlichen Prüfungen. Geplant nach dem SchoolCraft-Muster (AES-GCM, Schlüssel außerhalb der Datenbank). |
 | Laufwerksverschlüsselung | ❌ | Nicht durch das Kit eingerichtet (Sache des Servers). |
 | Sicherungen verschlüsselt | ❌ | Liegen als Datei in `/var/backups/profomat` (nur root). |
-| Systemsiegel- und Cookie-Schlüssel | ✅ | `/var/lib/profomat/schluessel`, nie im Repository, in der Sicherung enthalten. |
+| Systemsiegel-, Cookie- und SAML-Schlüssel | ✅ | `/var/lib/profomat/schluessel` (auch die Data-Protection-Schlüssel für die TOTP-Geheimnisse und `saml-sp.pfx`), nie im Repository, in der Sicherung enthalten. Geht der Ordner verloren, müssen alle ihren zweiten Faktor neu einrichten. |
 | Personendaten in Logs | ✅ | Nur Pseudonyme und Antragsnummern (Regel in CLAUDE.md). |
 
 ## 6. Betrieb
@@ -86,7 +95,7 @@ Stand: 26.11.2026, abgeglichen mit Code und Konfiguration im Repository (nicht m
 
 ## Nächste Schritte
 
-1. Zweiter Faktor bzw. Hochschul-SSO, wählbar je Instanz.
+1. SAML beim IdP der Hochschule registrieren (lokaler SP oder DFN-AAI), Attributfreigabe, REFEDS-MFA klären; danach `Anmeldung:Verfahren` auf dem Server erweitern.
 2. Feldverschlüsselung für Prüfungsdaten.
 3. EF-Migrationen statt `-DbNeu`.
 4. Log-Versand und Metriken für den Hochschulbetrieb.

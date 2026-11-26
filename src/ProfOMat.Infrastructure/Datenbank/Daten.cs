@@ -150,12 +150,63 @@ public static class DatenbankInitialisierung
             version = 18;
         }
 
+        if (version == 18)
+        {
+            await AufVersion19Async(db, abbruch);
+            version = 19;
+        }
+
         if (version != ProfOMatDbContext.Schemaversion)
         {
             throw new InvalidOperationException(
                 $"Datenbankschema veraltet (Datei: {version?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "unbekannt"}, erwartet: {ProfOMatDbContext.Schemaversion}) – "
                 + "Datei löschen oder beiseitelegen (Entwicklungsphase ohne Migrationen).");
         }
+    }
+
+    /// <summary>
+    /// 18 → 19 ohne Datenverlust: Anmeldung über ASP.NET Core Identity. Konten bekommen Sicherheitsstempel (je Konto zufällig – bisherige
+    /// Sitzungen enden einmalig), Zähler und Ende der Sperre nach Fehlversuchen, zweiten Faktor (TOTP) und Wiederherstellungscodes; neu sind
+    /// die Tabellen der verknüpften Identitätsdienste und der Passkeys. Vorhandene Passwort-Hashes (PBKDF2, Identity-Format) bleiben gültig.
+    /// </summary>
+    private static async Task AufVersion19Async(ProfOMatDbContext db, CancellationToken abbruch)
+    {
+        await using var transaktion = await db.Database.BeginTransactionAsync(abbruch);
+        foreach (var anweisung in NeueTabellen(db.Database.GenerateCreateScript(), ProfOMatDbContext.TabellenAbVersion19))
+        {
+            await db.Database.ExecuteSqlRawAsync(anweisung, abbruch);
+        }
+
+        var konto = db.Model.FindEntityType(typeof(ProfOMat.Domain.Konten.Konto))!;
+        var tabelle = konto.GetTableName()!;
+        (string Eigenschaft, string Sql)[] spalten =
+        [
+            (nameof(ProfOMat.Domain.Konten.Konto.SicherheitsStempel), "TEXT NOT NULL DEFAULT ''"),
+            (nameof(ProfOMat.Domain.Konten.Konto.Fehlversuche), "INTEGER NOT NULL DEFAULT 0"),
+            (nameof(ProfOMat.Domain.Konten.Konto.GesperrtBis), "INTEGER NULL"),
+            (nameof(ProfOMat.Domain.Konten.Konto.ZweiterFaktorAktiv), "INTEGER NOT NULL DEFAULT 0"),
+            (nameof(ProfOMat.Domain.Konten.Konto.AuthenticatorSchluessel), "TEXT NULL"),
+            (nameof(ProfOMat.Domain.Konten.Konto.Wiederherstellungscodes), "TEXT NULL"),
+        ];
+        foreach (var (eigenschaft, sqlTyp) in spalten)
+        {
+            var spalte = konto.FindProperty(eigenschaft)!.GetColumnName();
+            var vorhanden = await db.Database.SqlQuery<int>($"SELECT COUNT(*) AS \"Value\" FROM pragma_table_info({tabelle}) WHERE name = {spalte}").SingleAsync(abbruch);
+            if (vorhanden == 0)
+            {
+                var sql = "ALTER TABLE \"" + tabelle + "\" ADD COLUMN \"" + spalte + "\" " + sqlTyp + ";";
+                await db.Database.ExecuteSqlRawAsync(sql, abbruch);
+            }
+        }
+
+        var stempel = konto.FindProperty(nameof(ProfOMat.Domain.Konten.Konto.SicherheitsStempel))!.GetColumnName();
+        var stempelSql = "UPDATE \"" + tabelle + "\" SET \"" + stempel + "\" = upper(hex(randomblob(16))) WHERE \"" + stempel + "\" = '';";
+        await db.Database.ExecuteSqlRawAsync(stempelSql, abbruch);
+
+        var info = await db.Set<Schemainfo>().SingleAsync(abbruch);
+        info.Version = 19;
+        await db.SaveChangesAsync(abbruch);
+        await transaktion.CommitAsync(abbruch);
     }
 
     /// <summary>

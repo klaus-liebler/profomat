@@ -20,7 +20,7 @@ namespace ProfOMat.Infrastructure.Datenbank;
 public sealed class ProfOMatDbContext(DbContextOptions<ProfOMatDbContext> optionen) : DbContext(optionen)
 {
     /// <summary>Erhöhen, wenn sich das Modell ändert: eine ältere Datei wird dann beim Start abgelehnt (statt still falsch zu laufen).</summary>
-    public const int Schemaversion = 18;
+    public const int Schemaversion = 19;
 
     /// <summary>Tabellen, die mit Version 10 dazugekommen sind (Aufwertung 9 → 10 legt nur diese an).</summary>
     internal static readonly string[] TabellenAbVersion10 = ["Hausarbeiten", "HausarbeitThemen", "HausarbeitPersonen", "HausarbeitTeams", "Teammitglieder", "Mailentwuerfe", "Mailsignaturen", "MailsignaturBilder"];
@@ -36,6 +36,9 @@ public sealed class ProfOMatDbContext(DbContextOptions<ProfOMatDbContext> option
 
     /// <summary>Tabellen, die mit Version 15 dazugekommen sind (Buchungsnotizen, Einzelbuchungen, Budgetprognose, Erinnerungen).</summary>
     internal static readonly string[] TabellenAbVersion15 = ["Buchungsnotizen", "Einzelbuchungen", "Budgetprognosen", "Prognoseveranstaltungen", "Finanzerinnerungen"];
+
+    /// <summary>Tabellen, die mit Version 19 dazugekommen sind (ASP.NET Core Identity: verknüpfte Identitätsdienste, Passkeys).</summary>
+    internal static readonly string[] TabellenAbVersion19 = ["ExterneAnmeldungen", "Passkeys"];
 
     protected override void ConfigureConventions(ModelConfigurationBuilder konventionen)
     {
@@ -59,6 +62,34 @@ public sealed class ProfOMatDbContext(DbContextOptions<ProfOMatDbContext> option
             e.Navigation(k => k.Rollen).AutoInclude().UsePropertyAccessMode(PropertyAccessMode.Field);
             e.HasMany(k => k.Schluessel).WithOne().HasForeignKey(s => s.KontoId).OnDelete(DeleteBehavior.Cascade);
             e.Navigation(k => k.Schluessel).AutoInclude().UsePropertyAccessMode(PropertyAccessMode.Field);
+            e.HasMany(k => k.Anmeldungen).WithOne().HasForeignKey(a => a.KontoId).OnDelete(DeleteBehavior.Cascade);
+            e.Navigation(k => k.Anmeldungen).AutoInclude().UsePropertyAccessMode(PropertyAccessMode.Field);
+            e.HasMany(k => k.Passkeys).WithOne().HasForeignKey(p => p.KontoId).OnDelete(DeleteBehavior.Cascade);
+            e.Navigation(k => k.Passkeys).AutoInclude().UsePropertyAccessMode(PropertyAccessMode.Field);
+            e.Ignore(k => k.WiederherstellungscodeHashes);
+            e.Property(k => k.SicherheitsStempel).HasMaxLength(64);
+            e.Property(k => k.AuthenticatorSchluessel).HasMaxLength(1000);
+            e.Property(k => k.Wiederherstellungscodes).HasMaxLength(2000);
+        });
+        m.Entity<ExterneAnmeldung>(e =>
+        {
+            e.ToTable("ExterneAnmeldungen");
+            e.HasKey(a => a.Id);
+            e.HasIndex(a => new { a.Anbieter, a.Schluessel }).IsUnique();
+            e.HasIndex(a => a.KontoId);
+            e.Property(a => a.Anbieter).HasMaxLength(40);
+            e.Property(a => a.Schluessel).HasMaxLength(ExterneAnmeldung.SchluesselMaxLaenge);
+            e.Property(a => a.Anzeigename).HasMaxLength(200);
+        });
+        m.Entity<KontoPasskey>(e =>
+        {
+            e.ToTable("Passkeys");
+            e.HasKey(p => p.Id);
+            e.HasIndex(p => p.CredentialId).IsUnique();
+            e.HasIndex(p => p.KontoId);
+            e.Property(p => p.CredentialId).HasMaxLength(1024);
+            e.Property(p => p.Bezeichnung).HasMaxLength(KontoPasskey.BezeichnungMaxLaenge);
+            e.Property(p => p.Transporte).HasMaxLength(200);
         });
         m.Entity<KontoRolle>(e =>
         {

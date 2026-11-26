@@ -23,7 +23,7 @@ für den Lasercutter). Aufbau und Leitlinien folgen
 | Netz | Öffentlich erreichbar über `https://liebler.iui.hs-osnabrueck.de/profomat/`, kein VPN und keine IP-Beschränkung; SSH nur aus dem VPN. |
 | Webserver (nginx) | TLS 1.2/1.3, Umleitung auf HTTPS, `server_tokens off`; HSTS, CSP und Rate-Limits setzt die Anwendung, nicht nginx. |
 | Anwendung | Rechte im Dienst, EF Core, Antiforgery, strenge CSP; Kestrel nur auf `127.0.0.1:5082`. |
-| Anmeldung | Lokale Konten mit PBKDF2 und Anmeldebremse; **kein zweiter Faktor**, Hochschul-SSO (Shibboleth/SAML) geplant. |
+| Anmeldung | ASP.NET Core Identity: Verfahren je Instanz schaltbar (SAML, OIDC, Passwort + TOTP, Passkey); TOTP Pflicht für Systemverwaltung und Studiendekanat; Sperre nach Fehlversuchen. **SAML an den IdP der Hochschule noch nicht angebunden.** |
 | Daten | SQLite-Datei nur für den Dienstbenutzer lesbar; **keine Feldverschlüsselung**, Sicherungen unverschlüsselt. |
 | Betrieb | systemd mit Härtung, Sicherung vor jedem Update und täglich, automatischer Rückweg beim Ausrollen; Logs nur lokal. |
 
@@ -71,6 +71,7 @@ dotnet build ProfOMat.slnx                                   # Warnungen sind Fe
 dotnet test --project tests\ProfOMat.Domain.Tests
 dotnet test --project tests\ProfOMat.Application.Tests
 node tests\Signatur\signatur-test.mjs                        # Schlüsselformate (braucht openssl)
+node tests\Browser\anmeldung.mjs http://localhost:5311 <Ordner> # Anmeldung (leere Datenbank, ohne Testanmeldung): Ersteinrichtung mit TOTP, Passkey (virtueller Authenticator), Einladung, Sperre, 390 px
 node tests\Browser\ablauf.mjs http://localhost:5310 <Ordner>  # Drittprüfung per Einladung im Headless-Edge (alle Rollen, PDF, 390 px), Instanz muss laufen
 node tests\Browser\klausur.mjs http://localhost:5310 <Ordner> # Klausurablauf (frische Datenbank)
 node tests\Browser\muendlich.mjs http://localhost:5310 <Ordner> # Mündliche Prüfung live: Tastatur, Bemerkung, Protokoll-PDF, 390 px
@@ -83,9 +84,29 @@ node tests\Browserinanzen.mjs http://localhost:5310 <Ordner>    # Finanzen: Tea
 
 ## Betrieb (Kurzfassung)
 
-Anmeldung wie Podium: Auf einer leeren Datenbank legt man das erste Konto auf der Anmeldeseite an (Ersteinrichtung), weitere nur per
-Einladungslink (*Verwaltung → Konten*). Geheimnisse nur über Umgebungsvariablen: `Mail__Host`, `Mail__Benutzer`, `Mail__Passwort`. Der Ordner `Speicher:Schluessel` enthält den Systemsiegel-Schlüssel und die Cookie-Schlüssel. Er gehört in die
-Sicherung, nie ins Repository.
+Anmeldung über ASP.NET Core Identity: Auf einer leeren Datenbank legt man das erste Konto auf der Anmeldeseite an (Ersteinrichtung,
+danach sofort zweiter Faktor mit einer Authenticator-App), weitere nur per Einladungslink (*Verwaltung → Konten*) – mit Passwort oder
+„Mit Hochschulkonto anlegen“. Geheimnisse nur über Umgebungsvariablen: `Mail__Host`, `Mail__Benutzer`, `Mail__Passwort`, `Oidc__ClientSecret`.
+Der Ordner `Speicher:Schluessel` enthält den Systemsiegel-Schlüssel, die Data-Protection-Schlüssel (Cookies, TOTP-Geheimnisse) und das
+SAML-Zertifikat. Er gehört in die Sicherung, nie ins Repository.
+
+Anmeldeverfahren je Instanz (Umgebungsvariablen, `__` statt `:`; ohne `Anmeldung__Verfahren` gelten Passwort und Passkey, dazu SAML
+bzw. OIDC, sobald konfiguriert):
+
+```ini
+Anmeldung__Verfahren=Saml,Passwort,Passkey        # Kacheln auf /anmelden: Saml, Oidc, Passwort, Passkey
+Anmeldung__MfaBeiSsoVerlangen=true                # Systemverwaltung/Studiendekanat: MFA-Nachweis vom IdP, sonst eigener TOTP-Schritt
+Anmeldung__SperreNachFehlversuchen=5              # danach ist die Anmeldung gesperrt für …
+Anmeldung__SperreMinuten=15
+ProfOMat__OeffentlicheAdresse=https://liebler.iui.hs-osnabrueck.de/profomat/   # Grundlage der SAML-Adressen
+Saml__IdpEntityId=https://shib-idp.hs-osnabrueck.de/idp/shibboleth   # schaltet SAML frei; SP-Metadaten: …/profomat/Saml2
+Saml__Zugehoerigkeiten=employee@hs-osnabrueck.de,staff@hs-osnabrueck.de,faculty@hs-osnabrueck.de
+Saml__Kontakt=it@example.invalid                  # optional: technischer Kontakt in den Metadaten
+Oidc__Authority=https://login.microsoftonline.com/<tenant>/v2.0
+Oidc__ClientId=<id>
+Oidc__ClientSecret=<geheim>                       # nur in /etc/profomat/profomat.env
+Oidc__MfaAcr=                                     # optional: acr-Werte, die als zweiter Faktor gelten
+```
 
 Testsystem auf dem Hochschulserver: `.\deploy\server\deploy.ps1` (Tests, Linux-Build, Upload, Einspielen mit Sicherung und
 Rückweg; `-DbNeu` nach geänderter Schemaversion). Einrichtung und Sicherheitsstand: [docs/deploy.md](docs/deploy.md).

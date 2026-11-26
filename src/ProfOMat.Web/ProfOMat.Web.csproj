@@ -9,6 +9,8 @@
     <PackageReference Include="Radzen.Blazor" />
     <PackageReference Include="Serilog.AspNetCore" />
     <PackageReference Include="Serilog.Sinks.File" />
+    <PackageReference Include="Sustainsys.Saml2.AspNetCore2" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" />
   </ItemGroup>
 
   <ItemGroup>

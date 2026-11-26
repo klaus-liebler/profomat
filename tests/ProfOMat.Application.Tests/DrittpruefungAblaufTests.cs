@@ -489,9 +489,10 @@ public sealed class KontoTests
             .AnlegenAsync("neu", "Prof. Dr.", "Nora", "Neu", "neu@hs.test", [Domain.Konten.Rolle.Pruefende], "kurz")));
         await u.InBereichAsync(d => d.GetRequiredService<KontoDienst>()
             .AnlegenAsync("Neu", "Prof. Dr.", "Nora", "Neu", "neu@hs.test", [Domain.Konten.Rolle.Pruefende], "ein-langes-passwort"));
-        (await u.InBereichAsync(d => d.GetRequiredService<KontoDienst>().PasswortAnmeldenAsync("neu", "falsch"))).ShouldBeNull();
-        var b = await u.InBereichAsync(d => d.GetRequiredService<KontoDienst>().PasswortAnmeldenAsync(" NEU ", "ein-langes-passwort"));
-        b!.Name.ShouldBe("Prof. Dr. Nora Neu");
+        (await u.InBereichAsync(d => d.GetRequiredService<KontoDienst>().PasswortPruefenAsync("neu", "falsch"))).Erfolg.ShouldBeFalse();
+        var p = await u.InBereichAsync(d => d.GetRequiredService<KontoDienst>().PasswortPruefenAsync(" NEU ", "ein-langes-passwort"));
+        var b = KontoDienst.AlsBenutzer(p.Konto!);
+        b.Name.ShouldBe("Prof. Dr. Nora Neu");
         b.Hat(Domain.Konten.Rolle.Pruefende).ShouldBeTrue();
     }
 

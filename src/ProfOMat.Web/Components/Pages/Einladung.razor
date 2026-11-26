@@ -2,10 +2,12 @@
 @attribute [AllowAnonymous]
 @attribute [ExcludeFromInteractiveRouting]
 @layout LeeresLayout
-@using Microsoft.AspNetCore.Authentication
-@using Microsoft.AspNetCore.Authentication.Cookies
+@using Microsoft.AspNetCore.DataProtection
 @using ProfOMat.Application.Konten
 @inject KontoDienst Konten
+@inject Anmeldeangebot Angebot
+@inject Anmeldeabschluss Abschluss
+@inject IDataProtectionProvider Schutz
 @inject NavigationManager Navigation
 @inject ILogger<Einladung> Log
 @inject Ortszeit Zeit
@@ -48,6 +50,34 @@
             <p>Neues Passwort für <b>@info.Name</b> (Kennung <span class="pm-mono">@info.Kennung</span>). Der Link gilt nur einmal.</p>
         }
 
+        @if (info.Art == EinladungsArt.Konto && Angebot.Sso)
+        {
+            <div class="pm-anmeldekacheln">
+                @if (Angebot.Hat(Anmeldeverfahren.Saml))
+                {
+                    <section class="pm-kachel">
+                        <h2>Mit @Angebot.SamlName</h2>
+                        <p class="pm-small pm-muted">Konto ohne eigenes Passwort anlegen: Name und Mail übernimmt ProfOMat vom Anmeldedienst der Hochschule.</p>
+                        <a class="pm-btn pm-btn-haupt pm-kachel-knopf" href="anmelden/extern/saml?zweck=einladung">Mit @Angebot.SamlName anlegen</a>
+                    </section>
+                }
+                @if (Angebot.Hat(Anmeldeverfahren.Oidc))
+                {
+                    <section class="pm-kachel">
+                        <h2>Mit @Angebot.OidcName</h2>
+                        <p class="pm-small pm-muted">Konto ohne eigenes Passwort anlegen: Name und Mail übernimmt ProfOMat vom Identitätsdienst.</p>
+                        <a class="pm-btn pm-btn-haupt pm-kachel-knopf" href="anmelden/extern/oidc?zweck=einladung">Mit @Angebot.OidcName anlegen</a>
+                    </section>
+                }
+            </div>
+            @if (Angebot.Hat(Anmeldeverfahren.Passwort))
+            {
+                <h2>Oder mit Kennung und Passwort</h2>
+            }
+        }
+
+        @if (info.Art == EinladungsArt.Passwort || Angebot.Hat(Anmeldeverfahren.Passwort) || !Angebot.Sso)
+        {
         <form method="post" @formname="einloesen" @onsubmit="EinloesenAsync" class="pm-fields">
             <AntiforgeryToken />
             <input type="hidden" name="Token" value="@Token" />
@@ -73,6 +103,7 @@
                 <button type="submit" class="pm-btn pm-btn-haupt">@(info.Art == EinladungsArt.Konto ? "Konto anlegen und anmelden" : "Passwort setzen und anmelden")</button>
             </div></div>
         </form>
+        }
     }
 </div>
 
@@ -125,6 +156,17 @@
             {
                 fehler = Ungueltig;
             }
+            else if (info.Art == EinladungsArt.Konto && Angebot.Sso && !string.IsNullOrEmpty(Token))
+            {
+                // Für „Mit Hochschulkonto anlegen“: das Token verschlüsselt und kurzlebig im Cookie statt in der Adresse (Logs)
+                HttpContext.Response.Cookies.Append(AnmeldeRegistrierung.EinladungCookie,
+                    Schutz.CreateProtector(AnmeldeRegistrierung.EinladungZweck).ToTimeLimitedDataProtector().Protect(Token, TimeSpan.FromMinutes(15)),
+                    new CookieOptions
+                    {
+                        HttpOnly = true, SameSite = SameSiteMode.Lax, Secure = HttpContext.Request.IsHttps, Path = AnmeldeEndpunkte.CookiePfad(HttpContext),
+                        MaxAge = TimeSpan.FromMinutes(15), IsEssential = true,
+                    });
+            }
         }
     }
 
@@ -145,11 +187,10 @@
         {
             var angaben = info.Art == EinladungsArt.Konto ? new Kontoangaben(IKennung ?? "", ITitel, IVorname ?? "", INachname ?? "", IMail ?? "") : null;
             var benutzer = await Konten.EinladungEinloesenAsync(Token, angaben, IPasswort ?? "");
-            var stempel = await Konten.StempelAsync(benutzer.KontoIdPflicht) ?? throw new FachlicherFehler("Das Konto ist gesperrt.");
-            await HttpContext.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme,
-                Anmeldung.Principal(benutzer, "Passwort", CookieAuthenticationDefaults.AuthenticationScheme, stempel));
             Log.LogInformation("Link eingelöst ({Art}), Konto {Konto}", info.Art, Pseudonym.Id(benutzer.KontoIdPflicht));
-            Navigation.NavigateTo("./");
+            var konto = await Konten.AktivesKontoAsync(benutzer.KontoIdPflicht) ?? throw new FachlicherFehler("Das Konto ist gesperrt.");
+            // Systemverwaltung und Studiendekanat richten danach gleich den zweiten Faktor ein
+            Navigation.NavigateTo(await Abschluss.AbschliessenAsync(HttpContext, konto, Anmeldeart.Passwort, false, null));
         }
         catch (FachlicherFehler ex)
         {

@@ -39,7 +39,7 @@ public sealed class AnmeldungTests
         (await Mit(u, d => d.ErsteinrichtungNoetigAsync())).ShouldBeFalse();
         (await Should.ThrowAsync<FachlicherFehler>(() => Mit(u, d => d.ErsteinrichtenAsync(new Kontoangaben("boese", null, "B", "Böse", "b@x.test"), Pw, false))))
             .Message.ShouldContain("bereits eingerichtet");
-        (await Mit(u, d => d.PasswortAnmeldenAsync("LIEBLER", Pw)))!.Kennung.ShouldBe("liebler");
+        (await Mit(u, d => d.PasswortPruefenAsync("LIEBLER", Pw))).Konto!.Kennung.ShouldBe("liebler");
     }
 
     [Fact]
@@ -91,7 +91,7 @@ public sealed class AnmeldungTests
         u.Benutzer.Aktuell = Benutzer.Niemand;
         (await Mit(u, d => d.EinladungPruefenAsync(link.Token)))!.Kennung.ShouldBe("probst");
         await Mit(u, d => d.EinladungEinloesenAsync(link.Token, null, Pw));
-        (await Mit(u, d => d.PasswortAnmeldenAsync("probst", Pw))).ShouldNotBeNull();
+        (await Mit(u, d => d.PasswortPruefenAsync("probst", Pw))).Erfolg.ShouldBeTrue();
         (await Mit(u, d => d.StempelAsync(probst.Id))).ShouldNotBe(vorher);
     }
 

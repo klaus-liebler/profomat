@@ -1,0 +1,328 @@
+@page "/profil/sicherheit"
+@attribute [Authorize]
+@attribute [ExcludeFromInteractiveRouting]
+@using Microsoft.AspNetCore.Identity
+@using ProfOMat.Application.Konten
+@inject UserManager<Konto> Identitaet
+@inject SignInManager<Konto> Sitzungen
+@inject KontoDienst Konten
+@inject SicherheitDienst Sicherheit
+@inject Anmeldeangebot Angebot
+@inject Ortszeit Zeit
+@inject ILogger<AnmeldungUndSicherheit> Log
+@* Statisch gerendert (wie die Anmeldeseite): Jede Änderung erneuert den Sicherheitsstempel – die eigene Sitzung wird danach mit
+   RefreshSignInAsync fortgeschrieben, das geht nur mit HTTP-Antwort. Passkeys über passkey.js (kein Inline-JavaScript). *@
+
+<PageTitle>Anmeldung und Sicherheit · ProfOMat</PageTitle>
+
+<div class="pm-head">
+    <div>
+        <h1>Anmeldung und Sicherheit</h1>
+        <p>Wie Sie sich bei ProfOMat anmelden: Passwort, zweiter Faktor (Authenticator-App), Passkeys und verknüpfte Konten bei Identitätsdiensten.
+            Jede Änderung beendet Ihre Sitzungen auf anderen Geräten. <a href="profil">Zurück zum Profil</a></p>
+    </div>
+</div>
+
+@if (fehler is not null)
+{
+    <div class="pm-alert pm-crit" role="alert">@fehler</div>
+}
+@if (hinweis is not null)
+{
+    <div class="pm-alert pm-gut" role="status">@hinweis</div>
+}
+
+@if (codes is not null)
+{
+    <section class="pm-card">
+        <h2>Ihre Wiederherstellungscodes</h2>
+        <p>Sicher aufbewahren (ausdrucken oder im Passwortsafe). Jeder Code gilt einmal, falls das Telefon verloren geht. Sie werden nur jetzt angezeigt.</p>
+        <ul class="pm-codes">
+            @foreach (var c in codes)
+            {
+                <li class="pm-mono">@c</li>
+            }
+        </ul>
+    </section>
+}
+
+@if (konto is not null)
+{
+    <div class="pm-grid-2">
+        <section class="pm-card">
+            <h2>Zweiter Faktor (Authenticator-App)</h2>
+            @if (konto.ZweiterFaktorAktiv)
+            {
+                <p><StatusPille Stil="gut">eingerichtet</StatusPille> Noch @konto.WiederherstellungscodeHashes.Count Wiederherstellungscodes übrig.</p>
+                <div class="pm-row">
+                    <form method="post" @formname="codes-neu" @onsubmit="CodesNeuAsync" class="pm-inline">
+                        <AntiforgeryToken />
+                        <button type="submit" class="pm-btn">Neue Wiederherstellungscodes</button>
+                    </form>
+                    @if (pflicht)
+                    {
+                        <span class="pm-why" tabindex="0" data-why="Für Systemverwaltung und Studiendekanat ist der zweite Faktor Pflicht."><button type="button" class="pm-btn" disabled>Ausschalten</button></span>
+                    }
+                    else
+                    {
+                        <form method="post" @formname="faktor-aus" @onsubmit="AbschaltenAsync" class="pm-inline">
+                            <AntiforgeryToken />
+                            <button type="submit" class="pm-btn pm-btn-gefahr">Ausschalten</button>
+                        </form>
+                    }
+                </div>
+            }
+            else if (einrichtung is not null)
+            {
+                <p>Scannen Sie den QR-Code mit einer Authenticator-App und geben Sie den angezeigten Code ein.</p>
+                <div class="pm-qr-zeile">
+                    <img class="pm-qr" src="@qr" alt="QR-Code für die Authenticator-App" width="200" height="200" />
+                    <div class="pm-small">
+                        <p>Oder den Schlüssel von Hand eingeben:</p>
+                        <p class="pm-mono pm-schluessel">@einrichtung.Schluessel</p>
+                    </div>
+                </div>
+                <form method="post" @formname="faktor-an" @onsubmit="AktivierenAsync" class="pm-fields">
+                    <AntiforgeryToken />
+                    <div class="pm-field"><label class="pm-lbl" for="f-code">Code aus der App</label>
+                        <input id="f-code" name="FCode" class="pm-input" inputmode="numeric" autocomplete="one-time-code" maxlength="8" required /></div>
+                    <div class="pm-field pm-field-weit"><div><button type="submit" class="pm-btn pm-btn-haupt">Zweiten Faktor einschalten</button></div></div>
+                </form>
+            }
+            else
+            {
+                <p class="pm-muted">Noch nicht eingerichtet. @(pflicht ? "Für Ihre Rolle ist er Pflicht – Sie richten ihn bei der nächsten Anmeldung mit Passwort ein." : "Empfohlen, wenn Sie sich mit Passwort anmelden.")</p>
+                <form method="post" @formname="faktor-start" @onsubmit="EinrichtenAsync">
+                    <AntiforgeryToken />
+                    <button type="submit" class="pm-btn pm-btn-haupt">Jetzt einrichten</button>
+                </form>
+            }
+        </section>
+
+        <section class="pm-card">
+            <h2>Passwort</h2>
+            @if (!Angebot.Hat(Anmeldeverfahren.Passwort))
+            {
+                <p class="pm-small pm-muted">Die Anmeldung mit Passwort ist auf dieser Instanz ausgeschaltet; ein Passwort gilt nur, falls sie wieder eingeschaltet wird.</p>
+            }
+            <form method="post" @formname="passwort" @onsubmit="PasswortAsync" class="pm-fields">
+                <AntiforgeryToken />
+                @if (konto.PasswortHash is not null)
+                {
+                    <div class="pm-field pm-field-weit"><label class="pm-lbl" for="alt">Bisheriges Passwort</label>
+                        <input id="alt" name="Alt" type="password" class="pm-input" autocomplete="current-password" required /></div>
+                }
+                else
+                {
+                    <p class="pm-small pm-muted pm-field-weit">Ihr Konto hat noch kein Passwort (Anmeldung über einen Identitätsdienst oder Passkey).</p>
+                }
+                <div class="pm-field"><label class="pm-lbl" for="neu">Neues Passwort (mind. @KontoDienst.MinPasswortLaenge Zeichen)</label>
+                    <input id="neu" name="Neu" type="password" class="pm-input" autocomplete="new-password" required minlength="@KontoDienst.MinPasswortLaenge" /></div>
+                <div class="pm-field"><label class="pm-lbl" for="neu2">Wiederholen</label>
+                    <input id="neu2" name="Neu2" type="password" class="pm-input" autocomplete="new-password" required /></div>
+                <div class="pm-field pm-field-weit"><div><button type="submit" class="pm-btn">@(konto.PasswortHash is null ? "Passwort setzen" : "Passwort ändern")</button></div></div>
+            </form>
+        </section>
+    </div>
+
+    <div class="pm-grid-2">
+        <section class="pm-card">
+            <h2>Passkeys</h2>
+            @if (konto.Passkeys.Count == 0)
+            {
+                <p class="pm-muted">Noch keiner. Mit einem Passkey melden Sie sich ohne Passwort an – geschützt durch Fingerabdruck, Gesicht oder Geräte-PIN.</p>
+            }
+            <div class="pm-list">
+                @foreach (var p in konto.Passkeys.OrderByDescending(p => p.Hinzugefuegt))
+                {
+                    <div>
+                        <span class="pm-grow"><b>@(p.Bezeichnung ?? "Passkey")</b><br />
+                            <span class="pm-small pm-muted">hinzugefügt @Zeit.Kurz(p.Hinzugefuegt)@(p.Gesichert ? " · im Konto des Geräteherstellers gesichert" : "")</span></span>
+                        <form method="post" @formname="@($"passkey-weg-{p.Id:N}")" @onsubmit="() => PasskeyEntfernenAsync(p.Id)" class="pm-inline">
+                            <AntiforgeryToken />
+                            <button type="submit" class="pm-btn pm-btn-gefahr">Entfernen</button>
+                        </form>
+                    </div>
+                }
+            </div>
+            @if (Angebot.Hat(Anmeldeverfahren.Passkey))
+            {
+                <form method="post" @formname="passkey-neu" @onsubmit="PasskeyHinzufuegenAsync" class="pm-fields">
+                    <AntiforgeryToken />
+                    <input type="hidden" name="Anmeldedaten" />
+                    <div class="pm-field pm-field-weit"><label class="pm-lbl" for="pk-name">Bezeichnung</label>
+                        <input id="pk-name" name="Bezeichnung" class="pm-input" maxlength="100" placeholder="z. B. Dienstlaptop, Telefon" /></div>
+                    <div class="pm-field pm-field-weit"><div>
+                        <button type="button" class="pm-btn pm-btn-haupt" data-passkey="hinzufuegen" data-optionen="profil/sicherheit/passkey/optionen">Passkey hinzufügen</button>
+                    </div></div>
+                    <p class="pm-small pm-muted pm-field-weit" data-passkey-status role="status"></p>
+                </form>
+            }
+            else
+            {
+                <p class="pm-small pm-muted">Die Anmeldung mit Passkey ist auf dieser Instanz ausgeschaltet.</p>
+            }
+        </section>
+
+        <section class="pm-card">
+            <h2>Verknüpfte Konten</h2>
+            @if (konto.Anmeldungen.Count == 0)
+            {
+                <p class="pm-muted">Keine. Verknüpfen Sie Ihr Konto beim Identitätsdienst, um sich per Single Sign-on anzumelden.</p>
+            }
+            <div class="pm-list">
+                @foreach (var a in konto.Anmeldungen.OrderBy(a => a.Verknuepft))
+                {
+                    <div>
+                        <span class="pm-grow"><b>@SicherheitDienst.Anzeige(a.Anbieter)</b><br />
+                            <span class="pm-small pm-muted">verknüpft @Zeit.Kurz(a.Verknuepft)</span></span>
+                        <form method="post" @formname="@($"trennen-{a.Id:N}")" @onsubmit="() => TrennenAsync(a.Id)" class="pm-inline">
+                            <AntiforgeryToken />
+                            <button type="submit" class="pm-btn pm-btn-gefahr">Trennen</button>
+                        </form>
+                    </div>
+                }
+            </div>
+            <div class="pm-row">
+                @if (Angebot.Hat(Anmeldeverfahren.Saml) && !konto.Anmeldungen.Any(a => a.Anbieter == ExterneIdentitaet.Saml))
+                {
+                    <a class="pm-btn" href="anmelden/extern/saml?zweck=verknuepfen">Mit @Angebot.SamlName verknüpfen</a>
+                }
+                @if (Angebot.Hat(Anmeldeverfahren.Oidc) && !konto.Anmeldungen.Any(a => a.Anbieter == ExterneIdentitaet.Oidc))
+                {
+                    <a class="pm-btn" href="anmelden/extern/oidc?zweck=verknuepfen">Mit @Angebot.OidcName verknüpfen</a>
+                }
+                @if (!Angebot.Sso)
+                {
+                    <p class="pm-small pm-muted">Auf dieser Instanz ist kein Identitätsdienst (SAML/OIDC) freigeschaltet.</p>
+                }
+            </div>
+        </section>
+    </div>
+}
+
+@code {
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    [SupplyParameterFromForm(FormName = "faktor-an")]
+    private string? FCode { get; set; }
+
+    [SupplyParameterFromForm(FormName = "passwort")]
+    private string? Alt { get; set; }
+
+    [SupplyParameterFromForm(FormName = "passwort")]
+    private string? Neu { get; set; }
+
+    [SupplyParameterFromForm(FormName = "passwort")]
+    private string? Neu2 { get; set; }
+
+    [SupplyParameterFromForm(FormName = "passkey-neu")]
+    private string? Anmeldedaten { get; set; }
+
+    [SupplyParameterFromForm(FormName = "passkey-neu")]
+    private string? Bezeichnung { get; set; }
+
+    [SupplyParameterFromQuery(Name = "ok")]
+    private string? Ok { get; set; }
+
+    [SupplyParameterFromQuery(Name = "fehler")]
+    private string? FehlerCode { get; set; }
+
+    private Konto? konto;
+    private bool pflicht;
+    private AuthenticatorEinrichtung? einrichtung;
+    private string? qr, fehler, hinweis;
+    private IReadOnlyList<string>? codes;
+
+    protected override async Task OnInitializedAsync()
+    {
+        konto = await Identitaet.GetUserAsync(HttpContext.User);
+        pflicht = konto is not null && Anmelderegeln.ZweiterFaktorPflicht(konto);
+        fehler = Anmeldefehler.Text(FehlerCode);
+        hinweis = Ok == "verknuepft" ? "Konto verknüpft – Sie können sich ab jetzt auch darüber anmelden." : null;
+
+        // Einrichtung läuft (Formular „faktor-an“ abgeschickt): QR-Code wieder anzeigen, falls der Code falsch war
+        if (konto is { ZweiterFaktorAktiv: false } && FCode is not null)
+        {
+            await QrZeigenAsync();
+        }
+    }
+
+    /// <summary>Änderung ausführen; die eigene Sitzung mit dem neuen Sicherheitsstempel fortschreiben.</summary>
+    private async Task AendernAsync(Func<Konto, Task> aenderung, string? erfolg)
+    {
+        if (konto is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await aenderung(konto);
+            hinweis = erfolg;
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+        }
+
+        konto = await Identitaet.GetUserAsync(HttpContext.User) ?? konto;
+        await Sitzungen.RefreshSignInAsync(konto);
+        pflicht = Anmelderegeln.ZweiterFaktorPflicht(konto);
+    }
+
+    private async Task QrZeigenAsync()
+    {
+        einrichtung = await Sicherheit.AuthenticatorAsync(konto!);
+        qr = QrCode.SvgDatenUri(einrichtung.OtpauthUri);
+    }
+
+    private Task EinrichtenAsync() => AendernAsync(_ => QrZeigenAsync(), null);
+
+    private Task AktivierenAsync() => AendernAsync(async k =>
+    {
+        codes = await Sicherheit.ZweitenFaktorAktivierenAsync(k, FCode);
+        if (codes is null)
+        {
+            throw new FachlicherFehler("Der Code stimmt nicht. Bitte die Uhrzeit des Telefons prüfen und den aktuellen Code eingeben.");
+        }
+
+        einrichtung = null;
+    }, "Zweiter Faktor eingeschaltet.");
+
+    private Task CodesNeuAsync() => AendernAsync(async k => codes = await Sicherheit.WiederherstellungscodesNeuAsync(k), "Neue Wiederherstellungscodes erzeugt – die bisherigen gelten nicht mehr.");
+
+    private Task AbschaltenAsync() => AendernAsync(k => Sicherheit.ZweitenFaktorAbschaltenAsync(k), "Zweiter Faktor ausgeschaltet.");
+
+    private Task PasswortAsync() => AendernAsync(k =>
+    {
+        if (Neu != Neu2)
+        {
+            throw new FachlicherFehler("Die beiden Passwörter stimmen nicht überein.");
+        }
+
+        return Konten.PasswortSetzenAsync(k.Id, Alt, Neu ?? "");
+    }, "Passwort geändert.");
+
+    private Task PasskeyHinzufuegenAsync() => AendernAsync(async k =>
+    {
+        if (string.IsNullOrEmpty(Anmeldedaten))
+        {
+            throw new FachlicherFehler("Der Browser hat keinen Passkey übergeben.");
+        }
+
+        var ergebnis = await Sitzungen.PerformPasskeyAttestationAsync(Anmeldedaten);
+        if (!ergebnis.Succeeded)
+        {
+            Log.LogWarning("Passkey hinzufügen fehlgeschlagen: {Grund}", ergebnis.Failure?.Message);
+            throw new FachlicherFehler("Der Passkey ließ sich nicht prüfen. Bitte erneut versuchen.");
+        }
+
+        await Sicherheit.PasskeyHinzufuegenAsync(k, ergebnis.Passkey, Bezeichnung);
+    }, "Passkey hinzugefügt.");
+
+    private Task PasskeyEntfernenAsync(Guid id) => AendernAsync(k => Sicherheit.PasskeyEntfernenAsync(k, id), "Passkey entfernt.");
+
+    private Task TrennenAsync(Guid id) => AendernAsync(k => Sicherheit.AnmeldungTrennenAsync(k, id), "Verknüpfung getrennt.");
+}

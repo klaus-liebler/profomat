@@ -41,7 +41,7 @@ internal static class Sicherheitsheader
     }
 
     /// <summary>Ohne Anmeldung erreichbar: hier greift das Rate-Limit je Adresse.</summary>
-    public static readonly string[] OeffentlichePfade = ["/anmelden", "/drittpruefung"];
+    public static readonly string[] OeffentlichePfade = ["/anmelden", "/drittpruefung", "/einladung", "/Saml2", "/signin-oidc"];
 
     /// <summary>Seiten mit Personendaten, Abwesenheiten oder Protokoll: nie im Browser- oder Proxy-Cache ablegen.</summary>
     private static readonly string[] OhneCache = ["/antraege", "/drittpruefung", "/konten", "/protokoll", "/postausgang", "/profil", "/klausuren"];

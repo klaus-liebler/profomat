@@ -1,7 +1,9 @@
-// Browserprüfung „Anmeldung wie Podium“ auf einer LEEREN Datenbank (wie der Server: ohne Demodaten, ohne Testanmeldung):
-// Ersteinrichtung, Feldbreiten, Einladungslink (Token hinter #), Einlösen in einem zweiten Browser, Bremse nach Fehlversuchen,
+// Browserprüfung der Anmeldung (ASP.NET Core Identity) auf einer LEEREN Datenbank (wie der Server: ohne Demodaten, ohne Testanmeldung):
+// Ersteinrichtung mit Pflicht-TOTP (QR-Code, Code, Wiederherstellungscodes), Passkey hinzufügen und damit anmelden (virtueller
+// Authenticator über CDP), Feldbreiten, Einladungslink (Token hinter #), Einlösen in einem zweiten Browser, Sperre nach Fehlversuchen,
 // öffentliches Antragsformular ohne Anmeldung, 390 px.
 // Aufruf: node tests/Browser/anmeldung.mjs http://localhost:5311/profomat <Ordner>
+import { createHmac } from 'node:crypto';
 import { mkdirSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -18,6 +20,18 @@ const PW = 'ein-langes-Passwort-1';
 const formular = (seite, werte, knopf) => seite.eval(`(() => { const w = ${JSON.stringify(werte)};
     for (const [id, v] of Object.entries(w)) { const el = document.getElementById(id); if (!el) throw new Error('fehlt ' + id); el.value = v; }
     [...document.querySelectorAll('button[type=submit]')].find(b => b.textContent.includes(${JSON.stringify(knopf)})).click(); })()`);
+// TOTP wie eine Authenticator-App (RFC 6238: SHA-1, 6 Stellen, 30 s)
+function totp(base32) {
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+    let bits = '';
+    for (const c of base32.replace(/[\s=]/g, '').toUpperCase()) { bits += alphabet.indexOf(c).toString(2).padStart(5, '0'); }
+    const schluessel = Buffer.from(bits.match(/.{8}/g).map((b) => parseInt(b, 2)));
+    const zaehler = Buffer.alloc(8);
+    zaehler.writeBigUInt64BE(BigInt(Math.floor(Date.now() / 30000)));
+    const h = createHmac('sha1', schluessel).update(zaehler).digest();
+    const o = h[h.length - 1] & 0x0f;
+    return String((h.readUInt32BE(o) & 0x7fffffff) % 1000000).padStart(6, '0');
+}
 const breite = (seite, id) => seite.eval(`Math.round(document.getElementById('${id}').getBoundingClientRect().width)`);
 
 const { seite, beenden } = await browserStarten({ port: 9351, breite: 1280, hoehe: 900 });
@@ -31,9 +45,43 @@ try {
     await seite.bild(join(bilder, 'a1-ersteinrichtung.png'));
     await formular(seite, { 'e-kennung': 'Liebler', 'e-titel': 'Prof. Dr.', 'e-vorname': 'Klaus', 'e-nachname': 'Liebler', 'e-mail': 'kl@example.invalid',
         'e-pw': PW, 'e-pw2': PW }, 'Konto anlegen');
-    await seite.warteAuf(`!location.pathname.endsWith('/anmelden')`);
+    await seite.warteAuf(`location.pathname.endsWith('/anmelden/zweiter-faktor')`);
+    await warte(600);
+    pruefe((await seite.text()).includes('Zweiten Faktor einrichten'), 'Systemverwaltung muss zuerst den zweiten Faktor einrichten');
+    pruefe(await seite.eval(`document.querySelector('img.pm-qr')?.src.startsWith('data:image/svg+xml')`), 'QR-Code als SVG');
+    await seite.bild(join(bilder, 'a1b-totp-einrichten.png'));
+    const geheim = await seite.eval(`document.querySelector('.pm-schluessel').textContent`);
+    await formular(seite, { 'e-code': '000000' }, 'Einrichten');
+    await warte(900);
+    pruefe((await seite.text()).includes('Der Code stimmt nicht'), 'falscher Code abgelehnt');
+    await formular(seite, { 'e-code': totp(geheim) }, 'Einrichten');
+    await seite.warteAuf(`document.body.innerText.includes('Wiederherstellungscodes')`);
+    pruefe(await seite.eval(`document.querySelectorAll('.pm-codes li').length`) === 10, 'zehn Wiederherstellungscodes angezeigt');
+    await seite.bild(join(bilder, 'a1c-wiederherstellungscodes.png'));
+    await seite.klickText('a', 'Weiter zu ProfOMat');
+    await seite.warteAuf(`!location.pathname.includes('/anmelden')`);
     await warte(800);
     pruefe((await seite.text()).includes('Prof. Dr. Klaus Liebler'), 'angemeldet als Prof. Dr. Klaus Liebler');
+
+    console.log('• Passkey hinzufügen und damit anmelden (virtueller Authenticator)');
+    await seite.cdp('WebAuthn.enable', { enableUI: false });
+    await seite.cdp('WebAuthn.addVirtualAuthenticator', { options: { protocol: 'ctap2', transport: 'internal', hasResidentKey: true,
+        hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true } });
+    await seite.oeffnen(basis + 'profil/sicherheit');
+    pruefe((await seite.text()).includes('Anmeldung und Sicherheit'), 'Seite „Anmeldung und Sicherheit“');
+    pruefe((await seite.text()).includes('eingerichtet'), 'zweiter Faktor als eingerichtet angezeigt');
+    await seite.eval(`document.getElementById('pk-name').value = 'Virtueller Schlüssel'`);
+    await seite.klick('[data-passkey="hinzufuegen"]');
+    await seite.warteAuf(`document.body.innerText.includes('Passkey hinzugefügt')`);
+    pruefe((await seite.text()).includes('Virtueller Schlüssel'), 'Passkey in der Liste');
+    await seite.bild(join(bilder, 'a1d-sicherheit.png'));
+    await seite.eval(`document.querySelector('form[action$="abmelden"] button').click()`);
+    await warte(1200);
+    await seite.oeffnen(basis + 'anmelden');
+    await seite.klick('[data-passkey="anmelden"]');
+    await seite.warteAuf(`!location.pathname.includes('/anmelden')`);
+    await warte(800);
+    pruefe((await seite.text()).includes('Prof. Dr. Klaus Liebler'), 'mit Passkey angemeldet – ohne Passwort und ohne weiteren Code');
 
     console.log('• Einladungslink erzeugen');
     await seite.oeffnen(basis + 'konten');
@@ -85,13 +133,18 @@ try {
         await formular(fremd, { kennung: 'niemeyer', pw: PW }, 'Anmelden');
         await warte(900);
         pruefe((await fremd.text()).includes('Zu viele Fehlversuche'), 'nach 5 Fehlversuchen gesperrt, auch mit richtigem Passwort');
+        await fremd.breite(390, 844);
+        await warte(400);
+        pruefe(await fremd.eval('document.documentElement.scrollWidth') <= 392, 'Anmeldeseite mit 390 px ohne waagerechte Rollleiste');
+        await fremd.bild(join(bilder, 'a4-anmelden-390px.png'));
+        await fremd.breite(1280, 900);
 
-        console.log('• Öffentliches Antragsformular ohne Anmeldung');
-        await fremd.oeffnen(basis + 'drittpruefung/antrag');
+        console.log('• Persönliche Links der Studierenden ohne Anmeldung');
+        pruefe(!(await fremd.eval(`!!document.querySelector('a[href$="drittpruefung/antrag"]')`)), 'kein Link auf das alte Antragsformular');
+        await fremd.oeffnen(basis + 'drittpruefung/00000000-0000-0000-0000-000000000000/falsch');
         await warte(600);
-        pruefe((await fremd.text()).includes('Antrag auf mündliche Prüfung im dritten Versuch'), 'Antragsformular erreichbar');
-        pruefe(await fremd.eval(`document.getElementById('webseite') && getComputedStyle(document.querySelector('.pm-koeder')).position === 'absolute'`),
-            'Köderfeld vorhanden und unsichtbar');
+        pruefe((await fremd.eval('location.pathname')).includes('/drittpruefung/'), 'Studierendenlink ohne Umleitung zur Anmeldung erreichbar');
+        pruefe((await fremd.text()).includes('Link ungültig'), 'falscher Link: „Link ungültig“');
         await fremd.oeffnen(basis + 'konten');
         await warte(600);
         pruefe((await fremd.eval('location.pathname')).endsWith('/anmelden'), 'Konten nur mit Anmeldung');

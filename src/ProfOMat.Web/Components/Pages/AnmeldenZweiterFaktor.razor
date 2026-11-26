@@ -1,0 +1,196 @@
+@page "/anmelden/zweiter-faktor"
+@attribute [AllowAnonymous]
+@attribute [ExcludeFromInteractiveRouting]
+@layout LeeresLayout
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Authentication
+@using Microsoft.AspNetCore.Identity
+@using ProfOMat.Application.Konten
+@inject SignInManager<Konto> Identitaet
+@inject SicherheitDienst Sicherheit
+@inject Anmeldeabschluss Abschluss
+@inject NavigationManager Navigation
+@inject ILogger<AnmeldenZweiterFaktor> Log
+@* Zweite Stufe der Anmeldung: Code aus der Authenticator-App (oder Wiederherstellungscode). Wer den Pflicht-Faktor noch nicht hat
+   (Systemverwaltung, Studiendekanat), richtet ihn hier ein – mit QR-Code, ohne Inline-JavaScript. Grundlage ist das kurzlebige
+   Zwischen-Cookie von ASP.NET Core Identity aus der ersten Stufe (5 Minuten). *@
+
+<PageTitle>Zweiter Faktor · ProfOMat</PageTitle>
+
+<div class="pm-login">
+    <div class="pm-row"><span class="pm-brand-zeichen">P</span><h1>@(codes is not null ? "Wiederherstellungscodes" : einrichten ? "Zweiten Faktor einrichten" : "Zweiter Faktor")</h1></div>
+
+    @if (fehler is not null)
+    {
+        <div class="pm-alert pm-crit" role="alert">@fehler</div>
+    }
+
+    @if (codes is not null)
+    {
+        <div class="pm-alert pm-gut">Der zweite Faktor ist eingerichtet und Sie sind angemeldet.</div>
+        <p>Bewahren Sie diese <b>Wiederherstellungscodes</b> sicher auf (ausdrucken oder im Passwortsafe). Jeder Code gilt einmal, falls das Telefon
+            verloren geht. Sie werden nur jetzt angezeigt.</p>
+        <ul class="pm-codes">
+            @foreach (var c in codes)
+            {
+                <li class="pm-mono">@c</li>
+            }
+        </ul>
+        <div><a class="pm-btn pm-btn-haupt" href="@ziel">Weiter zu ProfOMat</a></div>
+    }
+    else if (konto is null)
+    {
+        <p>Die Anmeldung ist abgelaufen (nach fünf Minuten). Bitte <a href="anmelden">erneut anmelden</a>.</p>
+    }
+    else if (einrichten && einrichtung is not null)
+    {
+        <p>Für Ihre Rolle ist ein zweiter Faktor Pflicht. Scannen Sie den QR-Code mit einer Authenticator-App (z. B. Microsoft Authenticator,
+            FreeOTP, Aegis, 2FAS) und geben Sie den angezeigten sechsstelligen Code ein.</p>
+        <div class="pm-qr-zeile">
+            <img class="pm-qr" src="@qr" alt="QR-Code für die Authenticator-App" width="200" height="200" />
+            <div class="pm-small">
+                <p>QR-Code lässt sich nicht scannen? Schlüssel von Hand eingeben:</p>
+                <p class="pm-mono pm-schluessel">@einrichtung.Schluessel</p>
+                <p class="pm-muted">Art: zeitbasiert (TOTP), 6 Stellen, 30 Sekunden.</p>
+            </div>
+        </div>
+        <form method="post" @formname="einrichten" @onsubmit="EinrichtenAsync" class="pm-fields">
+            <AntiforgeryToken />
+            <div class="pm-field"><label class="pm-lbl" for="e-code">Code aus der App</label>
+                <input id="e-code" name="ECode" class="pm-input" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]{6,8}" maxlength="8" required /></div>
+            <div class="pm-field pm-field-weit"><div><button type="submit" class="pm-btn pm-btn-haupt">Einrichten und anmelden</button></div></div>
+        </form>
+    }
+    else
+    {
+        <p>Geben Sie den sechsstelligen Code aus Ihrer Authenticator-App ein.</p>
+        <form method="post" @formname="code" @onsubmit="CodeAsync" class="pm-fields">
+            <AntiforgeryToken />
+            <div class="pm-field"><label class="pm-lbl" for="code">Code</label>
+                <input id="code" name="Code" class="pm-input" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]{6,8}" maxlength="8" required autofocus /></div>
+            <div class="pm-field pm-field-weit"><div><button type="submit" class="pm-btn pm-btn-haupt">Anmelden</button></div></div>
+        </form>
+        <details>
+            <summary class="pm-small">Telefon verloren? Mit Wiederherstellungscode anmelden</summary>
+            <form method="post" @formname="wiederherstellung" @onsubmit="WiederherstellungAsync" class="pm-fields">
+                <AntiforgeryToken />
+                <div class="pm-field"><label class="pm-lbl" for="wcode">Wiederherstellungscode</label>
+                    <input id="wcode" name="Wiederherstellungscode" class="pm-input" autocomplete="off" required /></div>
+                <div class="pm-field pm-field-weit"><div><button type="submit" class="pm-btn">Mit Wiederherstellungscode anmelden</button></div></div>
+            </form>
+            <p class="pm-small pm-muted">Keine Codes mehr? Die Systemverwaltung kann den zweiten Faktor zurücksetzen.</p>
+        </details>
+    }
+</div>
+
+@code {
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    [SupplyParameterFromForm(FormName = "code")]
+    private string? Code { get; set; }
+
+    [SupplyParameterFromForm(FormName = "einrichten")]
+    private string? ECode { get; set; }
+
+    [SupplyParameterFromForm(FormName = "wiederherstellung")]
+    private string? Wiederherstellungscode { get; set; }
+
+    [SupplyParameterFromQuery]
+    private string? ReturnUrl { get; set; }
+
+    private Konto? konto;
+    private Anmeldeart art = Anmeldeart.Passwort;
+    private bool einrichten;
+    private AuthenticatorEinrichtung? einrichtung;
+    private string? qr, fehler, ziel;
+    private IReadOnlyList<string>? codes;
+
+    protected override async Task OnInitializedAsync()
+    {
+        konto = await Identitaet.GetTwoFactorAuthenticationUserAsync();
+        if (konto is null)
+        {
+            return;
+        }
+
+        var zwischen = await HttpContext.AuthenticateAsync(IdentityConstants.TwoFactorUserIdScheme);
+        if (Enum.TryParse<Anmeldeart>(zwischen.Principal?.FindFirstValue(ClaimTypes.AuthenticationMethod), out var a))
+        {
+            art = a;
+        }
+
+        einrichten = !konto.ZweiterFaktorAktiv;
+        if (einrichten)
+        {
+            var stempel = konto.SicherheitsStempel;
+            einrichtung = await Sicherheit.AuthenticatorAsync(konto);
+            if (konto.SicherheitsStempel != stempel)
+            {
+                await Abschluss.ZwischenCookieAsync(HttpContext, konto, art);   // neuer Schlüssel = neuer Stempel
+            }
+
+            qr = QrCode.SvgDatenUri(einrichtung.OtpauthUri);
+        }
+    }
+
+    private string Ziel => Ruecksprung.Lokal(ReturnUrl, HttpContext.Request.PathBase.HasValue ? HttpContext.Request.PathBase.Value + "/" : "/");
+
+    private async Task CodeAsync()
+    {
+        if (konto is null)
+        {
+            return;
+        }
+
+        var sauber = new string((Code ?? "").Where(char.IsAsciiDigit).ToArray());
+        var ergebnis = await Identitaet.TwoFactorAuthenticatorSignInAsync(sauber, isPersistent: false, rememberClient: false);
+        await NachSignInAsync(ergebnis);
+    }
+
+    private async Task WiederherstellungAsync()
+    {
+        if (konto is null)
+        {
+            return;
+        }
+
+        var ergebnis = await Identitaet.TwoFactorRecoveryCodeSignInAsync((Wiederherstellungscode ?? "").Trim());
+        await NachSignInAsync(ergebnis);
+    }
+
+    private async Task NachSignInAsync(Microsoft.AspNetCore.Identity.SignInResult ergebnis)
+    {
+        if (ergebnis.Succeeded)
+        {
+            await Abschluss.ZweiterFaktorErledigtAsync(konto!, art);
+            Navigation.NavigateTo(Ziel);
+            return;
+        }
+
+        Log.LogWarning("Zweiter Faktor fehlgeschlagen ({Ergebnis})", ergebnis.IsLockedOut ? "gesperrt" : "falsch");
+        fehler = ergebnis.IsLockedOut ? "Zu viele Fehlversuche – die Anmeldung ist vorübergehend gesperrt." : "Der Code stimmt nicht. Bitte erneut versuchen.";
+    }
+
+    private async Task EinrichtenAsync()
+    {
+        if (konto is null || !einrichten)
+        {
+            return;
+        }
+
+        var neu = await Sicherheit.ZweitenFaktorAktivierenAsync(konto, ECode);
+        if (neu is null)
+        {
+            fehler = "Der Code stimmt nicht. Bitte die Uhrzeit des Telefons prüfen und den aktuellen Code eingeben.";
+            return;
+        }
+
+        // Identity hat den Stempel erneuert; angemeldet wird mit dem frischen Stand und dem Nachweis „mfa“.
+        await HttpContext.SignOutAsync(IdentityConstants.TwoFactorUserIdScheme);
+        await Identitaet.SignInWithClaimsAsync(konto, isPersistent: false, Anmeldeabschluss.Claims(art, mfa: true));
+        await Abschluss.ZweiterFaktorErledigtAsync(konto, art);
+        codes = neu;
+        ziel = Ziel;
+    }
+}

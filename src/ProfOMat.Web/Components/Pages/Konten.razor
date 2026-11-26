@@ -76,7 +76,7 @@
     <h2>Alle Konten</h2>
     <div class="pm-tbl">
         <table>
-            <thead><tr><th>Name</th><th>Kennung</th><th>Mail</th><th>Rollen</th><th>Schlüssel</th><th></th></tr></thead>
+            <thead><tr><th>Name</th><th>Kennung</th><th>Mail</th><th>Rollen</th><th>Anmeldung</th><th>Schlüssel</th><th></th></tr></thead>
             <tbody>
                 @foreach (var k in konten)
                 {
@@ -85,6 +85,7 @@
                         <td class="pm-mono">@k.Kennung</td>
                         <td>@k.Email</td>
                         <td>@string.Join(", ", k.Rollen.Select(r => r.Rolle.Anzeigename()))</td>
+                        <td class="pm-small">@AnmeldeStand(k)</td>
                         <td>@k.Schluessel.Count(s => s.WiderrufenAm is null)</td>
                         <td class="pm-nowrap">
                             <button type="button" class="pm-linkbutton" @onclick="() => Bearbeiten(k)">bearbeiten</button> ·
@@ -114,10 +115,18 @@
                 }
             </div>
             <div class="pm-field"><span class="pm-lbl">Zugang</span><label class="pm-check"><input type="checkbox" @bind="aktiv" /> aktiv</label>
-                <span class="pm-hilfe">Sperren und Rollenänderungen beenden bestehende Sitzungen sofort.</span></div>
+                <span class="pm-hilfe">Sperren und Rollenänderungen beenden bestehende Sitzungen sofort. Speichern mit „aktiv“ hebt auch eine
+                    vorübergehende Sperre nach Fehlversuchen auf@(bearbeitet.GesperrtBis is { } bis && bis > DateTimeOffset.UtcNow ? $" (gesperrt bis {Zeit.Kurz(bis)})" : "").</span></div>
+            <div class="pm-field"><span class="pm-lbl">Zweiter Faktor</span>
+                <span>@(bearbeitet.ZweiterFaktorAktiv ? "eingerichtet" : "nicht eingerichtet")</span>
+                <span class="pm-hilfe">Gerät verloren und keine Wiederherstellungscodes mehr? Zurücksetzen – wer ihn braucht, richtet ihn bei der nächsten Anmeldung neu ein.</span></div>
         </div>
         <div class="pm-row">
             <BegruendeterButton Text="Speichern" Haupt="true" Click="SpeichernAsync" />
+            @if (bearbeitet.ZweiterFaktorAktiv)
+            {
+                <BegruendeterButton Text="Zweiten Faktor zurücksetzen" Click="ZweitenFaktorZuruecksetzenAsync" />
+            }
             <button type="button" class="pm-btn" @onclick="() => bearbeitet = null">Abbrechen</button>
         </div>
     </section>
@@ -198,6 +207,30 @@
         bearbeitet = k;
         (titel, vorname, nachname, email, aktiv) = (k.Titel, k.Vorname, k.Nachname, k.Email, k.Aktiv);
         rollen = k.Rollen.Select(r => r.Rolle).ToHashSet();
+    }
+
+    private static string AnmeldeStand(Konto k)
+        => string.Join(" · ", new[]
+        {
+            k.PasswortHash is null ? null : k.ZweiterFaktorAktiv ? "Passwort + App" : "Passwort",
+            k.Passkeys.Count > 0 ? $"{k.Passkeys.Count} Passkey(s)" : null,
+            k.Anmeldungen.Count > 0 ? string.Join(", ", k.Anmeldungen.Select(a => a.Anbieter)) : null,
+        }.Where(t => t is not null));
+
+    private async Task ZweitenFaktorZuruecksetzenAsync()
+    {
+        fehler = null;
+        try
+        {
+            await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<KontoDienst>().ZweitenFaktorZuruecksetzenAsync(bearbeitet!.Id));
+            bearbeitet = null;
+            Hinweise.Notify(NotificationSeverity.Success, "Zweiter Faktor zurückgesetzt.");
+            await LadenAsync();
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+        }
     }
 
     private static void Umschalten(HashSet<Rolle> menge, Rolle r, bool an)

@@ -18,7 +18,9 @@ public static class Registrierung
         dienste.AddScoped<Postausgang>();
         dienste.AddScoped<Mailentwuerfe>();
         dienste.AddScoped<Mailsignaturen>();
+        dienste.Configure<AnmeldeOptionen>(konfiguration.GetSection(AnmeldeOptionen.Abschnitt));
         dienste.AddScoped<KontoDienst>();
+        dienste.AddScoped<SicherheitDienst>();
         dienste.AddScoped<KatalogDienst>();
         dienste.AddScoped<DrittpruefungDienst>();
         dienste.AddScoped<Klausuren.KlausurDienst>();

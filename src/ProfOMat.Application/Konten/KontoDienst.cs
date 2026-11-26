@@ -15,22 +15,42 @@ public sealed record Kontoangaben(string Kennung, string? Titel, string Vorname,
 /// <summary>Frisch erzeugter Einmal-Link: das Token gibt es nur jetzt (gespeichert wird sein SHA-256).</summary>
 public sealed record EinladungsLink(Einladung Einladung, string Token);
 
+/// <summary>Ergebnis der Passwortprüfung (erste Stufe der Anmeldung).</summary>
+public enum Passwortergebnis
+{
+    Erfolg = 1,
+
+    /// <summary>Kennung unbekannt, Konto gesperrt oder Passwort falsch – bewusst ohne Unterscheidung.</summary>
+    Falsch = 2,
+
+    /// <summary>Vorübergehend gesperrt nach zu vielen Fehlversuchen.</summary>
+    VoruebergehendGesperrt = 3,
+}
+
+public sealed record Passwortpruefung(Passwortergebnis Ergebnis, Konto? Konto, DateTimeOffset? GesperrtBis = null)
+{
+    public bool Erfolg => Ergebnis == Passwortergebnis.Erfolg;
+}
+
 /// <summary>Was ein (noch gültiger) Link anbietet – für die öffentliche Einlöseseite.</summary>
 public sealed record EinladungsInfo(EinladungsArt Art, string? Notiz, DateTimeOffset Ablauf, IReadOnlyList<Rolle> Rollen, string? Kennung, string? Name);
 
 /// <summary>
-/// Lokale Konten der Lehrenden und Verwaltung (Anmeldung wie in Podium): Ersteinrichtung des ersten Kontos über die Oberfläche,
-/// weitere Konten nur per Einladungslink, vergessene Passwörter per Passwort-Link. Studierende brauchen kein Konto.
-/// Später zusätzlich Anmeldung über das Hochschulsystem.
+/// Konten der Lehrenden und Verwaltung auf Grundlage von ASP.NET Core Identity: Ersteinrichtung des ersten Kontos über die Oberfläche,
+/// weitere Konten nur per Einladungslink (mit Passwort oder über einen Identitätsdienst), vergessene Passwörter per Passwort-Link.
+/// Studierende brauchen kein Konto.
 /// </summary>
-public sealed partial class KontoDienst(IDaten daten, IAktuellerBenutzer aktuell, Protokoll protokoll, TimeProvider uhr)
+public sealed partial class KontoDienst(IDaten daten, IAktuellerBenutzer aktuell, Protokoll protokoll, TimeProvider uhr, UserManager<Konto> identitaet)
 {
     public const int MinPasswortLaenge = 12;
     public const int EinladungTageStandard = 7;
     public const int PasswortLinkTage = 3;
 
-    /// <summary>PBKDF2-HMAC-SHA512 mit 210 000 Iterationen (OWASP); ältere Hashes werden bei der Anmeldung erneuert.</summary>
-    private static readonly PasswordHasher<Konto> Hasher = new(Microsoft.Extensions.Options.Options.Create(new PasswordHasherOptions { IterationCount = 210_000 }));
+    /// <summary>PBKDF2-Iterationen (OWASP); dieselben Optionen gelten für ASP.NET Core Identity (<c>PasswordHasherOptions</c>).</summary>
+    public const int PasswortIterationen = 210_000;
+
+    /// <summary>PBKDF2-HMAC-SHA512 im Format von ASP.NET Core Identity; ältere Hashes werden bei der Anmeldung erneuert.</summary>
+    private static readonly PasswordHasher<Konto> Hasher = new(Microsoft.Extensions.Options.Options.Create(new PasswordHasherOptions { IterationCount = PasswortIterationen }));
 
     /// <summary>Ersteinrichtung nur einmal gleichzeitig (zwei Anfragen könnten sonst beide „kein Konto“ sehen).</summary>
     private static readonly SemaphoreSlim EinrichtungSperre = new(1, 1);
@@ -45,42 +65,58 @@ public sealed partial class KontoDienst(IDaten daten, IAktuellerBenutzer aktuell
         return new Benutzer(konto.Kennung, konto.Anzeigename, konto.Id, konto.Rollen.Select(r => r.Rolle).Order().ToList());
     }
 
-    /// <summary>Prüft Kennung und Passwort; <c>null</c> bei Fehlschlag (ohne Hinweis, was falsch war).</summary>
-    public async Task<Benutzer?> PasswortAnmeldenAsync(string kennung, string passwort, CancellationToken abbruch = default)
+    /// <summary>
+    /// Erste Stufe der Passwortanmeldung über ASP.NET Core Identity: Kennung und Passwort prüfen, Fehlversuche zählen, nach
+    /// <see cref="AnmeldeOptionen.SperreNachFehlversuchen"/> Fehlversuchen vorübergehend sperren. Angemeldet wird erst danach
+    /// (gegebenenfalls nach dem zweiten Faktor). Ohne Hinweis, ob Kennung oder Passwort falsch war.
+    /// </summary>
+    public async Task<Passwortpruefung> PasswortPruefenAsync(string kennung, string passwort, CancellationToken abbruch = default)
     {
         if (string.IsNullOrWhiteSpace(kennung) || string.IsNullOrEmpty(passwort))
         {
-            return null;
+            return new Passwortpruefung(Passwortergebnis.Falsch, null);
         }
 
-        var k = kennung.Trim().ToLowerInvariant();
-        var konto = await daten.ErsterAsync(daten.Menge<Konto>().Where(x => x.Kennung == k), abbruch);
-        if (konto is not { Aktiv: true, PasswortHash: { } hash })
+        var konto = await identitaet.FindByNameAsync(kennung.Trim());
+        if (konto is not { Aktiv: true, PasswortHash: not null })
         {
-            Hasher.VerifyHashedPassword(Attrappe, AttrappenHash, passwort);
-            return null;
+            Hasher.VerifyHashedPassword(Attrappe, AttrappenHash, passwort);   // gleiche Antwortzeit wie bei bekannter Kennung
+            return new Passwortpruefung(Passwortergebnis.Falsch, null);
         }
 
-        var ergebnis = Hasher.VerifyHashedPassword(konto, hash, passwort);
-        if (ergebnis == PasswordVerificationResult.Failed)
+        if (await identitaet.IsLockedOutAsync(konto))
         {
-            return null;
+            return new Passwortpruefung(Passwortergebnis.VoruebergehendGesperrt, null, konto.GesperrtBis);
         }
 
-        if (ergebnis == PasswordVerificationResult.SuccessRehashNeeded)
+        if (await identitaet.CheckPasswordAsync(konto, passwort))
         {
-            konto.PasswortSetzen(Hasher.HashPassword(konto, passwort));
+            await identitaet.ResetAccessFailedCountAsync(konto);
+            return new Passwortpruefung(Passwortergebnis.Erfolg, konto);
         }
 
-        var benutzer = AlsBenutzer(konto);
-        protokoll.Eintragen(benutzer, "Anmeldung", "Anmeldung mit Passwort");
-        await daten.SpeichernAsync(abbruch);
-        return benutzer;
+        await identitaet.AccessFailedAsync(konto);
+        if (await identitaet.IsLockedOutAsync(konto))
+        {
+            protokoll.Eintragen(AlsBenutzer(konto), "Anmeldung.Sperre", "Vorübergehend gesperrt nach zu vielen Fehlversuchen", konto.Id);
+            await daten.SpeichernAsync(abbruch);
+            return new Passwortpruefung(Passwortergebnis.VoruebergehendGesperrt, null, konto.GesperrtBis);
+        }
+
+        return new Passwortpruefung(Passwortergebnis.Falsch, null);
     }
 
-    /// <summary>Testanmeldung (nur Entwicklung): Konto ohne Passwort wählen.</summary>
-    public async Task<Benutzer?> TestanmeldungAsync(Guid kontoId, CancellationToken abbruch = default)
-        => await daten.FindenAsync<Konto>(kontoId, abbruch) is { Aktiv: true } konto ? AlsBenutzer(konto) : null;
+    /// <summary>Erfolgreiche Anmeldung ins Protokoll (Art, zweiter Faktor) – ohne Personendaten im Betriebslog.</summary>
+    public async Task AnmeldungProtokollierenAsync(Konto konto, Anmeldeart art, bool zweiterFaktor, CancellationToken abbruch = default)
+    {
+        ArgumentNullException.ThrowIfNull(konto);
+        protokoll.Eintragen(AlsBenutzer(konto), "Anmeldung", $"Anmeldung ({art}{(zweiterFaktor ? ", zweiter Faktor" : "")})", konto.Id);
+        await daten.SpeichernAsync(abbruch);
+    }
+
+    /// <summary>Aktives Konto für die Anmeldung (Testanmeldung, Passkey, Identitätsdienst); <c>null</c>, wenn unbekannt oder gesperrt.</summary>
+    public async Task<Konto?> AktivesKontoAsync(Guid kontoId, CancellationToken abbruch = default)
+        => await daten.FindenAsync<Konto>(kontoId, abbruch) is { Aktiv: true } konto ? konto : null;
 
     /// <summary>Aktuelle Rechte eines angemeldeten Kontos (Rollen können sich seit der Anmeldung geändert haben).</summary>
     public async Task<Benutzer?> AktualisierenAsync(Guid kontoId, CancellationToken abbruch = default)
@@ -241,19 +277,28 @@ public sealed partial class KontoDienst(IDaten daten, IAktuellerBenutzer aktuell
     // ================================================================================================ Sitzungen
 
     /// <summary>
-    /// Stempel einer Sitzung: ändert sich mit Passwort, Rollen und Sperre. Steht im Anmelde-Cookie; passt er nicht mehr,
-    /// ist die Sitzung beendet (wie Podium).
+    /// Aktueller Sicherheitsstempel (ASP.NET Core Identity) eines aktiven Kontos; <c>null</c>, wenn es das Konto nicht (mehr) gibt oder es
+    /// gesperrt ist. Steht im Anmelde-Cookie; passt er nicht mehr (Passwort, Rollen, Sperre, zweiter Faktor, Verknüpfungen geändert),
+    /// endet die Sitzung. Eine schmale Abfrage, weil sie bei jeder Anfrage läuft.
     /// </summary>
-    public static string Stempel(Konto konto)
-    {
-        ArgumentNullException.ThrowIfNull(konto);
-        var roh = $"{konto.PasswortHash}|{konto.Aktiv}|{string.Join(',', konto.Rollen.Select(r => r.Rolle).Order())}";
-        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(roh)))[..16];
-    }
-
-    /// <summary>Aktueller Stempel eines aktiven Kontos; <c>null</c>, wenn es das Konto nicht (mehr) gibt oder es gesperrt ist.</summary>
     public async Task<string?> StempelAsync(Guid kontoId, CancellationToken abbruch = default)
-        => await daten.FindenAsync<Konto>(kontoId, abbruch) is { Aktiv: true } konto ? Stempel(konto) : null;
+        => await daten.ErsterAsync(daten.Menge<Konto>().Where(k => k.Id == kontoId && k.Aktiv).Select(k => k.SicherheitsStempel), abbruch);
+
+    /// <summary>Systemverwaltung: zweiten Faktor eines Kontos zurücksetzen (Gerät verloren). Bei Pflicht richtet die Person ihn bei der nächsten Anmeldung neu ein.</summary>
+    public async Task ZweitenFaktorZuruecksetzenAsync(Guid kontoId, CancellationToken abbruch = default)
+    {
+        var wer = await aktuell.ErmittelnAsync(abbruch);
+        Rechte.Verwaltung(wer).Sicherstellen();
+        var konto = await daten.FindenAsync<Konto>(kontoId, abbruch) ?? throw new FachlicherFehler("Konto nicht gefunden.");
+        if (konto.Id == wer.KontoId)
+        {
+            throw new FachlicherFehler("Den eigenen zweiten Faktor ändern Sie unter Profil → Anmeldung und Sicherheit.");
+        }
+
+        konto.ZweitenFaktorZuruecksetzen();
+        protokoll.Eintragen(wer, "Konto.ZweiterFaktor", $"Zweiter Faktor für {konto.Kennung} zurückgesetzt", konto.Id);
+        await daten.SpeichernAsync(abbruch);
+    }
 
     // ================================================================================================ Ersteinrichtung
 
@@ -383,6 +428,52 @@ public sealed partial class KontoDienst(IDaten daten, IAktuellerBenutzer aktuell
             e.Art == EinladungsArt.Konto ? $"Konto {konto.Kennung} per Einladung angelegt" : $"Passwort für {konto.Kennung} per Link gesetzt", konto.Id);
         await daten.SpeichernAsync(abbruch);
         return AlsBenutzer(konto);
+    }
+
+    /// <summary>
+    /// Öffentlich: Einladungslink über einen Identitätsdienst (SAML/OIDC) einlösen. Das neue Konto hat kein Passwort und ist mit der dauerhaften
+    /// externen Kennung verknüpft; Name und Mail kommen vom Identitätsdienst. Passwort-Links lassen sich so nicht einlösen.
+    /// </summary>
+    public async Task<Konto> EinladungMitIdentitaetsdienstEinloesenAsync(string? token, ExterneIdentitaet ext, CancellationToken abbruch = default)
+    {
+        ArgumentNullException.ThrowIfNull(ext);
+        var e = await GueltigeEinladungAsync(token, abbruch) ?? throw new FachlicherFehler("Der Link ist ungültig, abgelaufen oder wurde schon verwendet.");
+        if (e.Art != EinladungsArt.Konto)
+        {
+            throw new FachlicherFehler("Ein Passwort-Link lässt sich nicht über einen Identitätsdienst einlösen.");
+        }
+
+        if (await identitaet.FindByLoginAsync(ext.Anbieter, ext.Schluessel) is not null)
+        {
+            throw new FachlicherFehler("Mit diesem Konto des Identitätsdienstes ist schon ein ProfOMat-Konto verknüpft – bitte einfach anmelden.");
+        }
+
+        if (string.IsNullOrWhiteSpace(ext.Email) || !ext.Email.Contains('@', StringComparison.Ordinal))
+        {
+            throw new FachlicherFehler("Der Identitätsdienst hat keine Mailadresse übermittelt. Bitte beim Rechenzentrum melden.");
+        }
+
+        var basis = ext.KennungsVorschlag();
+        var kennung = basis;
+        for (var i = 2; await daten.AnzahlAsync(daten.Menge<Konto>().Where(x => x.Kennung == kennung), abbruch) > 0; i++)
+        {
+            kennung = basis + i.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        var nachname = ext.Nachname ?? ext.Anzeigename ?? kennung;
+        var konto = new Konto(kennung, null, ext.Vorname ?? "", nachname, ext.Email, KontoHerkunft.Hochschule);
+        foreach (var r in e.RollenListe)
+        {
+            konto.RolleGeben(r);
+        }
+
+        var jetzt = uhr.GetUtcNow();
+        konto.AnmeldungVerknuepfen(ext.Anbieter, ext.Schluessel, ext.Anbieter == ExterneIdentitaet.Saml ? "Hochschulkonto" : "Firmenkonto", jetzt);
+        daten.Hinzufuegen(konto);
+        e.Einloesen(konto.Id, jetzt);
+        protokoll.Eintragen(AlsBenutzer(konto), "Konto.Angelegt", $"Konto {konto.Kennung} per Einladung über {ext.Anbieter} angelegt", konto.Id);
+        await daten.SpeichernAsync(abbruch);
+        return konto;
     }
 
     public static string TokenHash(string token) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token)));

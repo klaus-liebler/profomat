@@ -1,35 +1,23 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Components.Authorization;
+using Microsoft.AspNetCore.Identity;
 using ProfOMat.Application;
 using ProfOMat.Domain.Konten;
+using ProfOMat.Infrastructure.Sicherheit;
 
 namespace ProfOMat.Web.Sicherheit;
 
 /// <summary>
-/// Anmeldung per Cookie. Heute: lokale Konten (Kennung + Passwort) und in der Entwicklung die Testanmeldung.
-/// Später zusätzlich SAML (Shibboleth-IdP der Hochschule) – dieselben Claims, siehe docs/spezifikation/architektur.md.
+/// Anmeldung über ASP.NET Core Identity (Cookie „profomat.anmeldung“). Die Claims erzeugt die Claims-Fabrik der Infrastruktur:
+/// Konto-Id, Anzeigename, Kennung, Rollen, Sicherheitsstempel; dazu die Anmeldeart (<see cref="ClaimTypes.AuthenticationMethod"/>) und
+/// „amr“ = „mfa“, wenn ein zweiter Faktor nachgewiesen ist. Siehe docs/spezifikation/architektur.md.
 /// </summary>
 internal static class Anmeldung
 {
     public const string KontoClaim = ClaimTypes.NameIdentifier;
-    public const string ArtClaim = "profomat:anmeldeart";
-    public const string StempelClaim = "profomat:stempel";
 
-    /// <param name="stempel">Sitzungsstempel (<see cref="ProfOMat.Application.Konten.KontoDienst.Stempel"/>); ändert er sich, endet die Sitzung.</param>
-    public static ClaimsPrincipal Principal(Benutzer benutzer, string art, string schema, string stempel)
-    {
-        ArgumentNullException.ThrowIfNull(benutzer);
-        var claims = new List<Claim>
-        {
-            new(KontoClaim, benutzer.KontoIdPflicht.ToString("D")),
-            new(ClaimTypes.Name, benutzer.Name),
-            new("profomat:kennung", benutzer.Kennung),
-            new(ArtClaim, art),
-            new(StempelClaim, stempel),
-        };
-        claims.AddRange(benutzer.Rollen.Select(r => new Claim(ClaimTypes.Role, r.ToString())));
-        return new ClaimsPrincipal(new ClaimsIdentity(claims, schema, ClaimTypes.Name, ClaimTypes.Role));
-    }
+    /// <summary>Claim-Typ des Sicherheitsstempels (Identity-Vorgabe).</summary>
+    public static readonly string StempelClaim = new ClaimsIdentityOptions().SecurityStampClaimType;
 
     public static Benutzer? AlsBenutzer(ClaimsPrincipal? p)
     {
@@ -39,13 +27,14 @@ internal static class Anmeldung
         }
 
         var rollen = p.FindAll(ClaimTypes.Role).Select(c => Enum.TryParse<Rolle>(c.Value, out var r) ? r : (Rolle?)null).OfType<Rolle>().ToList();
-        return new Benutzer(p.FindFirst("profomat:kennung")?.Value ?? "?", p.Identity.Name ?? "?", id, rollen);
+        return new Benutzer(p.FindFirst(Identitaet.KennungClaim)?.Value ?? "?", p.Identity.Name ?? "?", id, rollen);
     }
 }
 
 /// <summary>
-/// Sitzung noch gültig? Wie Podium: Das Konto muss aktiv sein und der Stempel im Cookie zum aktuellen Stand passen
-/// (Passwortwechsel, Rollenänderung oder Sperre beenden alle bisherigen Sitzungen).
+/// Sitzung noch gültig? Das Konto muss aktiv sein und der Sicherheitsstempel von Identity im Cookie zum aktuellen Stand passen
+/// (Passwortwechsel, Rollenänderung, Sperre, zweiter Faktor oder Verknüpfungen beenden alle bisherigen Sitzungen). Läuft bei jeder
+/// Anfrage (eine schmale Abfrage) und jede Minute für offene Blazor-Verbindungen – strenger als der SecurityStampValidator von Identity.
 /// </summary>
 internal static class Sitzung
 {

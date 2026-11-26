@@ -10,16 +10,11 @@
 
 <div class="pm-head">
     <div>
-        <h1>Profil und Signaturschlüssel</h1>
+        <h1>Profil, Anmeldung und Signaturschlüssel</h1>
         <p>Wer mit eigenem Schlüssel unterschreiben möchte, hinterlegt hier einmal den öffentlichen Teil. Der private Schlüssel bleibt bei Ihnen:
             Der Browser signiert damit einen Nachweistext; übertragen wird nur der öffentliche Schlüssel.</p>
     </div>
 </div>
-
-@if (fehler is not null)
-{
-    <div class="pm-alert pm-crit" role="alert">@fehler</div>
-}
 
 @if (konto is not null)
 {
@@ -58,13 +53,15 @@
             }
         </section>
         <section class="pm-card">
-            <h2>Passwort ändern</h2>
-            @if (konto.PasswortHash is not null)
-            {
-                <div class="pm-field"><label class="pm-lbl" for="alt">Bisheriges Passwort</label><input id="alt" type="password" class="pm-input" @bind="altesPasswort" autocomplete="current-password" /></div>
-            }
-            <div class="pm-field"><label class="pm-lbl" for="neu">Neues Passwort (mind. @KontoDienst.MinPasswortLaenge Zeichen)</label><input id="neu" type="password" class="pm-input" @bind="neuesPasswort" autocomplete="new-password" /></div>
-            <div><BegruendeterButton Text="Passwort ändern" Click="PasswortAsync" /></div>
+            <h2>Anmeldung und Sicherheit</h2>
+            <p>Passwort, zweiter Faktor (Authenticator-App), Passkeys und verknüpfte Konten bei Identitätsdiensten.</p>
+            <ul class="pm-small">
+                <li>Passwort: @(konto.PasswortHash is null ? "keines" : "gesetzt")</li>
+                <li>Zweiter Faktor: @(konto.ZweiterFaktorAktiv ? "eingerichtet" : Anmelderegeln.ZweiterFaktorPflicht(konto) ? "fehlt (für Ihre Rolle Pflicht)" : "nicht eingerichtet")</li>
+                <li>Passkeys: @konto.Passkeys.Count · verknüpfte Konten: @konto.Anmeldungen.Count</li>
+            </ul>
+            @* Eigene Seite ohne Blazor-Verbindung: Änderungen erneuern den Sicherheitsstempel, die Sitzung wird per HTTP fortgeschrieben. *@
+            <div><a class="pm-btn pm-btn-haupt" href="profil/sicherheit" data-enhance-nav="false">Anmeldung und Sicherheit verwalten</a></div>
         </section>
     </div>
 
@@ -83,7 +80,7 @@
 
 @code {
     private Konto? konto;
-    private string? fehler, altesPasswort, neuesPasswort, bezeichnung;
+    private string? bezeichnung;
     private (string Text, DateTimeOffset Zeit)? nachweis;
     private Unterschreiben? unterschreiben;
 
@@ -126,18 +123,4 @@
         await LadenAsync();
     }
 
-    private async Task PasswortAsync()
-    {
-        fehler = null;
-        try
-        {
-            await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<KontoDienst>().PasswortSetzenAsync(konto!.Id, altesPasswort, neuesPasswort ?? ""));
-            altesPasswort = neuesPasswort = null;
-            Hinweise.Notify(NotificationSeverity.Success, "Passwort geändert.");
-        }
-        catch (FachlicherFehler ex)
-        {
-            fehler = ex.Message;
-        }
-    }
 }

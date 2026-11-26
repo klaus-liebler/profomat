@@ -39,6 +39,8 @@ export async function browserStarten({ port = 9333, breite = 1280, hoehe = 900 }
 
     const seite = {
         ereignisse,
+        /** Rohe CDP-Befehle an die Seite (z. B. WebAuthn.addVirtualAuthenticator für Passkeys). */
+        cdp: s,
         async eval(ausdruck) {
             const r = await s('Runtime.evaluate', { expression: ausdruck, awaitPromise: true, returnByValue: true });
             if (r.exceptionDetails) { throw new Error(`eval: ${r.exceptionDetails.exception?.description ?? r.exceptionDetails.text}`); }

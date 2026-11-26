@@ -3,7 +3,7 @@
     <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
   </PropertyGroup>
   <!-- Zentrale Paketversionen, gleiche Auswahl wie VibeVHS. Nicht verwenden: QuestPDF, MediatR, AutoMapper, FluentAssertions.
-       Neue Pakete nur nach Rückfrage (ClosedXML freigegeben 11/2026). -->
+       Neue Pakete nur nach Rückfrage (ClosedXML freigegeben 11/2026; SAML und OIDC für die Anmeldung freigegeben 11/2026). -->
   <ItemGroup>
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="11.0.0" />
     <PackageVersion Include="Microsoft.Extensions.TimeProvider.Testing" Version="11.0.0" />
@@ -14,6 +14,9 @@
     <PackageVersion Include="PDFsharp-MigraDoc" Version="6.2.4" />
     <PackageVersion Include="QRCoder" Version="1.6.0" />
     <PackageVersion Include="ClosedXML" Version="0.105.1" />
+    <!-- Anmeldung: SAML 2.0 (Shibboleth, wie Podium) und OpenID Connect -->
+    <PackageVersion Include="Sustainsys.Saml2.AspNetCore2" Version="2.11.2" />
+    <PackageVersion Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="11.0.0" />
     <!-- transitiv von PDFsharp: auf die sichere Version heben -->
     <PackageVersion Include="System.Security.Cryptography.Pkcs" Version="11.0.0" />
     <PackageVersion Include="xunit.v3" Version="4.0.3" />

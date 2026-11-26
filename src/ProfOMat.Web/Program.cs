@@ -1,6 +1,4 @@
 using System.Globalization;
-using Microsoft.AspNetCore.Authentication;
-using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.DataProtection;
 using ProfOMat.Adapters.Mocks;
 using ProfOMat.Application;
@@ -41,26 +39,10 @@ builder.Services.AddSerilog((dienste, log) => log
 builder.Services.AddRazorComponents().AddInteractiveServerComponents().AddHubOptions(o => o.MaximumReceiveMessageSize = 1024 * 1024);
 builder.Services.AddRadzenComponents();
 
-builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
-    .AddCookie(o =>
-    {
-        o.LoginPath = "/anmelden";
-        o.AccessDeniedPath = "/anmelden";
-        o.Cookie.Name = "profomat.anmeldung";
-        o.Cookie.HttpOnly = true;
-        o.Cookie.SameSite = SameSiteMode.Lax;
-        o.ExpireTimeSpan = TimeSpan.FromHours(10);
-        o.SlidingExpiration = true;
-        // Gesperrte Konten, neues Passwort oder geänderte Rollen beenden bestehende Sitzungen beim nächsten Aufruf (wie Podium).
-        o.Events.OnValidatePrincipal = async ctx =>
-        {
-            if (!await Sitzung.GueltigAsync(ctx.Principal, ctx.HttpContext.RequestServices, ctx.HttpContext.RequestAborted))
-            {
-                ctx.RejectPrincipal();
-                await ctx.HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
-            }
-        };
-    });
+var schluesselOrdner = Path.Combine(builder.Environment.ContentRootPath, builder.Configuration["Speicher:Schluessel"] ?? "data/schluessel");
+
+// Anmeldung über ASP.NET Core Identity; die Verfahren (SAML, OIDC, Passwort + TOTP, Passkey) schaltet die Konfiguration je Instanz frei.
+builder.Services.AddProfOMatAnmeldung(builder.Configuration, schluesselOrdner, builder.Environment.IsDevelopment());
 builder.Services.AddAuthorization();
 builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddScoped<Microsoft.AspNetCore.Components.Authorization.AuthenticationStateProvider, Sitzungspruefung>();
@@ -78,7 +60,7 @@ builder.Services
 
 builder.Services.AddDataProtection()
     .SetApplicationName("ProfOMat")
-    .PersistKeysToFileSystem(new DirectoryInfo(Path.Combine(builder.Environment.ContentRootPath, builder.Configuration["Speicher:Schluessel"] ?? "data/schluessel")));
+    .PersistKeysToFileSystem(new DirectoryInfo(schluesselOrdner));
 
 var hinterProxy = builder.Configuration.GetValue("ReverseProxy:Aktiv", false);
 if (hinterProxy)
@@ -160,6 +142,11 @@ app.UseRateLimiter();
 app.UseSerilogRequestLogging();
 app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
 app.UseRequestLocalization("de-DE");
+if (app.Services.GetRequiredService<Anmeldeangebot>().Hat(ProfOMat.Application.Konten.Anmeldeverfahren.Saml))
+{
+    app.UseSamlFehler();
+}
+
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseAntiforgery();
@@ -169,11 +156,7 @@ app.MapGet("/gesund", async (ProfOMatDbContext db) => await db.Database.CanConne
     ? Results.Text("ok")
     : Results.Text("Datenbank nicht erreichbar", statusCode: StatusCodes.Status503ServiceUnavailable)).AllowAnonymous().DisableRateLimiting();
 
-app.MapPost("/abmelden", async (HttpContext http) =>
-{
-    await http.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
-    return Results.LocalRedirect("~/");
-});
+app.MapAnmeldung();
 
 // PDF für Beschäftigte (Rechte prüft der Dienst)
 app.MapGet("/antraege/{id:guid}/pdf", async (Guid id, DrittpruefungDienst dienst, HttpContext http) =>

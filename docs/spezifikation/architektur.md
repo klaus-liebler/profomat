@@ -9,7 +9,7 @@
 | Netz | Öffentlich erreichbar über `https://liebler.iui.hs-osnabrueck.de/profomat/`, kein VPN und keine IP-Beschränkung; SSH nur aus dem VPN. |
 | Webserver (nginx) | TLS 1.2/1.3, Umleitung auf HTTPS, `server_tokens off`; HSTS, CSP und Rate-Limits setzt die Anwendung, nicht nginx. |
 | Anwendung | Rechte im Dienst, EF Core, Antiforgery, strenge CSP; Kestrel nur auf `127.0.0.1:5082`. |
-| Anmeldung | Lokale Konten mit PBKDF2 und Anmeldebremse; **kein zweiter Faktor**, Hochschul-SSO (Shibboleth/SAML) geplant. |
+| Anmeldung | ASP.NET Core Identity: je Instanz schaltbar SAML (Shibboleth), OIDC, Passwort + TOTP (Pflicht für Systemverwaltung und Studiendekanat), Passkeys; Sperre nach Fehlversuchen, Sicherheitsstempel. Anbindung an den IdP der Hochschule noch offen. |
 | Daten | SQLite-Datei nur für den Dienstbenutzer lesbar; **keine Feldverschlüsselung**, Sicherungen unverschlüsselt. |
 | Betrieb | systemd mit Härtung, Sicherung vor jedem Update und täglich, automatischer Rückweg beim Ausrollen; Logs nur lokal. |
 
@@ -21,10 +21,10 @@ Ausführlich: [sicherheit-und-betrieb.md](../sicherheit-und-betrieb.md).
 
 ```
 src/ProfOMat.Domain          Fachmodell: Konto, Katalog (Fakultät, Studiengang, Prüfung), Antrag + Signatur, Postausgang/Dokument/Protokoll
-src/ProfOMat.Application     Dienste (KontoDienst, KatalogDienst, DrittpruefungDienst), Ports, Rechte, Signaturtext und -prüfung
-src/ProfOMat.Infrastructure  EF Core (EnsureCreated + Schemaversion), Systemsiegel, PDF, SMTP, Quartz-Jobs
+src/ProfOMat.Application     Dienste (KontoDienst, SicherheitDienst, KatalogDienst, DrittpruefungDienst), Anmelderegeln, Ports, Rechte, Signaturtext und -prüfung
+src/ProfOMat.Infrastructure  EF Core (EnsureCreated + Schemaversion), Identity-Speicher über Konto, Systemsiegel, PDF, SMTP, Quartz-Jobs
 src/ProfOMat.Adapters.Mocks  Mock-Hochschulsystem (Katalog), Demodaten
-src/ProfOMat.Web             Seiten, Anmeldung (Cookie), signatur.js (WebCrypto, Unterschriftsfeld)
+src/ProfOMat.Web             Seiten, Anmeldung (Identity-Cookies, SAML, OIDC, Passkeys), signatur.js (WebCrypto), passkey.js
 tests/…                      Domain, Application (SQLite in-memory, echtes Siegel/PDF), Signatur (Node), Browser (Headless-Edge über CDP)
 ```
 
@@ -103,7 +103,49 @@ Rückgabe (Zweitprüfende/Studiendekanat) → BeimErstpruefer, Unterschriften de
   Schlüssel als `systemsiegel-*.pem` daneben legen, dann bleiben alte Siegel prüfbar.
 - **Später:** X.509-Zertifikate (Kette gegen eine Hochschul- oder eigene CA prüfen), Ed25519, PAdES-Siegel des Abschluss-PDFs.
 
-## Anmeldung über das Hochschulsystem (Hochschule Osnabrück)
+## Anmeldung (ASP.NET Core Identity)
+
+Grundlage ist **ASP.NET Core Identity** über das vorhandene Kontomodell. Statt der Identity-Standardtabellen gibt es einen eigenen
+Speicher (`Infrastructure/Sicherheit/Identitaet.cs`, `KontoSpeicher`): `Konto`, `KontoRolle` und `HinterlegterSchluessel` bleiben
+fachlich, wie sie sind; dazu kommen am Konto Sicherheitsstempel, Fehlversuche/Sperre bis, zweiter Faktor, verschlüsseltes TOTP-Geheimnis
+(Data Protection) und Hashes der Wiederherstellungscodes sowie die Tabellen `ExterneAnmeldungen` (Identity-„Logins“) und `Passkeys`
+(Schemaversion 19, Aufwertung 18 → 19 in `DatenbankInitialisierung`). Rollen stehen als Claims im Cookie (Claims-Fabrik), nicht in
+Identity-Rollentabellen. Vorhandene PBKDF2-Hashes sind schon im Identity-Format und bleiben gültig.
+
+| Baustein | Wo | Was |
+|---|---|---|
+| Verfahren je Instanz | `Application/Konten/Anmeldeverfahren.cs` (`AnmeldeOptionen`), `Web/Sicherheit/Anmeldeverfahren.cs` | Abschnitt `Anmeldung`; Kacheln auf `/anmelden` |
+| Regeln | `Anmelderegeln` | TOTP-Pflicht für Systemverwaltung und Studiendekanat; MFA-Nachweis bei SSO und Passkey |
+| Erste Stufe | `KontoDienst.PasswortPruefenAsync`, Passkey-Prüfung bzw. `/anmelden/extern/fertig` | Passwort + Sperre nach Fehlversuchen; Passkey (Nutzerprüfung Pflicht); SAML/OIDC |
+| Abschluss | `Anmeldeabschluss` | aktiv und nicht gesperrt? zweiter Faktor nötig → Zwischen-Cookie von Identity (5 min) und `/anmelden/zweiter-faktor`, sonst Sitzung |
+| Zweiter Faktor | `/anmelden/zweiter-faktor`, `SicherheitDienst` | Code oder Wiederherstellungscode; Ersteinrichtung mit QR-Code (QRCoder, SVG) |
+| Selbstverwaltung | `/profil/sicherheit` (statisch gerendert) | Passwort, TOTP, Passkeys, Verknüpfungen; danach `RefreshSignInAsync` |
+| Sitzung | `Sitzung`, `Sitzungspruefung` | Stempel im Cookie gegen die Datenbank: jede Anfrage und offene Seiten jede Minute |
+
+**Cookies:** `profomat.anmeldung` (Sitzung, 10 h gleitend), `profomat.extern` (5 min, schlanke Claims vom Identitätsdienst),
+`profomat.zweiterfaktor` (5 min, Konto-Id, Anmeldeart, Stempel), `profomat.einladung` (15 min, verschlüsseltes Einladungstoken für
+„Mit Hochschulkonto anlegen“ – das Token steht so nie in einer Adresse). Anmeldeart und `amr=mfa` stehen als Claims in der Sitzung.
+
+**Identitätsdienste.** SAML mit Sustainsys.Saml2 wie in Podium (`Web/Sicherheit/Saml.cs`): Metadaten unter `{OeffentlicheAdresse}Saml2`,
+ACS `…/Saml2/Acs` (HTTP-POST), SP-Zertifikat wird beim ersten Start im Schlüsselordner erzeugt (`saml-sp.pfx`), IdP-Metadaten erst beim
+ersten Anmelden geladen, AES-CBC und rsa-oaep-mgf1p in den Metadaten, Fehler am ACS als feste Meldung auf der Anmeldeseite. OIDC über
+`AddOpenIdConnect` (Code-Flow mit PKCE, `MapInboundClaims` aus, keine Tokens im Cookie). Beides meldet zuerst im Zwischen-Cookie an;
+`/anmelden/extern/fertig` wertet aus:
+
+1. Kennung: SAML subject-id, sonst pairwise-id, sonst eppn (klein geschrieben); OIDC `sub`. Nie die Mailadresse.
+2. SAML: nur erlaubte `eduPersonScopedAffiliation` (`Saml:Zugehoerigkeiten`, Vorgabe employee/staff/faculty@hs-osnabrueck.de).
+3. Zweck: *verknüpfen* (angemeldetes eigenes Konto), *Einladung* (neues Konto ohne Passwort, Herkunft „Hochschule“, Rollen aus dem Link)
+   oder *anmelden* (Konto über die Verknüpfung; unbekannt → Hinweis, kein automatisches Konto).
+4. MFA-Nachweis: SAML `AuthnContextClassRef` = `https://refeds.org/profile/mfa` (weitere über `Saml:MfaKontexte`), OIDC `amr` enthält
+   mfa/mca/otp/hwk oder `acr` aus `Oidc:MfaAcr`. Fehlt er bei Systemverwaltung oder Studiendekanat, folgt der eigene TOTP-Schritt
+   (`Anmeldung:MfaBeiSsoVerlangen`, Vorgabe an).
+
+Fehlermeldungen kommen als feste Codes (`?fehler=…`), nie als Text in der Adresse. Passkeys über die Passkey-Unterstützung von Identity:
+`/anmelden/passkey/optionen` und `/profil/sicherheit/passkey/optionen` liefern die Optionen (Antiforgery im Kopf), `passkey.js` ruft
+WebAuthn auf und schickt das Ergebnis per Formular; Identity prüft Attestierung bzw. Assertion. Für SSO-Starts gibt es Links statt
+Formularen, weil die CSP `form-action 'self'` Weiterleitungen nach außen nach einem Formular verböte.
+
+### Hochschule Osnabrück
 
 Befund (November 2026):
 
@@ -112,21 +154,16 @@ Befund (November 2026):
   ([REFEDS MET](https://met.refeds.org/met/entity/https%3A%2F%2Fshib-idp.hs-osnabrueck.de%2Fidp%2Fshibboleth/?federation=dfn-aai)).
   Stud.IP der Hochschule bietet den Login per Shibboleth bereits an.
 
-Vorgehen:
+Noch offen:
 
-1. **ProfOMat als SAML-Service-Provider** einrichten (Bibliothek nach Rückfrage, z. B. Sustainsys.Saml2 oder ITfoxtec.Identity.Saml2;
-   gleiche Claims wie die lokale Anmeldung, siehe `Web/Sicherheit/Anmeldung.cs`).
-2. Mit dem IT-Service der Hochschule (Betreiber des IdP) klären: **lokaler SP** am IdP (einfacher, reicht für einen internen
-   Dienst) oder Registrierung in der DFN-AAI über die Hochschule als Föderationsmitglied. Benötigt werden: SP-Metadaten mit
-   Zertifikat, Assertion Consumer Service unter der öffentlichen Adresse, Kontakt und Datenschutzerklärung.
-3. **Attributfreigabe** beantragen: `eduPersonPrincipalName` bzw. `subject-id` (dauerhafte Kennung), `mail`, `givenName`, `sn`,
-   `eduPersonScopedAffiliation` (student/faculty/employee). Für das Vorausfüllen bei Studierenden zusätzlich die **Matrikelnummer**,
-   üblich als `schacPersonalUniqueCode` (`urn:schac:personalUniqueCode:de:hs-osnabrueck.de:Matrikelnummer:…`). Das braucht eine
-   Begründung (Datenminimierung) und einen Eintrag im Verzeichnis der Verarbeitungstätigkeiten.
-4. **Kontoverknüpfung:** beim ersten SSO-Login über die Mailadresse mit dem lokalen Konto verbinden (Herkunft „Hochschule“,
-   Kennung = eppn); die Rollen bleiben im ProfOMat. Studierende brauchen weiterhin kein Konto. Mit SSO entfällt für sie die
-   Mailbestätigung (FA-102).
-5. Keine direkte LDAP-Anmeldung: Dabei liefen die Hochschulpasswörter durch die Anwendung.
+1. Mit dem IT-Service der Hochschule (Betreiber des IdP) klären: **lokaler SP** am IdP (einfacher, reicht für einen internen
+   Dienst) oder Registrierung in der DFN-AAI über die Hochschule als Föderationsmitglied. ProfOMat liefert die SP-Metadaten mit
+   Zertifikat selbst (`/Saml2`); dazu Kontakt (`Saml:Kontakt`) und Datenschutzerklärung.
+2. **Attributfreigabe** beantragen: `subject-id` bzw. `pairwise-id` (sonst `eduPersonPrincipalName`), `mail`, `givenName`, `sn`,
+   `displayName`, `eduPersonScopedAffiliation`; dazu klären, ob der IdP REFEDS-MFA signalisiert. Für das Vorausfüllen bei Studierenden
+   zusätzlich die **Matrikelnummer** (`schacPersonalUniqueCode`) – mit Begründung (Datenminimierung) und Eintrag im Verzeichnis der
+   Verarbeitungstätigkeiten (FA-102).
+3. Keine direkte LDAP-Anmeldung: Dabei liefen die Hochschulpasswörter durch die Anwendung.
 
 ## Studiengänge und Prüfungen aus dem Hochschulsystem
 

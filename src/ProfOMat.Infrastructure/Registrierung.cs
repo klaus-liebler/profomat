@@ -25,6 +25,7 @@ public static class Registrierung
         var verbindung = konfiguration.GetConnectionString("ProfOMat") ?? "Data Source=data/profomat.db";
         dienste.AddDbContext<ProfOMatDbContext>(o => o.UseSqlite(Pfad(verbindung, inhaltsordner)));
         dienste.AddScoped<IDaten, Daten>();
+        dienste.AddProfOMatIdentitaet(konfiguration);
         dienste.AddSingleton<ISystemsiegel>(new Systemsiegel(Path.Combine(inhaltsordner, konfiguration["Speicher:Schluessel"] ?? "data/schluessel")));
         dienste.AddSingleton<IAntragPdf, AntragPdf>();
         dienste.AddSingleton<ProfOMat.Application.Muendlich.IMuendlichProtokollPdf, MuendlichProtokollPdf>();

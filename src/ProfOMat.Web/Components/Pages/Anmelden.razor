@@ -2,21 +2,23 @@
 @attribute [AllowAnonymous]
 @attribute [ExcludeFromInteractiveRouting]
 @layout LeeresLayout
-@using Microsoft.AspNetCore.Authentication
-@using Microsoft.AspNetCore.Authentication.Cookies
+@using Microsoft.AspNetCore.Identity
 @using ProfOMat.Application.Konten
 @inject KontoDienst Konten
+@inject SignInManager<Konto> Identitaet
+@inject Anmeldeangebot Angebot
+@inject Anmeldeabschluss Abschluss
 @inject NavigationManager Navigation
-@inject IConfiguration Konfiguration
 @inject Anmeldebremse Bremse
 @inject ILogger<Anmelden> Log
+@* Anmeldeverfahren als getrennte Kacheln; welche erscheinen, legt die Konfiguration der Instanz fest (Abschnitt „Anmeldung“). *@
 
 <PageTitle>@(ersteinrichtung ? "Ersteinrichtung" : "Anmelden") · ProfOMat</PageTitle>
 
-<div class="pm-login">
+<div class="pm-login pm-login-weit">
     <div class="pm-row"><span class="pm-brand-zeichen">P</span><h1>@(ersteinrichtung ? "Ersteinrichtung" : "Anmelden")</h1></div>
-    <p class="pm-muted">Für Lehrende, Studiendekanat und Verwaltung. Studierende brauchen für den Antrag auf mündliche Drittprüfung keine Anmeldung:
-        <a href="drittpruefung/antrag">direkt zum Antrag</a>.</p>
+    <p class="pm-muted">Für Lehrende, Studiendekanat und Verwaltung. Studierende brauchen keine Anmeldung: Für den Antrag auf mündliche
+        Drittprüfung schickt ihnen die Erstprüferin bzw. der Erstprüfer einen persönlichen Link.</p>
 
     @if (fehler is not null)
     {
@@ -27,7 +29,8 @@
     {
         <div class="pm-alert pm-warn">
             Es gibt noch kein Konto. Legen Sie jetzt das erste Konto der <b>Systemverwaltung</b> an – danach ist die Ersteinrichtung gesperrt;
-            weitere Kolleginnen und Kollegen laden Sie unter <i>Verwaltung → Konten</i> per Einladungslink ein.
+            weitere Kolleginnen und Kollegen laden Sie unter <i>Verwaltung → Konten</i> per Einladungslink ein. Gleich im Anschluss richten Sie den
+            zweiten Faktor (Authenticator-App) ein; für die Systemverwaltung ist er Pflicht.
         </div>
         <form method="post" @formname="einrichtung" @onsubmit="EinrichtenAsync" class="pm-fields">
             <AntiforgeryToken />
@@ -48,32 +51,71 @@
             <div class="pm-field pm-field-weit">
                 <label class="pm-check"><input type="checkbox" name="EPruefende" value="true" checked /> Ich prüfe auch selbst (Rolle Prüfende)</label>
             </div>
-            <div class="pm-field pm-field-weit"><div><button type="submit" class="pm-btn pm-btn-haupt">Konto anlegen und anmelden</button></div></div>
+            <div class="pm-field pm-field-weit"><div><button type="submit" class="pm-btn pm-btn-haupt">Konto anlegen und weiter</button></div></div>
         </form>
     }
     else
     {
-        <form method="post" @formname="passwort" @onsubmit="PasswortAsync" class="pm-fields">
-            <AntiforgeryToken />
-            <div class="pm-field">
-                <label class="pm-lbl" for="kennung">Kennung</label>
-                <input id="kennung" name="Kennung" class="pm-input" autocomplete="username" required value="@Kennung" />
-            </div>
-            <div class="pm-field">
-                <label class="pm-lbl" for="pw">Passwort</label>
-                <input id="pw" name="Passwort" type="password" class="pm-input" autocomplete="current-password" required />
-            </div>
-            <div class="pm-field pm-field-weit"><div><button type="submit" class="pm-btn pm-btn-haupt">Anmelden</button></div></div>
-        </form>
-        <p class="pm-small pm-muted">Neu hier oder Passwort vergessen? Die Systemverwaltung schickt Ihnen einen Einladungs- bzw. Passwort-Link.</p>
-
-        <div class="pm-alert pm-info pm-small">
-            <b>Hochschulkennung (Single Sign-on)</b> folgt: Anmeldung über den Shibboleth-IdP der Hochschule (DFN-AAI), sobald der Dienst beim
-            Rechenzentrum registriert ist. Bis dahin gibt es lokale Konten.
+        <div class="pm-anmeldekacheln">
+            @if (Angebot.Hat(Anmeldeverfahren.Saml))
+            {
+                <section class="pm-kachel" aria-labelledby="k-saml">
+                    <h2 id="k-saml">@Angebot.SamlName</h2>
+                    <p class="pm-small pm-muted">Single Sign-on über den Anmeldedienst der Hochschule (SAML, Shibboleth). Passwort und zweiten Faktor prüft
+                        der Anmeldedienst.</p>
+                    <a class="pm-btn pm-btn-haupt pm-kachel-knopf" href="@ExternLink("saml")">Mit @Angebot.SamlName anmelden</a>
+                </section>
+            }
+            @if (Angebot.Hat(Anmeldeverfahren.Oidc))
+            {
+                <section class="pm-kachel" aria-labelledby="k-oidc">
+                    <h2 id="k-oidc">@Angebot.OidcName</h2>
+                    <p class="pm-small pm-muted">Single Sign-on über den Identitätsdienst Ihrer Einrichtung (OpenID Connect).</p>
+                    <a class="pm-btn pm-btn-haupt pm-kachel-knopf" href="@ExternLink("oidc")">Mit @Angebot.OidcName anmelden</a>
+                </section>
+            }
+            @if (Angebot.Hat(Anmeldeverfahren.Passkey))
+            {
+                <section class="pm-kachel" aria-labelledby="k-passkey">
+                    <h2 id="k-passkey">Passkey</h2>
+                    <p class="pm-small pm-muted">Ohne Passwort und sicher gegen Phishing: Fingerabdruck, Gesichtserkennung oder Geräte-PIN. Einen Passkey
+                        legen Sie nach der ersten Anmeldung unter <i>Profil → Anmeldung und Sicherheit</i> an.</p>
+                    <form method="post" @formname="passkey" @onsubmit="PasskeyAsync" class="pm-kachel-form">
+                        <AntiforgeryToken />
+                        <input type="hidden" name="Anmeldedaten" />
+                        <p class="pm-small pm-muted" data-passkey-status role="status"></p>
+                        <button type="button" class="pm-btn pm-btn-haupt pm-kachel-knopf" data-passkey="anmelden" data-optionen="anmelden/passkey/optionen">Mit Passkey anmelden</button>
+                    </form>
+                </section>
+            }
+            @if (Angebot.Hat(Anmeldeverfahren.Passwort))
+            {
+                <section class="pm-kachel" aria-labelledby="k-passwort">
+                    <h2 id="k-passwort">Kennung und Passwort</h2>
+                    <form method="post" @formname="passwort" @onsubmit="PasswortAsync" class="pm-kachel-form">
+                        <AntiforgeryToken />
+                        <div class="pm-field">
+                            <label class="pm-lbl" for="kennung">Kennung</label>
+                            <input id="kennung" name="Kennung" class="pm-input" autocomplete="username" required value="@Kennung" />
+                        </div>
+                        <div class="pm-field">
+                            <label class="pm-lbl" for="pw">Passwort</label>
+                            <input id="pw" name="Passwort" type="password" class="pm-input" autocomplete="current-password" required />
+                        </div>
+                        <div><button type="submit" class="pm-btn pm-btn-haupt">Anmelden</button></div>
+                    </form>
+                    <p class="pm-small pm-muted">Systemverwaltung und Studiendekanat geben danach einen Code aus der Authenticator-App ein.
+                        Neu hier oder Passwort vergessen? Die Systemverwaltung schickt Ihnen einen Einladungs- bzw. Passwort-Link.</p>
+                </section>
+            }
         </div>
+        @if (Angebot.Verfahren.Count == 0)
+        {
+            <div class="pm-alert pm-warn">Für diese Instanz ist kein Anmeldeverfahren freigeschaltet (Konfiguration „Anmeldung:Verfahren“).</div>
+        }
     }
 
-    @if (testanmeldung && !ersteinrichtung)
+    @if (Angebot.Testanmeldung && !ersteinrichtung)
     {
         <h2>Testanmeldung (nur Entwicklung)</h2>
         <form method="post" @formname="test" @onsubmit="TestAsync">
@@ -100,6 +142,9 @@
 
     [SupplyParameterFromForm(FormName = "passwort")]
     private string? Passwort { get; set; }
+
+    [SupplyParameterFromForm(FormName = "passkey")]
+    private string? Anmeldedaten { get; set; }
 
     [SupplyParameterFromForm(FormName = "test")]
     private Guid? Test { get; set; }
@@ -131,17 +176,23 @@
     [SupplyParameterFromQuery]
     private string? ReturnUrl { get; set; }
 
+    [SupplyParameterFromQuery(Name = "fehler")]
+    private string? FehlerCode { get; set; }
+
     private string? fehler;
-    private bool testanmeldung, ersteinrichtung;
+    private bool ersteinrichtung;
     private IReadOnlyList<Konto> konten = [];
 
     private string? Ip => HttpContext.Connection.RemoteIpAddress?.ToString();
 
+    private string ExternLink(string verfahren)
+        => $"anmelden/extern/{verfahren}" + (string.IsNullOrEmpty(ReturnUrl) ? "" : "?returnUrl=" + Uri.EscapeDataString(ReturnUrl));
+
     protected override async Task OnInitializedAsync()
     {
+        fehler = Anmeldefehler.Text(FehlerCode);
         ersteinrichtung = await Konten.ErsteinrichtungNoetigAsync();
-        testanmeldung = Konfiguration.GetValue("Anmeldung:TestanmeldungErlaubt", false);
-        if (testanmeldung)
+        if (Angebot.Testanmeldung)
         {
             konten = (await Konten.AlleAsync()).Where(k => k.Aktiv).OrderBy(k => k.Rollen.Min(r => r.Rolle)).ThenBy(k => k.Nachname).ToList();
         }
@@ -149,6 +200,12 @@
 
     private async Task PasswortAsync()
     {
+        if (!Angebot.Hat(Anmeldeverfahren.Passwort))
+        {
+            fehler = Anmeldefehler.Text(Anmeldefehler.Verfahren);
+            return;
+        }
+
         var kennung = Kennung ?? "";
         if (Bremse.Wartezeit(Ip, kennung) is { } warten)
         {
@@ -156,17 +213,39 @@
             return;
         }
 
-        var benutzer = await Konten.PasswortAnmeldenAsync(kennung, Passwort ?? "");
-        if (benutzer is null)
+        var pruefung = await Konten.PasswortPruefenAsync(kennung, Passwort ?? "");
+        if (pruefung is not { Erfolg: true, Konto: { } konto })
         {
             Bremse.Fehlversuch(Ip, kennung);
-            Log.LogWarning("Anmeldung fehlgeschlagen");
-            fehler = "Kennung oder Passwort stimmen nicht.";
+            Log.LogWarning("Anmeldung mit Passwort fehlgeschlagen ({Ergebnis})", pruefung.Ergebnis);
+            fehler = pruefung.Ergebnis == Passwortergebnis.VoruebergehendGesperrt
+                ? "Zu viele Fehlversuche – die Anmeldung ist vorübergehend gesperrt. Bitte später erneut versuchen."
+                : "Kennung oder Passwort stimmen nicht.";
             return;
         }
 
         Bremse.Erfolg(Ip, kennung);
-        await AnmeldenAsync(benutzer, "Passwort");
+        Navigation.NavigateTo(await Abschluss.AbschliessenAsync(HttpContext, konto, Anmeldeart.Passwort, false, ReturnUrl));
+    }
+
+    private async Task PasskeyAsync()
+    {
+        if (!Angebot.Hat(Anmeldeverfahren.Passkey) || string.IsNullOrEmpty(Anmeldedaten))
+        {
+            fehler = "Passkey-Anmeldung nicht möglich.";
+            return;
+        }
+
+        var ergebnis = await Identitaet.PerformPasskeyAssertionAsync(Anmeldedaten);
+        if (!ergebnis.Succeeded || ergebnis.User is not { } konto)
+        {
+            Log.LogWarning("Anmeldung mit Passkey fehlgeschlagen: {Grund}", ergebnis.Failure?.Message);
+            fehler = "Dieser Passkey wurde nicht erkannt. Bitte erneut versuchen oder ein anderes Verfahren wählen.";
+            return;
+        }
+
+        await Identitaet.UserManager.AddOrUpdatePasskeyAsync(konto, ergebnis.Passkey);   // Signaturzähler fortschreiben
+        Navigation.NavigateTo(await Abschluss.AbschliessenAsync(HttpContext, konto, Anmeldeart.Passkey, ergebnis.Passkey.IsUserVerified, ReturnUrl));
     }
 
     private async Task EinrichtenAsync()
@@ -182,7 +261,8 @@
             var benutzer = await Konten.ErsteinrichtenAsync(new Kontoangaben(EKennung ?? "", ETitel, EVorname ?? "", ENachname ?? "", EMail ?? ""),
                 EPasswort ?? "", EPruefende);
             Log.LogInformation("Ersteinrichtung: Konto {Konto} angelegt", Pseudonym.Id(benutzer.KontoIdPflicht));
-            await AnmeldenAsync(benutzer, "Passwort");
+            var konto = await Konten.AktivesKontoAsync(benutzer.KontoIdPflicht) ?? throw new FachlicherFehler("Das Konto ist gesperrt.");
+            Navigation.NavigateTo(await Abschluss.AbschliessenAsync(HttpContext, konto, Anmeldeart.Passwort, false, null));
         }
         catch (FachlicherFehler ex)
         {
@@ -193,21 +273,12 @@
 
     private async Task TestAsync()
     {
-        if (!testanmeldung || Test is not { } id || await Konten.TestanmeldungAsync(id) is not { } benutzer)
+        if (!Angebot.Testanmeldung || Test is not { } id || await Konten.AktivesKontoAsync(id) is not { } konto)
         {
             fehler = "Testanmeldung nicht möglich.";
             return;
         }
 
-        await AnmeldenAsync(benutzer, "Test");
-    }
-
-    private async Task AnmeldenAsync(Benutzer benutzer, string art)
-    {
-        var stempel = await Konten.StempelAsync(benutzer.KontoIdPflicht) ?? throw new FachlicherFehler("Das Konto ist gesperrt.");
-        await HttpContext.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme,
-            Anmeldung.Principal(benutzer, art, CookieAuthenticationDefaults.AuthenticationScheme, stempel));
-        Log.LogInformation("Anmeldung ({Art}) Konto {Konto}", art, Pseudonym.Id(benutzer.KontoIdPflicht));
-        Navigation.NavigateTo(Ruecksprung.Lokal(ReturnUrl, new Uri(Navigation.BaseUri).AbsolutePath));
+        Navigation.NavigateTo(await Abschluss.AbschliessenAsync(HttpContext, konto, Anmeldeart.Test, false, ReturnUrl));
     }
 }

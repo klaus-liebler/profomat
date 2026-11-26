@@ -56,7 +56,7 @@ ssh -t srvadmin@liebler.iui.hs-osnabrueck.de "sudo bash /tmp/profomat-kit/schrit
 ```
 
 Prüfen: `https://liebler.iui.hs-osnabrueck.de/profomat/anmelden` zeigt die Ersteinrichtung (bzw. danach die Anmeldung);
-`…/profomat/drittpruefung/antrag` ist ohne Anmeldung erreichbar. Auf dem Server:
+persönliche Links der Studierenden (`…/profomat/drittpruefung/<id>/<token>`) sind ohne Anmeldung erreichbar. Auf dem Server:
 `curl http://127.0.0.1:5082/profomat/gesund` → `ok`, Logs `journalctl -u profomat -f` und `/var/log/profomat/`.
 
 ## Update
