@@ -1,0 +1,71 @@
+#!/usr/bin/env python3
+# Nachbildung von systemctl für den Test (kein echtes systemd im Wegwerf-Container). Startet ExecStart mit den Environment-
+# Einträgen aus Unit + Drop-ins im Hintergrund, Ausgabe nach $SIM/journal/<unit>.log.
+import os, sys, signal, subprocess, glob, time
+SIM = os.environ.get("SIM", "/tmp/sim"); os.makedirs(SIM + "/journal", exist_ok=True)
+a = [x for x in sys.argv[1:] if x not in ("--quiet", "--now", "--no-pager")]
+def unit(n): return n if n.endswith((".service", ".timer")) else n + ".service"
+def pidfile(n): return f"{SIM}/{unit(n)}.pid"
+def laeuft(n):
+    try: pid = int(open(pidfile(n)).read()); os.kill(pid, 0)
+    except Exception: return 0
+    try:
+        if open(f"/proc/{pid}/stat").read().split()[2] == "Z": return 0
+    except Exception: return 0
+    return pid
+def env_und_start(n):
+    dateien = [f"/etc/systemd/system/{unit(n)}"] + sorted(glob.glob(f"/etc/systemd/system/{unit(n)}.d/*.conf"))
+    env, start, ab = dict(os.environ), None, None
+    for d in dateien:
+        if not os.path.exists(d): continue
+        for z in open(d):
+            z = z.strip()
+            if z.startswith("Environment="):
+                v = z[len("Environment="):].strip('"'); k, _, w = v.partition("="); env[k] = w
+            elif z.startswith("EnvironmentFile="):
+                f = z.split("=", 1)[1].lstrip("-")
+                if os.path.exists(f):
+                    for l in open(f):
+                        l = l.strip()
+                        if l and not l.startswith("#") and "=" in l: k, _, w = l.partition("="); env[k] = w
+            elif z.startswith("ExecStart="): start = z.split("=", 1)[1]
+            elif z.startswith("WorkingDirectory="): ab = z.split("=", 1)[1]
+    return env, start, ab
+cmd = a[0] if a else ""
+if cmd == "show":
+    prop = a[a.index("-p") + 1]; n = a[-1]
+    if prop == "ActiveState":
+        print("active" if laeuft(n) else ("failed" if os.path.exists(pidfile(n)) else "inactive"))
+    elif prop == "MainPID": print(laeuft(n))
+    elif prop == "NRestarts": print(0)
+    elif prop == "FragmentPath":
+        p = f"/etc/systemd/system/{unit(n)}"; print(p if os.path.exists(p) else "")
+    sys.exit(0)
+if cmd == "is-active": sys.exit(0 if laeuft(a[1]) else 3)
+if cmd == "is-enabled": sys.exit(0 if os.path.exists(f"{SIM}/{unit(a[1])}.enabled") else 1)
+if cmd in ("enable", "disable"):
+    for n in a[1:]:
+        f = f"{SIM}/{unit(n)}.enabled"
+        if cmd == "enable": open(f, "w").close()
+        elif os.path.exists(f): os.remove(f)
+    sys.exit(0)
+if cmd in ("stop", "restart"):
+    for n in a[1:]:
+        pid = laeuft(n)
+        if pid:
+            os.kill(pid, signal.SIGTERM)
+            for _ in range(50):
+                if not laeuft(n): break
+                time.sleep(0.1)
+        if os.path.exists(pidfile(n)): os.remove(pidfile(n))
+    if cmd == "stop": sys.exit(0)
+if cmd in ("start", "restart"):
+    for n in a[1:]:
+        if n.endswith(".timer") or laeuft(n): continue
+        env, start, ab = env_und_start(n)
+        if not start: print(f"Unit {unit(n)} not found.", file=sys.stderr); sys.exit(5)
+        log = open(f"{SIM}/journal/{unit(n).replace('.service','')}.log", "w")
+        p = subprocess.Popen(start.split(), env=env, cwd=ab or "/", stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+        open(pidfile(n), "w").write(str(p.pid))
+    sys.exit(0)
+sys.exit(0)   # daemon-reload, reload nginx …

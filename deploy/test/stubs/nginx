@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Nachbildung: „nginx -t“ scheitert nur, wenn $SIM/nginx-kaputt existiert
+[[ -e "${SIM:-/tmp/sim}/nginx-kaputt" ]] && { echo "nginx: [emerg] Testfehler" >&2; exit 1; }
+exit 0

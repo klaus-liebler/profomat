@@ -12,6 +12,8 @@
   <ItemGroup>
     <!-- Liberation-Schriften (SIL OFL 1.1) für PDFs, aus VibeVHS übernommen -->
     <EmbeddedResource Include="Schriften\*.ttf" LogicalName="ProfOMat.Schriften.%(Filename)%(Extension)" />
+    <!-- Formularvorlagen der Hochschule (öffentlich), werden vom ProfOMat ausgefüllt -->
+    <EmbeddedResource Include="Vorlagen\*.pdf" LogicalName="ProfOMat.Vorlagen.%(Filename)%(Extension)" />
   </ItemGroup>
 
   <ItemGroup>

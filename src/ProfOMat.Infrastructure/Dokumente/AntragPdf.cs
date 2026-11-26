@@ -10,11 +10,12 @@ using QRCoder;
 namespace ProfOMat.Infrastructure.Dokumente;
 
 /// <summary>
-/// PDF des abgeschlossenen Antrags: Angaben, Festlegung, Bestellung, alle Unterschriften (Bild bzw. Schlüssel-Fingerabdruck,
-/// Zeitpunkt, Prüfergebnis) und im Anhang der zuletzt unterschriebene Text. Der QR-Code führt zur Prüfansicht im ProfOMat.
-/// Das PDF ist eine Ausfertigung; maßgeblich sind die im System gespeicherten und versiegelten Unterschriften.
+/// PDF eines Antrags. Einladungsverfahren: Seite 1 ist das Formular der Fakultät mit den eingetragenen Angaben und Unterschriften
+/// (Stand nach der letzten Unterschrift), dahinter ein Beiblatt mit Terminwünschen, Prüfprotokoll und dem zuletzt unterschriebenen
+/// Text (<see cref="AntragFormular"/>). Altes Verfahren: eigenes Layout mit allen Angaben. Der QR-Code führt zur Prüfansicht im
+/// ProfOMat. Das PDF ist eine Ausfertigung; maßgeblich sind die im System gespeicherten und versiegelten Unterschriften.
 /// </summary>
-internal sealed class AntragPdf(Ortszeit ortszeit) : IAntragPdf
+internal sealed partial class AntragPdf(Ortszeit ortszeit) : IAntragPdf
 {
     private static readonly byte[] Schwarz = [0, 0, 0];
     private static readonly byte[] Weiss = [255, 255, 255];
@@ -24,6 +25,11 @@ internal sealed class AntragPdf(Ortszeit ortszeit) : IAntragPdf
     public byte[] Erzeugen(AntragAnsicht a)
     {
         ArgumentNullException.ThrowIfNull(a);
+        return a.Antrag.Verfahren == Antragsverfahren.Einladung ? Formular(a) : AltesLayout(a);
+    }
+
+    private byte[] AltesLayout(AntragAnsicht a)
+    {
         var antrag = a.Antrag;
         var dok = new Document();
         dok.Info.Title = $"Antrag auf mündliche Prüfung im dritten Versuch {antrag.Nummer}";
@@ -117,7 +123,7 @@ internal sealed class AntragPdf(Ortszeit ortszeit) : IAntragPdf
         return strom.ToArray();
     }
 
-    private static void Fusszeile(Section s, AntragAnsicht a)
+    private static void Fusszeile(Section s, AntragAnsicht a, string seite = "Seite ")
     {
         var fuss = s.Footers.Primary.AddTable();
         fuss.AddColumn(Unit.FromCentimeter(2.4));
@@ -134,7 +140,7 @@ internal sealed class AntragPdf(Ortszeit ortszeit) : IAntragPdf
         t.AddLineBreak();
         t.AddText($"Prüfen: {a.Link}");
         t.AddLineBreak();
-        t.AddText("Seite ");
+        t.AddText(seite);
         t.AddPageField();
         t.AddText(" von ");
         t.AddNumPagesField();

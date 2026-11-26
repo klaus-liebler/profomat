@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Nachbildung: Ausgabe des letzten Starts (-u <dienst>)
+while (( $# )); do [[ "$1" == "-u" ]] && { cat "${SIM:-/tmp/sim}/journal/$2.log" 2>/dev/null; exit 0; }; shift; done

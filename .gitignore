@@ -497,3 +497,6 @@ deploy/ausgabe/
 
 # Interne Finanzunterlagen (nicht ins Repository)
 finanzen_info/
+
+# Arbeitsunterlagen zu Prüfungen (Formularvorlagen liegen unter src/ProfOMat.Infrastructure/Vorlagen)
+pruefung_info/

@@ -1,8 +1,19 @@
 ﻿<#
 .SYNOPSIS
-    ProfOMat auf liebler.iui.hs-osnabrueck.de ausrollen (gleiches Muster wie VibeVHS und FraktionPerfekt): framework-abhängiger
-    Linux-Build (Runtime einmalig auf dem Server, VibeVHS-Schritt 09), Kit und Archiv hochladen, auf dem Server mit sudo einspielen. Übertragen wird NUR das Programm (dotnet publish) –
+    ProfOMat auf liebler.iui.hs-osnabrueck.de ausrollen (gleiches Muster wie VibeVHS und FraktionPerfekt): Linux-Build, Kit und
+    Archiv hochladen, auf dem Server mit sudo einspielen (schritte/ausrollen.sh: prüfen → sichern → Konfiguration ergänzen →
+    umschalten → Start beobachten mit Countdown → bei Fehler automatisch zurück). Übertragen wird NUR das Programm (dotnet publish) –
     Datenbank, Schlüssel (Systemsiegel) und Logs bleiben auf dem Server in /var/lib/profomat bzw. /var/log/profomat.
+    Drei Arten (-Modus, Standard aus konfiguration.env):
+      framework       nur die App; die ASP.NET-Core-Runtime ist auf dem Server installiert (VibeVHS-Schritt 09)   ~20 MB
+      self-contained  App mit eigener Runtime, braucht auf dem Server nichts von .NET                              ~70 MB
+      docker          Container: Abbild wird auf dem Server gebaut (Runtime aus mcr.microsoft.com/dotnet/aspnet)
+.EXAMPLE
+    .\deploy\server\deploy.ps1 -Pruefen      # bauen, hochladen und auf dem Server NUR prüfen (Trockenlauf, ändert nichts)
+.EXAMPLE
+    .\deploy\server\deploy.ps1 -Modus docker # als Container ausrollen
+.EXAMPLE
+    .\deploy\server\deploy.ps1 -Zurueck      # letzten Lauf zurücknehmen (Programm, Konfiguration, ggf. Datenbank)
 .EXAMPLE
     .\deploy\server\deploy.ps1                # testen, bauen, hochladen, einspielen (fragt nach dem sudo-Passwort)
 .EXAMPLE
@@ -20,6 +31,15 @@ param(
     [switch] $NurBauen,
     # Paket mit eigener .NET-Runtime (self-contained, ~70 statt ~20 MB) – nur, falls die gemeinsame Runtime fehlt
     [switch] $MitRuntime,
+    # Art des Ausrollens (Standard: MODUS in konfiguration.env); -MitRuntime entspricht -Modus self-contained
+    [ValidateSet("", "framework", "self-contained", "docker")]
+    [string] $Modus = "",
+    # Nur prüfen: bauen, hochladen, auf dem Server alle Voraussetzungen prüfen – nichts ändern
+    [switch] $Pruefen,
+    # Letzten Lauf zurücknehmen (fragt auf dem Server nach)
+    [switch] $Zurueck,
+    # Sekunden bis zum automatischen Rückweg, wenn die neue Version nicht antwortet (Standard: WARTEZEIT in konfiguration.env)
+    [int] $Wartezeit = 0,
     # Datenbank auf dem Server vor dem Start nach /var/lib/profomat/beiseite/ verschieben (nicht löschen); die Anwendung legt sie
     # neu an. Scheitert der Start, kommen vorige Version und vorige Datenbank automatisch zurück.
     [switch] $DbNeu,
@@ -56,17 +76,48 @@ function Kit-Hochladen {
     if ($LASTEXITCODE -ne 0) { throw "Kit auspacken fehlgeschlagen." }
 }
 
+if (-not $Modus) { $Modus = if ($MitRuntime) { "self-contained" } elseif ($konfig["MODUS"]) { $konfig["MODUS"] } else { "framework" } }
+if ($MitRuntime -and $Modus -ne "self-contained") { throw "-MitRuntime passt nicht zu -Modus $Modus." }
+
+function Achtung([string[]] $zeilen) {
+    $banner = @(
+        "   █████   ██████ ██   ██ ████████ ██    ██ ███    ██  ██████ ",
+        "  ██   ██ ██      ██   ██    ██    ██    ██ ████   ██ ██      ",
+        "  ███████ ██      ███████    ██    ██    ██ ██ ██  ██ ██   ███",
+        "  ██   ██ ██      ██   ██    ██    ██    ██ ██  ██ ██ ██    ██",
+        "  ██   ██  ██████ ██   ██    ██     ██████  ██   ████  ██████ ")
+    Write-Host ""
+    $banner | ForEach-Object { Write-Host $_ -ForegroundColor Red }
+    Write-Host ""
+    $zeilen | ForEach-Object { Write-Host ("  " + $_) -ForegroundColor Red }
+    Write-Host ""
+}
+
+if ($Zurueck) {
+    if ($DbNeu -or $Pruefen -or $NurKit -or $NurBauen) { throw "-Zurueck steht allein." }
+    Kit-Hochladen
+    ssh @sshArgs -t $Ziel "sudo bash /tmp/profomat-kit/schritte/ausrollen.sh --zurueck"
+    if ($LASTEXITCODE -ne 0) { throw "Rückweg fehlgeschlagen oder abgebrochen – Meldung oben." }
+    return
+}
+
 if ($DbNeu -and ($NurKit -or $NurBauen)) { throw "-DbNeu wirkt nur beim Einspielen, nicht zusammen mit -NurKit oder -NurBauen." }
-if ($DbNeu -and -not $OhneRueckfrage) {
-    Write-Host "! -DbNeu: Die Datenbank auf dem Testsystem wird beiseitegelegt und neu angelegt (danach Ersteinrichtung auf der Anmeldeseite)." -ForegroundColor Yellow
-    Write-Host "  Alle dort erfassten Daten sind danach nicht mehr in der Anwendung (Datei bleibt unter /var/lib/profomat/beiseite/)." -ForegroundColor Yellow
-    if ((Read-Host "  Fortfahren? (j/N)") -notmatch '^(j|ja|y|yes)$') { Write-Host "Abgebrochen – nichts geändert."; return }
+if ($DbNeu -and -not $Pruefen) {
+    Achtung @(
+        "-DbNeu: Die vorhandene Datenbank wird gesichert und beiseitegelegt,",
+        "aber NICHT in die neue Version übernommen.",
+        "Nach dem Start sind in der Anwendung ALLE DATEN WEG",
+        "(Konten, Anträge, Klausuren, Finanzen …) – Ersteinrichtung nötig.",
+        "Zurück kommen die Daten nur mit  deploy.ps1 -Zurueck  (vorige Version UND vorige Datenbank).")
+    if (-not $OhneRueckfrage -and (Read-Host "  Wirklich mit neuer, leerer Datenbank ausrollen? Dann „ja“ eintippen") -ne "ja") {
+        Write-Host "Abgebrochen – nichts geändert."; return
+    }
 }
 
 if ($NurKit) { Kit-Hochladen; return }
 
 # Keine Zeilenenden-Überraschungen auf dem Server: Skripte und Vorlagen müssen LF haben
-$crlf = Get-ChildItem (Join-Path $wurzel "deploy\server") -Recurse -File -Include *.sh, *.conf, *.service, *.timer, *.env, *.beispiel |
+$crlf = Get-ChildItem (Join-Path $wurzel "deploy\server") -Recurse -File -Include *.sh, *.conf, *.service, *.timer, *.env, *.beispiel, *.yml, Dockerfile |
     Where-Object { [IO.File]::ReadAllText($_.FullName).Contains("`r`n") }
 if ($crlf) { throw "CRLF in $($crlf[0].FullName) – Skripte müssen LF haben (deploy\server\.gitattributes)." }
 
@@ -76,8 +127,8 @@ if (-not $OhneTests) {
     if ($LASTEXITCODE -ne 0) { throw "Tests fehlgeschlagen – nichts ausgerollt." }
 }
 
-$eigeneRuntime = if ($MitRuntime) { "true" } else { "false" }
-Write-Host ("» dotnet publish (linux-x64, {0})" -f $(if ($MitRuntime) { "mit eigener Runtime" } else { "framework-abhängig" })) -ForegroundColor Cyan
+$eigeneRuntime = if ($Modus -eq "self-contained") { "true" } else { "false" }
+Write-Host ("» dotnet publish (linux-x64, Modus {0})" -f $Modus) -ForegroundColor Cyan
 $build = Join-Path $ausgabe "profomat"
 if (Test-Path $build) { Remove-Item $build -Recurse -Force }
 # Eigener Artefakt-Ordner: Die lokal laufende Instanz (bin\) bleibt unberührt
@@ -85,6 +136,16 @@ dotnet publish (Join-Path $wurzel "src\ProfOMat.Web") -c Release -r linux-x64 --
     --artifacts-path (Join-Path $ausgabe "artefakte")
 if ($LASTEXITCODE -ne 0) { throw "Build fehlgeschlagen." }
 Remove-Item (Join-Path $build "appsettings.Development.json") -ErrorAction SilentlyContinue
+
+# Schemastand fürs Paket: ausrollen.sh vergleicht ihn VOR jeder Änderung mit der Datenbank auf dem Server
+# („Migration vorhanden“ oder nur mit -DbNeu). Läuft mit der lokalen Runtime; die App startet dabei nicht.
+$schema = (& dotnet (Join-Path $build "ProfOMat.Web.dll") --schemainfo) -join "`n"
+if ($LASTEXITCODE -eq 0 -and $schema -match 'schemaversion=\d+') {
+    [IO.File]::WriteAllText((Join-Path $build "schemainfo.txt"), $schema.Trim() + "`n")
+    Write-Host ("  Schema: {0}" -f ($schema.Trim() -replace "`n", ", ")) -ForegroundColor DarkGray
+} else {
+    Write-Host "! schemainfo.txt nicht erzeugt – der Server fragt das Programm selbst bzw. erkennt Schemafehler beim Start." -ForegroundColor Yellow
+}
 
 # Sicherheitsnetz: niemals Daten, Datenbanken, Schlüssel oder Logs mit ausliefern
 $verboten = Get-ChildItem $build -Recurse -File |
@@ -101,9 +162,13 @@ Kit-Hochladen
 Write-Host "» Archiv hochladen" -ForegroundColor Cyan
 scp @sshArgs $archiv "${Ziel}:/tmp/profomat.tar.gz"
 if ($LASTEXITCODE -ne 0) { throw "Archiv hochladen fehlgeschlagen." }
-Write-Host "» einspielen (sudo fragt nach dem Passwort von srvadmin)" -ForegroundColor Cyan
-$dbNeuArg = if ($DbNeu) { "--db-neu " } else { "" }
-ssh @sshArgs -t $Ziel "sudo bash /tmp/profomat-kit/schritte/ausrollen.sh $dbNeuArg/tmp/profomat.tar.gz"
-if ($LASTEXITCODE -ne 0) { throw "Einspielen fehlgeschlagen – Meldung oben (eine vorhandene Version läuft unverändert weiter)." }
+$optionen = @("--modus", $Modus)
+if ($DbNeu) { $optionen += "--db-neu" }
+if ($Pruefen) { $optionen += "--pruefen" }
+if ($Wartezeit -gt 0) { $optionen += @("--wartezeit", $Wartezeit) }
+Write-Host ("» {0} (sudo fragt nach dem Passwort von srvadmin)" -f $(if ($Pruefen) { "auf dem Server prüfen" } else { "einspielen" })) -ForegroundColor Cyan
+ssh @sshArgs -t $Ziel "sudo bash /tmp/profomat-kit/schritte/ausrollen.sh $($optionen -join ' ') /tmp/profomat.tar.gz"
+if ($LASTEXITCODE -ne 0) { throw "Abgebrochen – Meldung oben. Eine vorhandene Version läuft unverändert weiter bzw. wurde wiederhergestellt." }
+if ($Pruefen) { Write-Host "✓ Prüfung bestanden – auf dem Server wurde nichts geändert." -ForegroundColor Green; return }
 Write-Host ("✓ ausgerollt: https://{0}{1}/" -f $konfig["HOST"], $konfig["PFAD"]) -ForegroundColor Green
 Write-Host "  Erstes Ausrollen? Sofort die Anmeldeseite öffnen und das erste Konto anlegen (Ersteinrichtung)." -ForegroundColor Yellow

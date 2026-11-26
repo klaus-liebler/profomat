@@ -1,5 +1,20 @@
 # ProfOMat – Architektur und Entscheidungen
 
+## Sicherheit und Betrieb im Überblick (für Technik)
+
+> Ist-Stand im Code, nicht Zielbild. Wer nur die Fachlichkeit lesen will, überspringt diesen Abschnitt.
+
+| Ebene | Stand in einem Satz |
+|---|---|
+| Netz | Öffentlich erreichbar über `https://liebler.iui.hs-osnabrueck.de/profomat/`, kein VPN und keine IP-Beschränkung; SSH nur aus dem VPN. |
+| Webserver (nginx) | TLS 1.2/1.3, Umleitung auf HTTPS, `server_tokens off`; HSTS, CSP und Rate-Limits setzt die Anwendung, nicht nginx. |
+| Anwendung | Rechte im Dienst, EF Core, Antiforgery, strenge CSP; Kestrel nur auf `127.0.0.1:5082`. |
+| Anmeldung | Lokale Konten mit PBKDF2 und Anmeldebremse; **kein zweiter Faktor**, Hochschul-SSO (Shibboleth/SAML) geplant. |
+| Daten | SQLite-Datei nur für den Dienstbenutzer lesbar; **keine Feldverschlüsselung**, Sicherungen unverschlüsselt. |
+| Betrieb | systemd mit Härtung, Sicherung vor jedem Update und täglich, automatischer Rückweg beim Ausrollen; Logs nur lokal. |
+
+Ausführlich: [sicherheit-und-betrieb.md](../sicherheit-und-betrieb.md).
+
 ## Aufbau (wie VibeVHS)
 
 .NET 11, Blazor Server (SSR + InteractiveServer) mit Radzen, EF Core + SQLite, Serilog, Quartz.NET, PDFsharp/MigraDoc, QRCoder.
@@ -45,15 +60,44 @@ Gründe:
 Mehrwert der gewählten Lösung: Jede Unterschrift ist einzeln nachprüfbar (Text-Hash, Kette, Systemsiegel, bei Schlüsseln
 die Signatur selbst). Veränderungen in der Datenbank fallen auf. Der Prüfwert im PDF verbindet Ausfertigung und Vorgang.
 
+**Ergänzung (26.11.2026, Einladungsverfahren FA-140 ff.):** Das PDF ist jetzt das gewohnte Formular der Fakultät, und es entsteht
+schon mit der Unterschrift der Studierenden: Nach jeder Unterschrift erzeugt der Server eine neue Fassung (Tabelle `Dokumente`,
+jüngste gilt), in die er Angaben und Unterschriften (Bild bzw. Vermerk „digital signiert“) einträgt. Das ganze Handling bleibt
+im Browser; das PDF wird nie hochgeladen oder im PDF selbst signiert. Damit lässt sich jeder Zwischenstand herunterladen, etwa
+für ein Studiendekanat außerhalb des ProfOMat, das auf Papier bzw. außerhalb unterschreibt. Die Entscheidung oben bleibt:
+führend sind Vorgang und Signaturkette.
+
+## Drittprüfung per Einladung (Ablauf)
+
+```
+Erstprüfende: Link erzeugen (Name, Studiengang, Prüfung, opt. Termin/Ort/Zweitprüfende)   Status Eingeladen
+  → Studierende: Matrikelnummer, Terminwünsche, Unterschrift  → PDF v1, Mail an Erstprüfende  BeimErstpruefer
+  → Erstprüfende: Termin, Ort, Zweitprüfende, Unterschrift    → PDF v2, Mail an Zweitprüfende  BeimZweitpruefer
+  → Zweitprüfende: Unterschrift                               → PDF v3
+       ├─ Studiendekanat im ProfOMat (Studiengang vor Fakultät, sonst Vertretung)            BeimStudiendekanat
+       │    → Unterschrift → PDF v4 → Download und Mail an das Sekretariat von Hand         Abgeschlossen
+       └─ sonst: Zweitprüfende laden PDF v3 herunter, leiten weiter, melden es               ExternWeiterleiten → Weitergeleitet
+Rückgabe (Zweitprüfende/Studiendekanat) → BeimErstpruefer, Unterschriften der Prüfenden „überholt“
+```
+
+- **Link:** `/drittpruefung/{Id}/{Token}` (wie Hausarbeiten: Id ist UUIDv7 und nicht geheim, das Token schon; gespeichert nur sein
+  SHA-256). Kein öffentliches Formular mehr, daher auch keine Sicherheitsaufgabe. Alte Links `/drittpruefung/status/…` gelten weiter.
+- **Formularvorlage:** `src/ProfOMat.Infrastructure/Vorlagen/*.pdf` als eingebettete Ressource; Koordinaten der Felder in
+  `AntragFormular.cs` (aus Linien und Kästchen der Vorlage gemessen). Neue Vorlage → Koordinaten prüfen.
+- **Text:** Format `profomat-antrag-v2` mit allen Angaben des Formulars und der Erklärung des jeweiligen Schritts. Studiengang,
+  Prüfung und Erstprüfende stehen in Folgeschritten so, wie die Studierenden sie unterschrieben haben (kein Katalogabgleich dazwischen).
+  Ein Test schreibt den Hash eines Beispieltexts fest.
+- **Datenbank:** Schemaversion 18 ergänzt `Verfahren` (`Antrag` = altes Verfahren, `Einladung`) und `GueltigBis` ohne Datenverlust.
+
 ## Unterschreiben
 
-- **Text:** `Signaturinhalt` (Format `profomat-antrag-v1`, nie ändern – für Neues `v2`). Mehrzeilige Freitexte werden eingerückt,
+- **Text:** `Signaturinhalt` (Formate `profomat-antrag-v1` für das alte Verfahren und `profomat-antrag-v2` für Einladungen; nie ändern – für Neues `v3`). Mehrzeilige Freitexte werden eingerückt,
   damit niemand Feldzeilen einschmuggeln kann. Zeitpunkte UTC auf Millisekunden.
 - **Schlüssel:** `wwwroot/signatur.js` liest PKCS#8 (auch PBES2-verschlüsselt), PKCS#1, SEC1, DER, JWK. Signiert wird per WebCrypto
   mit einer nicht exportierbaren Kopie; an den Server gehen nur Signatur und öffentlicher JWK. Algorithmen: ECDSA P-256/384/521
   (SHA-256/384/512), RSASSA-PKCS1-v1_5 mit SHA-256 (RSA ≥ 2048 Bit). Fingerabdruck nach RFC 7638.
 - **Zuordnung zur Person:** Beschäftigte hinterlegen ihren öffentlichen Schlüssel einmal im Profil (Besitznachweis per Signatur). Bei
-  Studierenden bindet die bestätigte Hochschul-Mailadresse (später das SSO), ihr Schlüssel ist „nicht hinterlegt“.
+  Studierenden bindet der persönliche Einladungslink der Prüfenden (später das SSO), ihr Schlüssel ist „nicht hinterlegt“.
 - **Gezeichnet:** PNG 900×300 aus dem Canvas, serverseitig auf Format und Größe geprüft; Bild-Hash im Siegel.
 - **Systemsiegel:** ECDSA P-256, Schlüssel in `Speicher:Schluessel/systemsiegel.pem` (nie im Repo, gehört in die Sicherung). Alte
   Schlüssel als `systemsiegel-*.pem` daneben legen, dann bleiben alte Siegel prüfbar.

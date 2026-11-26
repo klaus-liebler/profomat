@@ -11,6 +11,7 @@
         <h1>Anträge auf mündliche Drittprüfung</h1>
         <p>Prüfende sehen die Anträge, in denen sie Erst- oder Zweitprüfende sind; Studiendekanat und Studierendensekretariat sehen alle.</p>
     </div>
+    <a class="pm-btn pm-btn-haupt" href="antraege/neu">Einladung erstellen</a>
 </div>
 
 <div class="pm-chips" role="tablist" aria-label="Filter">
@@ -40,7 +41,7 @@
                         <tr class="@(z.WartetAufMich ? "pm-hervor" : "")">
                             <td><a href="antraege/@z.Id">@z.Nummer</a></td>
                             <td>@z.Pruefung<br /><span class="pm-small pm-muted">@z.Studiengang</span></td>
-                            <td>@z.Name<br /><span class="pm-small pm-muted">@z.Matrikelnummer</span></td>
+                            <td>@z.Name<br /><span class="pm-small pm-muted">@(z.Matrikelnummer is { Length: > 0 } m ? m : "Matrikelnummer folgt")</span></td>
                             <td>@z.Erstpruefende</td>
                             <td>@(z.Termin is { } t ? Zeit.Kurz(t) : "–")</td>
                             <td><StatusPille Stil="@Darstellung.Stil(z.Status)">@z.Status.Anzeigename()</StatusPille>

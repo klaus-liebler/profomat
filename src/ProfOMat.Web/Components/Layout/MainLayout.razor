@@ -22,7 +22,7 @@
                     }
                     else
                     {
-                        <NavLink href="@punkt.Ziel" Match="@(punkt.Ziel == "" ? NavLinkMatch.All : NavLinkMatch.Prefix)" ActiveClass="on">@punkt.Titel</NavLink>
+                        <MenueLink href="@punkt.Ziel" Match="@(punkt.Ziel == "" ? NavLinkMatch.All : NavLinkMatch.Prefix)" Ausser="@punkt.Ausser" ActiveClass="on">@punkt.Titel</MenueLink>
                     }
                 }
             }
@@ -81,13 +81,13 @@
     [CascadingParameter]
     private Task<AuthenticationState>? Anmeldezustand { get; set; }
 
-    private sealed record Navigationspunkt(string Gruppe, string Titel, string Ziel, bool NurAngemeldet = true, Func<Benutzer, Freigabe>? Recht = null, string? Geplant = null);
+    private sealed record Navigationspunkt(string Gruppe, string Titel, string Ziel, bool NurAngemeldet = true, Func<Benutzer, Freigabe>? Recht = null, string? Geplant = null, string? Ausser = null);
 
     private static readonly IReadOnlyList<Navigationspunkt> Punkte =
     [
         new("Übersicht", "Start", "", NurAngemeldet: false),
-        new("Drittprüfungen", "Anträge", "antraege"),
-        new("Drittprüfungen", "Antrag stellen (Studierende)", "drittpruefung/antrag", NurAngemeldet: false),
+        new("Drittprüfungen", "Anträge", "antraege", Ausser: "antraege/neu"),
+        new("Drittprüfungen", "Einladung erstellen", "antraege/neu", Recht: DrittpruefungDienst.EinladungenErzeugen),
         new("Klausuren", "Klausuren", "klausuren", Recht: ProfOMat.Application.Klausuren.KlausurDienst.KlausurenAnlegen),
         new("Klausuren", "Räume", "raeume", Recht: ProfOMat.Application.Klausuren.KlausurDienst.KlausurenAnlegen),
         new("Mündliche Prüfungen", "Live-Protokoll", "muendlich", Recht: ProfOMat.Application.Muendlich.MuendlichDienst.Protokollieren),

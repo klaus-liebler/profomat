@@ -11,6 +11,23 @@ für den Lasercutter). Aufbau und Leitlinien folgen
 | [`docs/spezifikation/anforderungen.md`](docs/spezifikation/anforderungen.md) | Anforderungen (FA-Nummern), führend |
 | [`docs/spezifikation/architektur.md`](docs/spezifikation/architektur.md) | Aufbau, Entscheidungen (Signaturkette statt PDF), SSO der Hochschule, Katalogabgleich |
 | [`docs/spezifikation/fahrplan.md`](docs/spezifikation/fahrplan.md) | Iterationen und offene Abklärungen |
+| [`docs/sicherheit-und-betrieb.md`](docs/sicherheit-und-betrieb.md) | Sicherheit und Betrieb: ehrlicher Ist-Stand mit Fundstellen |
+
+## Sicherheit und Betrieb (für Technik)
+
+> Für IT-Betrieb, Datenschutz und technisch Interessierte – ehrlicher Stand mit ✅/⚠️/❌. Wer nur die Funktionen sehen will,
+> springt weiter zu [Starten](#starten).
+
+| Ebene | Stand in einem Satz |
+|---|---|
+| Netz | Öffentlich erreichbar über `https://liebler.iui.hs-osnabrueck.de/profomat/`, kein VPN und keine IP-Beschränkung; SSH nur aus dem VPN. |
+| Webserver (nginx) | TLS 1.2/1.3, Umleitung auf HTTPS, `server_tokens off`; HSTS, CSP und Rate-Limits setzt die Anwendung, nicht nginx. |
+| Anwendung | Rechte im Dienst, EF Core, Antiforgery, strenge CSP; Kestrel nur auf `127.0.0.1:5082`. |
+| Anmeldung | Lokale Konten mit PBKDF2 und Anmeldebremse; **kein zweiter Faktor**, Hochschul-SSO (Shibboleth/SAML) geplant. |
+| Daten | SQLite-Datei nur für den Dienstbenutzer lesbar; **keine Feldverschlüsselung**, Sicherungen unverschlüsselt. |
+| Betrieb | systemd mit Härtung, Sicherung vor jedem Update und täglich, automatischer Rückweg beim Ausrollen; Logs nur lokal. |
+
+Ausführlich mit Fundstellen im Code und offenen Punkten: [sicherheit-und-betrieb.md](docs/sicherheit-und-betrieb.md).
 
 ## Starten
 
@@ -32,8 +49,9 @@ Testkonten (Testanmeldung ohne Passwort; Mailadressen `…@demo.invalid`, außer
 | Prof. Dr. Paula Rechner | Prüfende, Studiendekanat (Fakultät WiSo) |
 | Sabine Sekretariat | Studierendensekretariat |
 
-Ablauf zum Ausprobieren: *Antrag stellen* (ohne Anmeldung, Mail z. B. `…@stud.hs-osnabrueck.de`) → Postausgang: Link öffnen und
-bestätigen → als Mustermann Termin festlegen und unterschreiben → als Beispiel bestellen → PDF.
+Ablauf zum Ausprobieren: als Mustermann *Einladung erstellen* (Zweitprüfende: Probst) → Link in einem privaten Fenster öffnen,
+Matrikelnummer ergänzen und unterschreiben → als Mustermann Termin ergänzen und unterschreiben → als Probst unterschreiben → als Beispiel
+bestellen → PDF. Ohne Studiendekanat an der Fakultät (*Studiengänge und Prüfungen*) leitet Probst das PDF stattdessen weiter.
 Klausuren: als Mustermann unter *Klausuren* die Datei `tools/Testdaten/pruefungsliste-beispiel.csv` (57 erfundene Personen) hochladen. Der Raum SI 0012 hat einen Beispielgrundriss (*Räume → Grundriss*).
 Hausarbeiten: unter *Hausarbeiten* `tools/Testdaten/pruefungsliste-mehrere.csv` hochladen und eine Prüfung wählen, unter *Themen* die Themenliste
 der Modulwebseite einfügen, Teams mit Wünschen anlegen, zuteilen, *Bestätigungsmails erstellen* → *Mails zum Versenden* (.eml fürs Desktop-Outlook;
@@ -53,7 +71,7 @@ dotnet build ProfOMat.slnx                                   # Warnungen sind Fe
 dotnet test --project tests\ProfOMat.Domain.Tests
 dotnet test --project tests\ProfOMat.Application.Tests
 node tests\Signatur\signatur-test.mjs                        # Schlüsselformate (braucht openssl)
-node tests\Browser\ablauf.mjs http://localhost:5310 <Ordner>  # Drittprüfung im Headless-Edge, Instanz muss laufen
+node tests\Browser\ablauf.mjs http://localhost:5310 <Ordner>  # Drittprüfung per Einladung im Headless-Edge (alle Rollen, PDF, 390 px), Instanz muss laufen
 node tests\Browser\klausur.mjs http://localhost:5310 <Ordner> # Klausurablauf (frische Datenbank)
 node tests\Browser\muendlich.mjs http://localhost:5310 <Ordner> # Mündliche Prüfung live: Tastatur, Bemerkung, Protokoll-PDF, 390 px
 node tests\Browser\beschriftung.mjs http://localhost:5310 <Ordner> # Verteiler beschriften: Klick, Ziehen, Pfeiltasten, PDF, 390 px

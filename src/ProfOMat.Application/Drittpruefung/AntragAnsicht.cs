@@ -16,7 +16,8 @@ public sealed record AntragAnsicht(
     IReadOnlyList<SignaturBefund> Signaturen,
     string Hochschule,
     string Link,
-    string? Termin)
+    string? Termin,
+    string SekretariatEmail)
 {
     /// <summary>Alle gültigen Unterschriften sind in Ordnung (Kette, Siegel, Signaturen).</summary>
     public bool KetteInOrdnung => Signaturen.Where(s => s.Signatur.Ueberholt is null).All(s => s.Gueltig);
@@ -33,13 +34,10 @@ public sealed record SignaturBefund(Signatur Signatur, bool Gueltig, IReadOnlyLi
 /// <summary>Vorlage zum Unterschreiben: genau dieser Text wird angezeigt und signiert.</summary>
 public sealed record Signiervorlage(Guid AntragId, Signaturschritt Schritt, string Text, DateTimeOffset Zeitpunkt, string? VorgaengerHash, string Unterzeichner);
 
-/// <summary>Neuer Antrag vor dem Einreichen: Id, Nummer und Zeitpunkt stehen bereits im zu unterschreibenden Text.</summary>
-public sealed record Antragsentwurf(Guid Id, string Nummer, DateTimeOffset Zeitpunkt, Antragsangaben Angaben, string Text);
-
 /// <summary>Filter für die Antragsliste.</summary>
 public enum AntragFilter
 {
-    /// <summary>Wartet auf mich (als Erstprüfende/r oder Studiendekanat).</summary>
+    /// <summary>Wartet auf mich (als Erst-, Zweitprüfende/r oder Studiendekanat).</summary>
     MeineAufgaben = 1,
 
     /// <summary>Alle offenen, die ich sehen darf.</summary>

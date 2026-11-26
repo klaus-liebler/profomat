@@ -6,6 +6,8 @@
 # Rückweg: sudo bash /tmp/profomat-kit/schritte/01-zurueck.sh   (Daten in /var/lib/profomat bleiben)
 source "$(dirname "$0")/gemeinsam.sh"
 source "$(dirname "$0")/liebler-nginx.sh"
+source "$(dirname "$0")/pruefen.sh"
+source "$(dirname "$0")/konfig-abgleich.sh"
 als_root
 
 command -v nginx >/dev/null && command -v sqlite3 >/dev/null \
@@ -30,9 +32,13 @@ if [[ ! -f "$UMGEBUNG" ]]; then
     ok "$UMGEBUNG angelegt (Schalter und Geheimnisse dort eintragen, nie ins Repository)"
 fi
 
-# systemd: Dienst und nächtliche Sicherung
+# systemd: Dienst – eine vorhandene Unit bleibt unverändert, Fehlendes kommt ins Drop-in (konfig-abgleich.sh);
+# widerspricht ein Eintrag der Vorlage, bricht der Schritt hier ab.
+dienst_planen
+pruef_ende
+dienst_anwenden
+# nächtliche Sicherung (Dateien gehören allein dem Kit)
 neu=0
-if vorlage_einspielen systemd/profomat.service "/etc/systemd/system/$DIENST.service"; then neu=1; fi
 if vorlage_einspielen systemd/profomat-sicherung.service "/etc/systemd/system/$DIENST-sicherung.service"; then neu=1; fi
 if vorlage_einspielen systemd/profomat-sicherung.timer "/etc/systemd/system/$DIENST-sicherung.timer"; then neu=1; fi
 vorlage_einspielen werkzeuge/sicherung.sh "/usr/local/sbin/$DIENST-sicherung.sh" 0755 || true

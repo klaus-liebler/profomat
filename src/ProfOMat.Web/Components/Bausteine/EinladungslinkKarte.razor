@@ -1,0 +1,96 @@
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+@inject NavigationManager Navigation
+@inject NotificationService Hinweise
+@inject Ortszeit Zeit
+
+@*
+    Zeigt einen frisch erzeugten Einladungslink (nur jetzt sichtbar – gespeichert ist nur sein Hash) zum Kopieren
+    bzw. als vorbereitete Mail im eigenen Mailprogramm.
+*@
+<section class="pm-card pm-hervor" aria-live="polite">
+    <h2>Link für @Name</h2>
+    <p>Bitte schicken Sie diesen persönlichen Link per Mail an die Studierende bzw. den Studierenden. Er gilt bis <b>@Zeit.Kurz(Link.GueltigBis)</b>
+        und wird <b>nur jetzt angezeigt</b>; geht er verloren, erzeugen Sie auf der Antragsseite einfach einen neuen.</p>
+    <div class="pm-row">
+        <input class="pm-input pm-grow pm-mono" readonly value="@Link.Link" aria-label="Einladungslink" />
+        <button type="button" class="pm-btn pm-btn-haupt" @onclick="KopierenAsync">Kopieren</button>
+        <a class="pm-btn" href="@Mailto" data-enhance-nav="false">Mail vorbereiten</a>
+    </div>
+    @ChildContent
+</section>
+
+@code {
+    private IJSObjectReference? modul;
+
+    [Parameter, EditorRequired]
+    public Einladungslink Link { get; set; } = default!;
+
+    /// <summary>Name der oder des Studierenden (Anrede in der Mail).</summary>
+    [Parameter, EditorRequired]
+    public string Name { get; set; } = string.Empty;
+
+    [Parameter, EditorRequired]
+    public string Pruefung { get; set; } = string.Empty;
+
+    [Parameter]
+    public string? Absender { get; set; }
+
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+
+    private string Mailto
+    {
+        get
+        {
+            var betreff = $"Ihr Antrag auf mündliche Wiederholungsprüfung (3. Versuch): {Pruefung}";
+            var text = $"""
+                Guten Tag {Name},
+
+                über diesen persönlichen Link ergänzen Sie Ihre Matrikelnummer und Ihre Terminwünsche und unterschreiben den Antrag auf
+                mündliche Wiederholungsprüfung im dritten Versuch für „{Pruefung}“:
+
+                {Link.Link}
+
+                Der Link gilt bis {Zeit.Kurz(Link.GueltigBis)}. Bitte geben Sie ihn nicht weiter. Über denselben Link sehen Sie später den Stand
+                und das unterschriebene Formular.
+
+                Viele Grüße
+                {Absender}
+                """;
+            return $"mailto:?subject={Uri.EscapeDataString(betreff)}&body={Uri.EscapeDataString(text.ReplaceLineEndings("\r\n"))}";
+        }
+    }
+
+    private async Task KopierenAsync()
+    {
+        try
+        {
+            modul ??= await JS.InvokeAsync<IJSObjectReference>("import", Navigation.ToAbsoluteUri("zwischenablage.js").ToString());
+            if (await modul.InvokeAsync<bool>("kopieren", Link.Link))
+            {
+                Hinweise.Notify(NotificationSeverity.Success, "Link kopiert.");
+                return;
+            }
+        }
+        catch (JSException)
+        {
+        }
+
+        Hinweise.Notify(NotificationSeverity.Warning, "Kopieren nicht möglich – den Link markieren und kopieren.");
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (modul is not null)
+        {
+            try
+            {
+                await modul.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+            }
+        }
+    }
+}

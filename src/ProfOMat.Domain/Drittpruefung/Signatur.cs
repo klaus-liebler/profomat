@@ -7,6 +7,9 @@ public enum Signaturschritt
     Antragstellung = 1,
     Erstpruefung = 2,
     Studiendekanat = 3,
+
+    /// <summary>Einladungsverfahren: Unterschrift der oder des Zweitprüfenden (zwischen Erstprüfung und Studiendekanat).</summary>
+    Zweitpruefung = 4,
 }
 
 public enum Signaturart
@@ -24,6 +27,7 @@ public static class SignaturText
     {
         Signaturschritt.Antragstellung => "Antragstellung (Studierende/r)",
         Signaturschritt.Erstpruefung => "Festlegung (Erstprüfende/r)",
+        Signaturschritt.Zweitpruefung => "Zustimmung (Zweitprüfende/r)",
         Signaturschritt.Studiendekanat => "Bestellung (Studiendekanat)",
         _ => schritt.ToString(),
     };

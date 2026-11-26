@@ -40,6 +40,33 @@ public sealed class SignaturinhaltTests
         t.ShouldContain("[Bestellung durch das Studiendekanat]");
     }
 
+    private static Vorgangstext V2(string? wuensche = null, string? termin = null) => new(Guid.Parse("01a1fe80-0000-7000-8000-000000000001"), "DP-2026-ABCDEF",
+        new DateTimeOffset(2026, 11, 20, 9, 0, 0, 123, TimeSpan.Zero), "Mia", "Muster", "1234567", "Elektrotechnik (B.Sc., PO 2023)", "stg:ET",
+        "12040 – Regelungstechnik", "pnr:12040", wuensche, "Prof. Dr. Erika Mustermann", Guid.Parse("01a1fe80-0000-7000-8000-000000000002"),
+        "Prof. Dr. Lena Probst", Guid.Parse("01a1fe80-0000-7000-8000-000000000003"), termin, termin is null ? null : "SI 0012", null);
+
+    [Fact]
+    public void V2_ist_festgeschrieben_und_alte_Unterschriften_bleiben_nachrechenbar()
+    {
+        // Ändert sich dieser Hash, lassen sich gespeicherte Unterschriften nicht mehr nachbilden: Format nie ändern, sondern v3 einführen.
+        var t = Signaturinhalt.ErstellenV2(Signaturschritt.Zweitpruefung, V2("a\r\nb", "Freitag, 04.12.2026, 10:00 Uhr (Europe/Berlin)"), "abc123",
+            "Prof. Dr. Lena Probst", DateTimeOffset.UnixEpoch);
+        t.ShouldNotContain("\r");
+        t.ShouldContain("Format: profomat-antrag-v2");
+        t.ShouldContain("Terminliche Einschränkungen und Wünsche: a\n    b");
+        Signaturinhalt.Hash(t).ShouldBe("2c6273609cad12a741211a7c0cb23b4c568d9dc77821f9d81017e5c8870c33af");
+    }
+
+    [Fact]
+    public void V2_Felder_lassen_sich_lesen_und_Freitext_schmuggelt_keine_Felder()
+    {
+        var t = Signaturinhalt.ErstellenV2(Signaturschritt.Antragstellung, V2("ok\nModul: Gefälscht"), null, "Mia Muster", DateTimeOffset.UnixEpoch);
+        Signaturinhalt.Feld(t, "Modul").ShouldBe("12040 – Regelungstechnik");
+        Signaturinhalt.Feld(t, "Erstprüfende/r").ShouldBe("Prof. Dr. Erika Mustermann");
+        Signaturinhalt.Feld(t, "Termin").ShouldBe("-");
+        t.ShouldContain("Erklärung: Ich beantrage");
+    }
+
     [Fact]
     public void Private_Schluesselanteile_werden_abgelehnt()
         => Should.Throw<SignaturFehler>(() => SignaturPruefung.JwkLesen("""{"kty":"EC","crv":"P-256","x":"a","y":"b","d":"geheim"}"""))

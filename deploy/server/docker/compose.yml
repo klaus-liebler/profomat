@@ -1,0 +1,40 @@
+# ProfOMat als Container (Modus docker) – Vorlage; ausrollen.sh füllt @…@ aus konfiguration.env und legt sie als
+# /opt/@DIENST@-docker/compose.yml ab, dazu .env mit BILD (Version) und UID/GID des Dienstbenutzers.
+# Datenbank: ProfOMat nutzt SQLite – die Datei liegt im Datenordner des Hosts, ein eigener Datenbank-Container ist nicht nötig.
+# (SchoolCraft ergänzt hier einen Dienst „datenbank“ mit postgres:17 ohne veröffentlichten Port.)
+name: @DIENST@
+services:
+  app:
+    image: ${BILD:?BILD fehlt in .env}
+    container_name: @DIENST@
+    restart: unless-stopped
+    user: "${DIENST_UID:?}:${DIENST_GID:?}"
+    env_file:
+      - path: /etc/@DIENST@/@DIENST@.env
+        required: false
+    environment:
+      ASPNETCORE_ENVIRONMENT: Testsystem
+      PathBase: @PFAD@
+      ReverseProxy__Aktiv: "true"
+      ReverseProxy__Host: @HOST@
+      # nginx kommt über das Docker-Netz (nicht Loopback): nur diesem Bereich die Weiterleitungs-Köpfe glauben
+      ReverseProxy__Netze__0: 172.16.0.0/12
+      ProfOMat__OeffentlicheAdresse: https://@HOST@@PFAD@/
+      ConnectionStrings__ProfOMat: Data Source=/var/lib/@DIENST@/@DB_DATEI@
+      Speicher__Schluessel: /var/lib/@DIENST@/schluessel
+      Speicher__Logs: /var/log/@DIENST@
+    ports:
+      - "127.0.0.1:@PORT@:8080"      # nur lokal, nach außen spricht nginx
+    volumes:
+      - /var/lib/@DIENST@:/var/lib/@DIENST@
+      - /var/log/@DIENST@:/var/log/@DIENST@
+    # Härtung wie die systemd-Unit: nur Lesezugriff aufs Abbild, keine Zusatzrechte
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    # Ausgabe ins Journal (journalctl CONTAINER_NAME=@DIENST@) – so greift auch der Log-Versand des Hosts
+    logging:
+      driver: journald
+      options:
+        tag: "@DIENST@"

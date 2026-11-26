@@ -108,11 +108,8 @@ public sealed class ProfOMatOptionen
     /// <summary>Zentrales Postfach des Studierendensekretariats (falls die Fakultät keines festlegt).</summary>
     public string SekretariatEmail { get; set; } = "studierendensekretariat@example.invalid";
 
-    /// <summary>Erlaubte Maildomains der Studierenden (inkl. Subdomains); leer = alle.</summary>
-    public IList<string> StudierendenMailDomains { get; } = [];
-
-    /// <summary>Tage, bis ein nicht bestätigter Antrag verfällt.</summary>
-    public int BestaetigungsfristTage { get; set; } = 7;
+    /// <summary>Vorschlag, wie viele Tage ein Einladungslink zur Drittprüfung gilt (änderbar je Link, 1–60).</summary>
+    public int EinladungGueltigTage { get; set; } = 14;
 
     /// <summary>Zeitzone für Anzeige und Eingabe von Prüfungsterminen.</summary>
     public string Zeitzone { get; set; } = "Europe/Berlin";

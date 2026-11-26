@@ -20,7 +20,7 @@ namespace ProfOMat.Infrastructure.Datenbank;
 public sealed class ProfOMatDbContext(DbContextOptions<ProfOMatDbContext> optionen) : DbContext(optionen)
 {
     /// <summary>Erhöhen, wenn sich das Modell ändert: eine ältere Datei wird dann beim Start abgelehnt (statt still falsch zu laufen).</summary>
-    public const int Schemaversion = 17;
+    public const int Schemaversion = 18;
 
     /// <summary>Tabellen, die mit Version 10 dazugekommen sind (Aufwertung 9 → 10 legt nur diese an).</summary>
     internal static readonly string[] TabellenAbVersion10 = ["Hausarbeiten", "HausarbeitThemen", "HausarbeitPersonen", "HausarbeitTeams", "Teammitglieder", "Mailentwuerfe", "Mailsignaturen", "MailsignaturBilder"];

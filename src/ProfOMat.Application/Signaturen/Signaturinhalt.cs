@@ -23,6 +23,27 @@ public sealed record Antragstext(
     string? Terminwuensche,
     string? Zweitpruefungswunsch);
 
+/// <summary>Stand des Formulars im Einladungsverfahren (Format v2), aufgelöst zu lesbaren Angaben; Termin bereits in Ortszeit formatiert.</summary>
+public sealed record Vorgangstext(
+    Guid AntragId,
+    string Nummer,
+    DateTimeOffset Erstellt,
+    string Vorname,
+    string Nachname,
+    string? Matrikelnummer,
+    string Studiengang,
+    string StudiengangSchluessel,
+    string Pruefung,
+    string PruefungSchluessel,
+    string? Terminwuensche,
+    string Erstpruefende,
+    Guid ErstpruefendeKontoId,
+    string? Zweitpruefende,
+    Guid? ZweitpruefendeKontoId,
+    string? Termin,
+    string? Ort,
+    string? Bemerkung);
+
 /// <summary>Festlegung im unterschriebenen Text (Termin bereits in Ortszeit formatiert).</summary>
 public sealed record Festlegungstext(string Termin, string Ort, string Zweitpruefende, string? Bemerkung);
 
@@ -35,6 +56,8 @@ public sealed record Festlegungstext(string Termin, string Ort, string Zweitprue
 public static class Signaturinhalt
 {
     public const string Format = "profomat-antrag-v1";
+
+    public const string FormatV2 = "profomat-antrag-v2";
 
     public static string Erstellen(Signaturschritt schritt, Antragstext antrag, string? vorgaengerHash, Festlegungstext? festlegung,
         string unterzeichner, DateTimeOffset zeitpunkt, string? studiendekanat = null)
@@ -90,6 +113,70 @@ public static class Signaturinhalt
         Zeile(t, "Unterzeichnet von", unterzeichner);
         Zeile(t, "Zeitpunkt", Utc(zeitpunkt));
         return t.ToString();
+    }
+
+    /// <summary>
+    /// Einladungsverfahren (Format „profomat-antrag-v2“, ebenfalls nie nachträglich ändern): jede Stufe enthält alle Angaben des
+    /// Formulars in seinem aktuellen Stand, die Erklärung der unterschreibenden Person und den Hash der vorherigen Unterschrift.
+    /// </summary>
+    public static string ErstellenV2(Signaturschritt schritt, Vorgangstext v, string? vorgaengerHash, string unterzeichner, DateTimeOffset zeitpunkt)
+    {
+        ArgumentNullException.ThrowIfNull(v);
+        var t = new StringBuilder();
+        Zeile(t, "ProfOMat – Antrag auf mündliche Wiederholungsprüfung (ATPO § 18 Abs. 1 Satz 3, § 16 Abs. 1 Satz 3)");
+        Zeile(t, "Format", FormatV2);
+        Zeile(t, "Schritt", schritt.Anzeigename());
+        Zeile(t, "Antrag", v.AntragId.ToString("D"));
+        Zeile(t, "Nummer", v.Nummer);
+        Zeile(t, "Erstellt", Utc(v.Erstellt));
+        Zeile(t, string.Empty);
+        Zeile(t, "[Angaben der/des Studierenden]");
+        Zeile(t, "Nachname", v.Nachname);
+        Zeile(t, "Vorname", v.Vorname);
+        Zeile(t, "Matrikelnummer", v.Matrikelnummer);
+        Zeile(t, "Studiengang", $"{v.Studiengang} [{v.StudiengangSchluessel}]");
+        Zeile(t, "Terminliche Einschränkungen und Wünsche", v.Terminwuensche);
+        Zeile(t, string.Empty);
+        Zeile(t, "[Angaben zur Wiederholungsprüfung]");
+        Zeile(t, "Art", "2. Wiederholung (3. Versuch), mündlich mit zwei Prüfenden");
+        Zeile(t, "Modul", $"{v.Pruefung} [{v.PruefungSchluessel}]");
+        Zeile(t, "Termin", v.Termin);
+        Zeile(t, "Ort", v.Ort);
+        Zeile(t, "Erstprüfende/r", $"{v.Erstpruefende} [{v.ErstpruefendeKontoId:D}]");
+        Zeile(t, "Zweitprüfende/r", v.Zweitpruefende is null ? null : $"{v.Zweitpruefende} [{v.ZweitpruefendeKontoId:D}]");
+        Zeile(t, "Bemerkung", v.Bemerkung);
+        Zeile(t, string.Empty);
+        Zeile(t, "[Erklärung]");
+        Zeile(t, "Erklärung", schritt switch
+        {
+            Signaturschritt.Antragstellung => "Ich beantrage, die zweite Wiederholung der oben genannten Modulprüfung als mündliche Prüfung abzulegen. "
+                                              + "Die vorausgefüllten Angaben habe ich geprüft.",
+            Signaturschritt.Erstpruefung => "Ich übernehme die Prüfung als Erstprüfende/r. Termin und Ort sind mit der/dem Zweitprüfenden abgestimmt.",
+            Signaturschritt.Zweitpruefung => "Ich übernehme die Prüfung als Zweitprüfende/r zu Termin und Ort wie oben angegeben.",
+            Signaturschritt.Studiendekanat => "Ich bestelle die oben genannten Prüfenden für diese mündliche Prüfung (ATPO § 24 Abs. 2).",
+            _ => throw new ArgumentOutOfRangeException(nameof(schritt)),
+        });
+        Zeile(t, string.Empty);
+        Zeile(t, "[Unterschrift]");
+        Zeile(t, "Vorherige Unterschrift (SHA-256)", vorgaengerHash ?? "-");
+        Zeile(t, "Unterzeichnet von", unterzeichner);
+        Zeile(t, "Zeitpunkt", Utc(zeitpunkt));
+        return t.ToString();
+    }
+
+    /// <summary>Liest den Wert einer Zeile „Feld: Wert“ aus einem unterschriebenen Text (ohne „[Schlüssel]“ am Ende).</summary>
+    public static string? Feld(string inhalt, string name)
+    {
+        ArgumentNullException.ThrowIfNull(inhalt);
+        var zeile = inhalt.Split('\n').FirstOrDefault(z => z.StartsWith(name + ": ", StringComparison.Ordinal));
+        if (zeile is null)
+        {
+            return null;
+        }
+
+        var wert = zeile[(name.Length + 2)..];
+        var klammer = wert.LastIndexOf(" [", StringComparison.Ordinal);
+        return klammer > 0 ? wert[..klammer] : wert;
     }
 
     /// <summary>SHA-256 des Textes als UTF-8 (hex, klein).</summary>

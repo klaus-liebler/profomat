@@ -14,32 +14,63 @@ namespace ProfOMat.Application.Tests;
 
 public sealed class DrittpruefungAblaufTests
 {
-    private static async Task<Antragsangaben> AngabenAsync(TestUmgebung u, string erstpruefer = "mustermann", string pruefung = "Regelungstechnik")
+    private const string Wuensche = "Nicht montags.\nAm liebsten vormittags.";
+
+    private static Task<T> D<T>(TestUmgebung u, Func<DrittpruefungDienst, Task<T>> arbeit) => u.InBereichAsync(d => arbeit(d.GetRequiredService<DrittpruefungDienst>()));
+
+    private static Task D(TestUmgebung u, Func<DrittpruefungDienst, Task> arbeit) => u.InBereichAsync(d => arbeit(d.GetRequiredService<DrittpruefungDienst>()));
+
+    private static Task<Einladungsangaben> AngabenAsync(TestUmgebung u, string pruefung = "Regelungstechnik") => u.InBereichAsync(async d =>
     {
-        var erst = await u.KontoAsync(erstpruefer);
-        return await u.InBereichAsync(async d =>
-        {
-            var k = d.GetRequiredService<KatalogDienst>();
-            var et = (await k.StudiengaengeAsync(false)).Single(s => s.Kuerzel == "ET");
-            var p = (await k.PruefungenAsync(et.Id, false)).Single(x => x.Titel == pruefung);
-            return new Antragsangaben("Mia", "Musterstudentin", "1234567", "mia.musterstudentin@hs-osnabrueck.de", et.Id, p.Id, erst.Id,
-                "Nicht montags.\nAm liebsten vormittags.", "Gern Prof. Probst");
-        });
+        var k = d.GetRequiredService<KatalogDienst>();
+        var et = (await k.StudiengaengeAsync(false)).Single(s => s.Kuerzel == "ET");
+        var p = (await k.PruefungenAsync(et.Id, false)).Single(x => x.Titel == pruefung);
+        return new Einladungsangaben("Mia", "Musterstudentin", et.Id, p.Id, 14);
+    });
+
+    /// <summary>Erstprüfende erzeugen den Link; liefert Antrag-Id und Token (aus dem Link).</summary>
+    private static async Task<(Guid Id, string Token)> EinladenAsync(TestUmgebung u, string erst = "mustermann", string? zweit = "probst", bool mitTermin = false)
+    {
+        await u.AlsAsync(erst);
+        var angaben = await AngabenAsync(u);
+        Guid? zweitId = zweit is null ? null : (await u.KontoAsync(zweit)).Id;
+        var vorbelegung = new Festlegung(mitTermin ? u.Uhr.GetUtcNow().AddDays(14) : null, mitTermin ? "SI 0012" : null, zweitId, null, null, null);
+        var link = await D(u, x => x.EinladenAsync(angaben, vorbelegung));
+        link.Link.ShouldStartWith($"https://profomat.test/drittpruefung/{link.AntragId:D}/");
+        link.GueltigBis.ShouldBe(u.Uhr.GetUtcNow().AddDays(14), TimeSpan.FromSeconds(1));
+        var teile = link.Link.Split('/');
+        return (Guid.Parse(teile[^2]), teile[^1]);
     }
 
-    /// <summary>Reicht ein und liefert Antrag-Id und Token (aus der Bestätigungsmail gelesen).</summary>
-    private static async Task<(Guid Id, string Token)> EinreichenAsync(TestUmgebung u, Unterschrift? unterschrift = null, string erstpruefer = "mustermann")
+    private static async Task StudierendAsync(TestUmgebung u, Guid id, string token, Func<string, Unterschrift>? unterschrift = null, string matrikel = "1234567")
     {
         u.Benutzer.Aktuell = Benutzer.Niemand;
-        var angaben = await AngabenAsync(u, erstpruefer);
-        var entwurf = await u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>().EntwurfAsync(angaben));
-        using var studiSchluessel = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-        await u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>()
-            .EinreichenAsync(entwurf, unterschrift ?? Unterschriften.MitSchluessel(studiSchluessel, entwurf.Text), TestUmgebung.Mensch(d)));
-        var mail = await LetzteMailAnAsync(u, "mia.musterstudentin@hs-osnabrueck.de");
-        var link = mail.Text.Split('\n').Select(z => z.Trim()).First(z => z.Contains("/drittpruefung/status/", StringComparison.Ordinal));
-        var teile = link.Split('/');
-        return (Guid.Parse(teile[^2]), teile[^1]);
+        var v = await D(u, x => x.StudierendenVorlageAsync(id, token, matrikel, Wuensche));
+        await D(u, x => x.StudierendUnterschreibenAsync(id, token, matrikel, Wuensche, v.Zeitpunkt, v.Text, (unterschrift ?? Gezeichnet)(v.Text)));
+    }
+
+    private static Unterschrift Gezeichnet(string _) => Unterschriften.Gezeichnet();
+
+    private static async Task<Signiervorlage> UnterschreibenAsync(TestUmgebung u, string als, Guid id, Signaturschritt schritt, Func<string, Unterschrift>? unterschrift = null)
+    {
+        await u.AlsAsync(als);
+        u.Uhr.Advance(TimeSpan.FromMinutes(1));
+        var v = await D(u, x => x.VorlageAsync(id, schritt));
+        var sig = (unterschrift ?? Gezeichnet)(v.Text);
+        await D(u, x => schritt switch
+        {
+            Signaturschritt.Erstpruefung => x.ErstpruefungUnterschreibenAsync(id, v.Zeitpunkt, v.Text, sig),
+            Signaturschritt.Zweitpruefung => x.ZweitpruefungUnterschreibenAsync(id, v.Zeitpunkt, v.Text, sig),
+            _ => x.GenehmigenAsync(id, v.Zeitpunkt, v.Text, sig),
+        });
+        return v;
+    }
+
+    private static async Task TerminFestlegenAsync(TestUmgebung u, Guid id, string ort = "SI 0012", string zweit = "probst")
+    {
+        await u.AlsAsync("mustermann");
+        var zweitKonto = await u.KontoAsync(zweit);
+        await D(u, x => x.FestlegungSpeichernAsync(id, new Festlegung(u.Uhr.GetUtcNow().AddDays(14), ort, zweitKonto.Id, null, null, "Bitte Ausweis mitbringen.")));
     }
 
     private static Task<Nachricht> LetzteMailAnAsync(TestUmgebung u, string an) => u.InBereichAsync(async d =>
@@ -54,12 +85,11 @@ public sealed class DrittpruefungAblaufTests
         return await daten.ListeAsync(daten.Menge<Nachricht>().OrderBy(n => n.Id));
     });
 
-    private static async Task FestlegenAsync(TestUmgebung u, Guid id, string zweit = "probst")
+    private static Task<int> PdfFassungenAsync(TestUmgebung u, Guid id) => u.InBereichAsync(d =>
     {
-        var zweitKonto = await u.KontoAsync(zweit);
-        await u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>().FestlegungSpeichernAsync(id,
-            new Festlegung(u.Uhr.GetUtcNow().AddDays(14), "SI 0012", zweitKonto.Id, "", null, null)));
-    }
+        var daten = d.GetRequiredService<IDaten>();
+        return daten.AnzahlAsync(daten.Menge<Dokument>().Where(x => x.AntragId == id));
+    });
 
     private static async Task SchluesselHinterlegenAsync(TestUmgebung u, ECDsa schluessel)
     {
@@ -68,205 +98,243 @@ public sealed class DrittpruefungAblaufTests
         await u.InBereichAsync(d => d.GetRequiredService<KontoDienst>().SchluesselHinterlegenAsync(zeit, Unterschriften.MitSchluessel(schluessel, nachweis), "Laptop"));
     }
 
-    [Fact]
-    public async Task Gesamter_Ablauf_mit_Schluessel_und_Unterschriftsfeld_endet_mit_PDF_beim_Sekretariat()
+    private static Task StudiendekanatEntfernenAsync(TestUmgebung u) => u.InBereichAsync(async d =>
     {
-        await using var u = await TestUmgebung.StartenAsync();
-        var (id, token) = await EinreichenAsync(u);
-
-        // Vor der Bestätigung sieht die Erstprüferin nichts und bekommt keine Mail
-        (await MailsAsync(u)).ShouldNotContain(n => n.An == "mustermann@demo.invalid");
-        var bestaetigt = await u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>().BestaetigenAsync(id, token));
-        bestaetigt!.Antrag.Status.ShouldBe(AntragStatus.BeimErstpruefer);
-        var anPruefer = await LetzteMailAnAsync(u, "mustermann@demo.invalid");
-        anPruefer.Text.ShouldContain($"https://profomat.test/antraege/{id:D}");
-
-        // Erstprüferin: Schlüssel hinterlegen, festlegen, unterschreiben
-        await u.AlsAsync("mustermann");
-        using var profSchluessel = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-        await SchluesselHinterlegenAsync(u, profSchluessel);
-        await FestlegenAsync(u, id);
-        var vorlage = await u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>().VorlageAsync(id, Signaturschritt.Erstpruefung));
-        vorlage.Text.ShouldContain("Ort: SI 0012");
-        vorlage.Text.ShouldContain("Zweitprüfende/r: Prof. Dr. Lena Probst");
-        await u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>()
-            .ErstpruefungUnterschreibenAsync(id, vorlage.Zeitpunkt, vorlage.Text, Unterschriften.MitSchluessel(profSchluessel, vorlage.Text)));
-        (await LetzteMailAnAsync(u, "beispiel@demo.invalid")).Betreff.ShouldStartWith("Bitte bestellen");
-
-        // Studiendekan unterschreibt im Feld
-        await u.AlsAsync("beispiel");
-        var v2 = await u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>().VorlageAsync(id, Signaturschritt.Studiendekanat));
-        v2.VorgaengerHash.ShouldBe(vorlage.Text is var t ? Signaturinhalt.Hash(t) : null);
-        await u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>().GenehmigenAsync(id, v2.Zeitpunkt, v2.Text, Unterschriften.Gezeichnet()));
-
-        var ansicht = await u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>().AnsichtAsync(id));
-        ansicht.Antrag.Status.ShouldBe(AntragStatus.Abgeschlossen);
-        ansicht.KetteInOrdnung.ShouldBeTrue(string.Join(" | ", ansicht.Signaturen.SelectMany(s => s.Hinweise)));
-        ansicht.Signaturen.Count.ShouldBe(3);
-
-        var pdf = await u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>().PdfAsync(id));
-        pdf.ShouldNotBeNull();
-        pdf.Inhalt.AsSpan(0, 4).ToArray().ShouldBe("%PDF"u8.ToArray());
-        await File.WriteAllBytesAsync(Path.Combine(Path.GetTempPath(), "profomat-test-antrag.pdf"), pdf.Inhalt, TestContext.Current.CancellationToken);
-
-        var anSekretariat = await LetzteMailAnAsync(u, "sekretariat@hs.test");
-        anSekretariat.AnhangDokumentId.ShouldBe(pdf.Id);
-        anSekretariat.Text.ShouldContain(ansicht.Pruefwert!);
-        (await LetzteMailAnAsync(u, "probst@demo.invalid")).AnhangDokumentId.ShouldBe(pdf.Id);
-
-        // Studierende sehen über ihren Link den Abschluss und das PDF
-        (await u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>().PdfFuerStudierendeAsync(id, token))).ShouldNotBeNull();
-    }
-
-    [Fact]
-    public async Task Postausgang_stellt_zu_und_haengt_das_PDF_an()
-    {
-        await using var u = await TestUmgebung.StartenAsync();
-        _ = await EinreichenAsync(u, Unterschriften.Gezeichnet());
-        var zustellung = new MerkendeZustellung();
-        var anzahl = await u.InBereichAsync(d => d.GetRequiredService<Postausgang>().ZustellenAsync(zustellung));
-        anzahl.ShouldBe(1);
-        zustellung.Gesendet.Single().An.ShouldBe("mia.musterstudentin@hs-osnabrueck.de");
-        (await MailsAsync(u)).ShouldAllBe(n => n.Versandt != null);
-    }
-
-    [Fact]
-    public async Task Oeffentliches_Formular_nur_mit_Sicherheitsaufgabe_und_begrenzt_je_Mailadresse()
-    {
-        await using var u = await TestUmgebung.StartenAsync();
-        u.Benutzer.Aktuell = Benutzer.Niemand;
-        var angaben = await AngabenAsync(u);
-        using var schluessel = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-        var entwurf = await u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>().EntwurfAsync(angaben));
-        (await Should.ThrowAsync<FachlicherFehler>(() => u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>()
-            .EinreichenAsync(entwurf, Unterschriften.MitSchluessel(schluessel, entwurf.Text), null)))).Message.ShouldContain("Sicherheitsprüfung");
-
-        for (var i = 0; i < DrittpruefungDienst.MaxUnbestaetigtJeMailUndTag; i++)
+        var daten = d.GetRequiredService<IDaten>();
+        foreach (var f in await daten.ListeAsync(daten.Menge<Fakultaet>()))
         {
-            await EinreichenAsync(u);
+            f.Aendern(f.Name, null, f.SekretariatEmail);
         }
 
-        var vierter = await u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>().EntwurfAsync(angaben));
-        (await Should.ThrowAsync<FachlicherFehler>(() => u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>()
-            .EinreichenAsync(vierter, Unterschriften.MitSchluessel(schluessel, vierter.Text), TestUmgebung.Mensch(d))))).Message.ShouldContain("unbestätigte");
+        await daten.SpeichernAsync();
+    });
+
+    private static async Task PdfSpeichernAsync(TestUmgebung u, Guid id, string name)
+    {
+        var pdf = await D(u, x => x.PdfAsync(id));
+        pdf.ShouldNotBeNull();
+        pdf.Inhalt.AsSpan(0, 4).ToArray().ShouldBe("%PDF"u8.ToArray());
+        await File.WriteAllBytesAsync(Path.Combine(Path.GetTempPath(), name), pdf.Inhalt, TestContext.Current.CancellationToken);
     }
 
     [Fact]
-    public async Task Geaenderter_Text_wird_abgelehnt()
+    public async Task Gesamter_Ablauf_Einladung_bis_Studiendekanat_mit_neuer_PDF_Fassung_nach_jeder_Unterschrift()
     {
         await using var u = await TestUmgebung.StartenAsync();
+        var (id, token) = await EinladenAsync(u);
+
+        // Studierende sehen die vorausgefüllten Angaben, noch ohne PDF
+        u.Benutzer.Aktuell = Benutzer.Niemand;
+        var vorher = await D(u, x => x.StudierendenAnsichtAsync(id, token));
+        vorher!.Antrag.Status.ShouldBe(AntragStatus.Eingeladen);
+        vorher.Antrag.Name.ShouldBe("Mia Musterstudentin");
+        vorher.Antrag.ZweitpruefendeName.ShouldBe("Prof. Dr. Lena Probst");
+        (await D(u, x => x.PdfFuerStudierendeAsync(id, token))).ShouldBeNull();
+
+        // Studierende unterschreiben mit eigenem (nicht hinterlegtem) Schlüssel
+        using var studiSchluessel = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var vorlage = await D(u, x => x.StudierendenVorlageAsync(id, token, "1234567", Wuensche));
+        vorlage.Text.ShouldContain("Format: profomat-antrag-v2");
+        vorlage.Text.ShouldContain("Matrikelnummer: 1234567");
+        vorlage.Text.ShouldContain("Zweitprüfende/r: Prof. Dr. Lena Probst [");
+        vorlage.Text.ShouldContain("Termin: -");
+        await D(u, x => x.StudierendUnterschreibenAsync(id, token, "1234567", Wuensche, vorlage.Zeitpunkt, vorlage.Text,
+            Unterschriften.MitSchluessel(studiSchluessel, vorlage.Text)));
+        (await D(u, x => x.PdfFuerStudierendeAsync(id, token))).ShouldNotBeNull();
+        var anErst = await LetzteMailAnAsync(u, "mustermann@demo.invalid");
+        anErst.Text.ShouldContain($"https://profomat.test/antraege/{id:D}");
+        anErst.AnhangDokumentId.ShouldNotBeNull();
+        (await PdfFassungenAsync(u, id)).ShouldBe(1);
+
+        // Erstprüferin: ohne Termin gesperrt; Termin ergänzen, mit hinterlegtem Schlüssel unterschreiben
+        await u.AlsAsync("mustermann");
+        (await D(u, x => x.ListeAsync(AntragFilter.MeineAufgaben))).Single().Id.ShouldBe(id);
+        (await D(u, x => x.AktionenAsync(id))).ErstpruefungUnterschreiben.Begruendung!.ShouldContain("Datum");
+        using var profSchluessel = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        await SchluesselHinterlegenAsync(u, profSchluessel);
+        await TerminFestlegenAsync(u, id);
+        var v1 = await UnterschreibenAsync(u, "mustermann", id, Signaturschritt.Erstpruefung, t => Unterschriften.MitSchluessel(profSchluessel, t));
+        v1.Text.ShouldContain("Ort: SI 0012");
+        v1.Text.ShouldContain("Terminliche Einschränkungen und Wünsche: Nicht montags.\n    Am liebsten vormittags.");
+        (await LetzteMailAnAsync(u, "probst@demo.invalid")).Betreff.ShouldStartWith("Bitte unterschreiben");
+
+        // Zweitprüferin unterschreibt im Feld → zuständiger Studiendekan im ProfOMat
+        await u.AlsAsync("probst");
+        (await D(u, x => x.ListeAsync(AntragFilter.MeineAufgaben))).Single().Id.ShouldBe(id);
+        await UnterschreibenAsync(u, "probst", id, Signaturschritt.Zweitpruefung);
+        (await D(u, x => x.AnsichtAsync(id))).Antrag.Status.ShouldBe(AntragStatus.BeimStudiendekanat);
+        (await LetzteMailAnAsync(u, "beispiel@demo.invalid")).Betreff.ShouldStartWith("Bitte bestellen");
+
+        // Studiendekan bestellt
+        var v3 = await UnterschreibenAsync(u, "beispiel", id, Signaturschritt.Studiendekanat);
+        v3.Text.ShouldContain("Ich bestelle die oben genannten Prüfenden");
+        var ansicht = await D(u, x => x.AnsichtAsync(id));
+        ansicht.Antrag.Status.ShouldBe(AntragStatus.Abgeschlossen);
+        ansicht.KetteInOrdnung.ShouldBeTrue(string.Join(" | ", ansicht.Signaturen.SelectMany(s => s.Hinweise)));
+        ansicht.Signaturen.Select(s => s.Signatur.Schritt).ShouldBe(
+            [Signaturschritt.Antragstellung, Signaturschritt.Erstpruefung, Signaturschritt.Zweitpruefung, Signaturschritt.Studiendekanat]);
+        (await PdfFassungenAsync(u, id)).ShouldBe(4);
+        await PdfSpeichernAsync(u, id, "profomat-test-drittpruefung.pdf");
+        (await LetzteMailAnAsync(u, "mustermann@demo.invalid")).Betreff.ShouldStartWith("Bestellt");
+        (await LetzteMailAnAsync(u, "probst@demo.invalid")).Betreff.ShouldStartWith("Bestellt");
+
+        // Keine automatische Mail an das Sekretariat: das Studiendekanat schickt das PDF selbst
+        (await MailsAsync(u)).ShouldNotContain(n => n.An == "sekretariat@hs.test");
+        ansicht.SekretariatEmail.ShouldBe("sekretariat@hs.test");
+    }
+
+    [Fact]
+    public async Task Studiendekanat_ausserhalb_Zweitpruefende_laden_herunter_und_melden_die_Weiterleitung()
+    {
+        await using var u = await TestUmgebung.StartenAsync();
+        await StudiendekanatEntfernenAsync(u);
+        var (id, token) = await EinladenAsync(u, mitTermin: true);
+        await StudierendAsync(u, id, token);
+        await UnterschreibenAsync(u, "mustermann", id, Signaturschritt.Erstpruefung);
+        await UnterschreibenAsync(u, "probst", id, Signaturschritt.Zweitpruefung);
+
+        var ansicht = await D(u, x => x.AnsichtAsync(id));
+        ansicht.Antrag.Status.ShouldBe(AntragStatus.ExternWeiterleiten);
+        (await D(u, x => x.ListeAsync(AntragFilter.MeineAufgaben))).Single().Id.ShouldBe(id);
+        await PdfSpeichernAsync(u, id, "profomat-test-drittpruefung-extern.pdf");
+        (await MailsAsync(u)).ShouldNotContain(n => n.Betreff.StartsWith("Bitte bestellen", StringComparison.Ordinal));
+
+        await u.AlsAsync("beispiel");
+        (await D(u, x => x.AktionenAsync(id))).Genehmigen.Erlaubt.ShouldBeFalse();
+        (await D(u, x => x.AktionenAsync(id))).WeitergeleitetMelden.Erlaubt.ShouldBeFalse();
+
+        await u.AlsAsync("probst");
+        await D(u, x => x.WeitergeleitetAsync(id));
+        (await D(u, x => x.AnsichtAsync(id))).Antrag.Status.ShouldBe(AntragStatus.Weitergeleitet);
+        (await D(u, x => x.ListeAsync(AntragFilter.Offen))).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Dekan_als_Erstpruefer_bestellt_sich_nicht_selbst_die_Vertretung_bekommt_den_Antrag()
+    {
+        await using var u = await TestUmgebung.StartenAsync();
+        var (id, token) = await EinladenAsync(u, erst: "beispiel", mitTermin: true);
+        await StudierendAsync(u, id, token);
+        await UnterschreibenAsync(u, "beispiel", id, Signaturschritt.Erstpruefung);
+        await UnterschreibenAsync(u, "probst", id, Signaturschritt.Zweitpruefung);
+
+        await u.AlsAsync("beispiel");
+        var aktionen = await D(u, x => x.AktionenAsync(id));
+        aktionen.Genehmigen.Begruendung!.ShouldContain("bestellt sich nicht selbst");
+        (await LetzteMailAnAsync(u, "rechner@demo.invalid")).Betreff.ShouldStartWith("Bitte bestellen");
+
+        await u.AlsAsync("rechner");
+        (await D(u, x => x.ListeAsync(AntragFilter.MeineAufgaben))).Single().Id.ShouldBe(id);
+        await UnterschreibenAsync(u, "rechner", id, Signaturschritt.Studiendekanat);
+        (await D(u, x => x.AnsichtAsync(id))).Antrag.Status.ShouldBe(AntragStatus.Abgeschlossen);
+    }
+
+    [Fact]
+    public async Task Rechte_Fremde_sehen_nichts_nur_Pruefende_laden_ein_nur_die_Zweitpruefende_unterschreibt()
+    {
+        await using var u = await TestUmgebung.StartenAsync();
+        await u.AlsAsync("sekretariat");
         var angaben = await AngabenAsync(u);
-        var entwurf = await u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>().EntwurfAsync(angaben));
+        (await Should.ThrowAsync<FachlicherFehler>(() => D(u, x => x.EinladenAsync(angaben, null)))).Message.ShouldContain("Prüfende");
+
+        var (id, token) = await EinladenAsync(u, mitTermin: true);
+        await u.AlsAsync("tester");
+        (await Should.ThrowAsync<FachlicherFehler>(() => D(u, x => x.AnsichtAsync(id)))).Message.ShouldContain("sehen nur");
+        (await D(u, x => x.ListeAsync(AntragFilter.Alle))).ShouldBeEmpty();
+
+        // Vor der Unterschrift der Studierenden unterschreibt niemand sonst
+        await u.AlsAsync("mustermann");
+        (await D(u, x => x.AktionenAsync(id))).ErstpruefungUnterschreiben.Begruendung!.ShouldContain("Erst unterschreibt die/der Studierende");
+
+        await StudierendAsync(u, id, token);
+        await UnterschreibenAsync(u, "mustermann", id, Signaturschritt.Erstpruefung);
+        await u.AlsAsync("mustermann");
+        (await Should.ThrowAsync<FachlicherFehler>(() => D(u, x => x.VorlageAsync(id, Signaturschritt.Zweitpruefung)))).Message.ShouldContain("Lena Probst");
+        (await D(u, x => x.AktionenAsync(id))).Festlegen.Erlaubt.ShouldBeFalse();
+
+        // Zweitprüfende brauchen die Rolle Prüfende
+        var (id2, _) = await EinladenAsync(u);
+        var sekretariat = await u.KontoAsync("sekretariat");
+        (await Should.ThrowAsync<FachlicherFehler>(() => D(u, x => x.FestlegungSpeichernAsync(id2,
+            new Festlegung(null, null, sekretariat.Id, null, null, null))))).Message.ShouldContain("nicht zur Verfügung");
+    }
+
+    [Fact]
+    public async Task Geaenderter_Text_falsche_Signatur_und_abgelaufene_Vorlage_werden_abgelehnt()
+    {
+        await using var u = await TestUmgebung.StartenAsync();
+        var (id, token) = await EinladenAsync(u);
+        u.Benutzer.Aktuell = Benutzer.Niemand;
+        var v = await D(u, x => x.StudierendenVorlageAsync(id, token, "1234567", null));
         using var k = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-        var gefaelscht = entwurf with { Text = entwurf.Text.Replace("1234567", "7654321", StringComparison.Ordinal) };
-        var fehler = await Should.ThrowAsync<FachlicherFehler>(() => u.InBereichAsync(d =>
-            d.GetRequiredService<DrittpruefungDienst>().EinreichenAsync(gefaelscht, Unterschriften.MitSchluessel(k, gefaelscht.Text), TestUmgebung.Mensch(d))));
-        fehler.Message.ShouldContain("geändert");
 
-        // Signatur über anderen Text als den angezeigten
-        var falsch = Unterschriften.MitSchluessel(k, entwurf.Text + "x");
-        (await Should.ThrowAsync<FachlicherFehler>(() => u.InBereichAsync(d =>
-            d.GetRequiredService<DrittpruefungDienst>().EinreichenAsync(entwurf, falsch, TestUmgebung.Mensch(d))))).Message.ShouldContain("passt nicht");
-    }
+        // andere Matrikelnummer als angezeigt
+        (await Should.ThrowAsync<FachlicherFehler>(() => D(u, x => x.StudierendUnterschreibenAsync(id, token, "7654321", null, v.Zeitpunkt, v.Text,
+            Unterschriften.MitSchluessel(k, v.Text))))).Message.ShouldContain("geändert");
 
-    [Fact]
-    public async Task RSA_Schluessel_wird_akzeptiert_kurze_nicht()
-    {
-        await using var u = await TestUmgebung.StartenAsync();
-        var angaben = await AngabenAsync(u);
-        var entwurf = await u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>().EntwurfAsync(angaben));
+        // Signatur über anderen Text
+        (await Should.ThrowAsync<FachlicherFehler>(() => D(u, x => x.StudierendUnterschreibenAsync(id, token, "1234567", null, v.Zeitpunkt, v.Text,
+            Unterschriften.MitSchluessel(k, v.Text + "x"))))).Message.ShouldContain("passt nicht");
+
+        // kurzer RSA-Schlüssel
         using var kurz = RSA.Create(1024);
-        (await Should.ThrowAsync<FachlicherFehler>(() => u.InBereichAsync(d =>
-            d.GetRequiredService<DrittpruefungDienst>().EinreichenAsync(entwurf, Unterschriften.MitRsa(kurz, entwurf.Text), TestUmgebung.Mensch(d))))).Message.ShouldContain("2048");
-        using var gut = RSA.Create(2048);
-        (await u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>().EinreichenAsync(entwurf, Unterschriften.MitRsa(gut, entwurf.Text), TestUmgebung.Mensch(d))))
-            .ShouldBe(entwurf.Nummer);
-    }
+        (await Should.ThrowAsync<FachlicherFehler>(() => D(u, x => x.StudierendUnterschreibenAsync(id, token, "1234567", null, v.Zeitpunkt, v.Text,
+            Unterschriften.MitRsa(kurz, v.Text))))).Message.ShouldContain("2048");
 
-    [Fact]
-    public async Task Abgelaufene_Vorlage_wird_abgelehnt()
-    {
-        await using var u = await TestUmgebung.StartenAsync();
-        var angaben = await AngabenAsync(u);
-        var entwurf = await u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>().EntwurfAsync(angaben));
+        // Erstprüferin ändert den Ort, während die Studentin unterschreibt
+        await u.AlsAsync("mustermann");
+        await D(u, x => x.FestlegungSpeichernAsync(id, new Festlegung(null, "SI 0110", null, null, null, null)));
+        u.Benutzer.Aktuell = Benutzer.Niemand;
+        (await Should.ThrowAsync<FachlicherFehler>(() => D(u, x => x.StudierendUnterschreibenAsync(id, token, "1234567", null, v.Zeitpunkt, v.Text,
+            Unterschriften.Gezeichnet())))).Message.ShouldContain("geändert");
+
+        var v2 = await D(u, x => x.StudierendenVorlageAsync(id, token, "1234567", null));
         u.Uhr.Advance(TimeSpan.FromMinutes(31));
-        (await Should.ThrowAsync<FachlicherFehler>(() => u.InBereichAsync(d =>
-            d.GetRequiredService<DrittpruefungDienst>().EinreichenAsync(entwurf, Unterschriften.Gezeichnet(), TestUmgebung.Mensch(d))))).Message.ShouldContain("abgelaufen");
+        (await Should.ThrowAsync<FachlicherFehler>(() => D(u, x => x.StudierendUnterschreibenAsync(id, token, "1234567", null, v2.Zeitpunkt, v2.Text,
+            Unterschriften.Gezeichnet())))).Message.ShouldContain("abgelaufen");
+
+        (await Should.ThrowAsync<FachlicherFehler>(() => D(u, x => x.StudierendenVorlageAsync(id, token, "12a4", null)))).Message.ShouldContain("Matrikelnummer");
     }
 
     [Fact]
     public async Task Nicht_hinterlegter_Schluessel_der_Pruefenden_wird_abgelehnt()
     {
         await using var u = await TestUmgebung.StartenAsync();
-        var (id, token) = await EinreichenAsync(u);
-        await u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>().BestaetigenAsync(id, token));
-        await u.AlsAsync("mustermann");
-        await FestlegenAsync(u, id);
-        var v = await u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>().VorlageAsync(id, Signaturschritt.Erstpruefung));
+        var (id, token) = await EinladenAsync(u, mitTermin: true);
+        await StudierendAsync(u, id, token);
         using var fremd = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-        (await Should.ThrowAsync<FachlicherFehler>(() => u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>()
-            .ErstpruefungUnterschreibenAsync(id, v.Zeitpunkt, v.Text, Unterschriften.MitSchluessel(fremd, v.Text))))).Message.ShouldContain("nicht hinterlegt");
+        (await Should.ThrowAsync<FachlicherFehler>(() => UnterschreibenAsync(u, "mustermann", id, Signaturschritt.Erstpruefung,
+            t => Unterschriften.MitSchluessel(fremd, t)))).Message.ShouldContain("nicht hinterlegt");
     }
 
     [Fact]
-    public async Task Rechte_Fremde_Pruefende_sehen_nichts_und_Dekan_bestellt_sich_nicht_selbst()
+    public async Task Rueckgabe_ueberholt_Pruefende_und_die_Kette_bleibt_gueltig()
     {
         await using var u = await TestUmgebung.StartenAsync();
-        var (id, token) = await EinreichenAsync(u, Unterschriften.Gezeichnet(), erstpruefer: "beispiel");
-        await u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>().BestaetigenAsync(id, token));
+        var (id, token) = await EinladenAsync(u, mitTermin: true);
+        await StudierendAsync(u, id, token);
+        await UnterschreibenAsync(u, "mustermann", id, Signaturschritt.Erstpruefung);
 
-        await u.AlsAsync("tester");
-        (await Should.ThrowAsync<FachlicherFehler>(() => u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>().AnsichtAsync(id))))
-            .Message.ShouldContain("sehen nur");
-        (await u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>().ListeAsync(AntragFilter.Alle))).ShouldBeEmpty();
+        await u.AlsAsync("probst");
+        await D(u, x => x.ZurueckgebenAsync(id, "Da bin ich auf einer Tagung."));
+        (await LetzteMailAnAsync(u, "mustermann@demo.invalid")).Text.ShouldContain("Da bin ich auf einer Tagung.");
 
-        // Der Studiendekan ist selbst Erstprüfer → seine Unterschrift als Studiendekan ist gesperrt, eine andere Person aus dem Studiendekanat darf
-        await u.AlsAsync("beispiel");
-        await FestlegenAsync(u, id);
-        var v = await u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>().VorlageAsync(id, Signaturschritt.Erstpruefung));
-        await u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>().ErstpruefungUnterschreibenAsync(id, v.Zeitpunkt, v.Text, Unterschriften.Gezeichnet()));
-        var aktionen = await u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>().AktionenAsync(id));
-        aktionen.Genehmigen.Erlaubt.ShouldBeFalse();
-        aktionen.Genehmigen.Begruendung!.ShouldContain("bestellt sich nicht selbst");
-        (await LetzteMailAnAsync(u, "rechner@demo.invalid")).Betreff.ShouldStartWith("Bitte bestellen");
-
-        await u.AlsAsync("rechner");
-        (await u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>().ListeAsync(AntragFilter.MeineAufgaben))).Single().Id.ShouldBe(id);
-        var v2 = await u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>().VorlageAsync(id, Signaturschritt.Studiendekanat));
-        await u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>().GenehmigenAsync(id, v2.Zeitpunkt, v2.Text, Unterschriften.Gezeichnet()));
-        (await u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>().AnsichtAsync(id))).Antrag.Status.ShouldBe(AntragStatus.Abgeschlossen);
-    }
-
-    [Fact]
-    public async Task Rueckgabe_ueberholt_die_Unterschrift_und_die_Kette_bleibt_gueltig()
-    {
-        await using var u = await TestUmgebung.StartenAsync();
-        var (id, token) = await EinreichenAsync(u, Unterschriften.Gezeichnet());
-        await u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>().BestaetigenAsync(id, token));
-        await u.AlsAsync("mustermann");
-        await FestlegenAsync(u, id);
-        var v = await u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>().VorlageAsync(id, Signaturschritt.Erstpruefung));
-        await u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>().ErstpruefungUnterschreibenAsync(id, v.Zeitpunkt, v.Text, Unterschriften.Gezeichnet()));
+        await TerminFestlegenAsync(u, id, ort: "SI 0110");
+        (await D(u, x => x.AnsichtAsync(id))).Antrag.Rueckfrage!.ShouldContain("Tagung");
+        var v = await UnterschreibenAsync(u, "mustermann", id, Signaturschritt.Erstpruefung);
+        v.Text.ShouldContain("Ort: SI 0110");
+        await UnterschreibenAsync(u, "probst", id, Signaturschritt.Zweitpruefung);
 
         await u.AlsAsync("beispiel");
-        await u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>().ZurueckgebenAsync(id, "Raum ist belegt, bitte SI 0110."));
+        await D(u, x => x.ZurueckgebenAsync(id, "Bitte anderen Raum."));
+        await UnterschreibenAsync(u, "mustermann", id, Signaturschritt.Erstpruefung);
+        await UnterschreibenAsync(u, "probst", id, Signaturschritt.Zweitpruefung);
+        await UnterschreibenAsync(u, "beispiel", id, Signaturschritt.Studiendekanat);
 
-        await u.AlsAsync("mustermann");
-        var zweit = await u.KontoAsync("probst");
-        await u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>().FestlegungSpeichernAsync(id,
-            new Festlegung(u.Uhr.GetUtcNow().AddDays(15), "SI 0110", zweit.Id, "", null, null)));
-        u.Uhr.Advance(TimeSpan.FromMinutes(5));
-        var v2 = await u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>().VorlageAsync(id, Signaturschritt.Erstpruefung));
-        v2.Text.ShouldContain("Ort: SI 0110");
-        (await u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>().AnsichtAsync(id))).Antrag.Rueckfrage.ShouldBe("Raum ist belegt, bitte SI 0110.");
-        await u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>().ErstpruefungUnterschreibenAsync(id, v2.Zeitpunkt, v2.Text, Unterschriften.Gezeichnet()));
-
-        await u.AlsAsync("beispiel");
-        var v3 = await u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>().VorlageAsync(id, Signaturschritt.Studiendekanat));
-        await u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>().GenehmigenAsync(id, v3.Zeitpunkt, v3.Text, Unterschriften.Gezeichnet()));
-        var ansicht = await u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>().AnsichtAsync(id));
-        ansicht.Signaturen.Count.ShouldBe(4);
-        ansicht.Signaturen.Count(s => s.Signatur.Ueberholt is not null).ShouldBe(1);
+        var ansicht = await D(u, x => x.AnsichtAsync(id));
+        ansicht.Antrag.Status.ShouldBe(AntragStatus.Abgeschlossen);
+        ansicht.Signaturen.Count.ShouldBe(7);
+        ansicht.Signaturen.Count(s => s.Signatur.Ueberholt is not null).ShouldBe(3);
         ansicht.KetteInOrdnung.ShouldBeTrue(string.Join(" | ", ansicht.Signaturen.SelectMany(s => s.Hinweise)));
     }
 
@@ -274,7 +342,8 @@ public sealed class DrittpruefungAblaufTests
     public async Task Veraenderung_in_der_Datenbank_faellt_auf()
     {
         await using var u = await TestUmgebung.StartenAsync();
-        var (id, token) = await EinreichenAsync(u);
+        var (id, token) = await EinladenAsync(u);
+        await StudierendAsync(u, id, token);
         await u.InBereichAsync(async d =>
         {
             var db = d.GetRequiredService<Infrastructure.Datenbank.ProfOMatDbContext>();
@@ -282,68 +351,79 @@ public sealed class DrittpruefungAblaufTests
             db.Entry(s).Property(x => x.Unterzeichner).CurrentValue = "Jemand anderes";
             await db.SaveChangesAsync();
         });
-        var ansicht = await u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>().StudierendenAnsichtAsync(id, token));
+        var ansicht = await D(u, x => x.StudierendenAnsichtAsync(id, token));
         ansicht!.KetteInOrdnung.ShouldBeFalse();
         ansicht.Signaturen.Single().Hinweise.ShouldContain(h => h.Contains("Systemsiegel ist ungültig", StringComparison.Ordinal));
     }
 
     [Fact]
-    public async Task Falsches_Token_liefert_nichts_und_Zurueckziehen_benachrichtigt()
+    public async Task Link_verfaellt_und_ein_neuer_Link_ersetzt_den_alten()
     {
         await using var u = await TestUmgebung.StartenAsync();
-        var (id, token) = await EinreichenAsync(u, Unterschriften.Gezeichnet());
-        (await u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>().StudierendenAnsichtAsync(id, token + "x"))).ShouldBeNull();
-        (await u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>().BestaetigenAsync(id, "falsch"))).ShouldBeNull();
-        await u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>().BestaetigenAsync(id, token));
-        await u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>().ZurueckziehenAsync(id, token));
-        (await LetzteMailAnAsync(u, "mustermann@demo.invalid")).Betreff.ShouldStartWith("Zurückgezogen");
-        (await u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>().StudierendenAnsichtAsync(id, token)))!.Antrag.Status
-            .ShouldBe(AntragStatus.Zurueckgezogen);
-    }
+        var (id, token) = await EinladenAsync(u);
+        (await D(u, x => x.StudierendenAnsichtAsync(id, token + "x"))).ShouldBeNull();
+        u.Uhr.Advance(TimeSpan.FromDays(15));
+        u.Benutzer.Aktuell = Benutzer.Niemand;
+        (await Should.ThrowAsync<FachlicherFehler>(() => D(u, x => x.StudierendenVorlageAsync(id, token, "1234567", null)))).Message.ShouldContain("abgelaufen");
+        (await D(u, x => x.VerfallenLassenAsync())).ShouldBe(1);
+        (await D(u, x => x.StudierendenAnsichtAsync(id, token)))!.Antrag.Status.ShouldBe(AntragStatus.Verfallen);
 
-    [Fact]
-    public async Task Unbestaetigte_Antraege_verfallen()
-    {
-        await using var u = await TestUmgebung.StartenAsync();
-        var (id, token) = await EinreichenAsync(u, Unterschriften.Gezeichnet());
-        u.Uhr.Advance(TimeSpan.FromDays(8));
-        (await u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>().VerfallenLassenAsync())).ShouldBe(1);
-        (await u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>().BestaetigenAsync(id, token)))!.Antrag.Status.ShouldBe(AntragStatus.Verfallen);
-    }
-
-    [Fact]
-    public async Task Ablehnung_geht_mit_Begruendung_an_die_Studierenden()
-    {
-        await using var u = await TestUmgebung.StartenAsync();
-        var (id, token) = await EinreichenAsync(u, Unterschriften.Gezeichnet());
-        await u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>().BestaetigenAsync(id, token));
         await u.AlsAsync("probst");
-        (await Should.ThrowAsync<FachlicherFehler>(() => u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>().AblehnenAsync(id, "x"))))
-            .Message.ShouldContain("sehen nur");
+        (await D(u, x => x.AktionenAsync(id))).LinkErneuern.Erlaubt.ShouldBeFalse();
         await u.AlsAsync("mustermann");
-        await u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>().AblehnenAsync(id, "Ich prüfe dieses Modul nicht."));
-        var mail = await LetzteMailAnAsync(u, "mia.musterstudentin@hs-osnabrueck.de");
-        mail.Text.ShouldContain("Ich prüfe dieses Modul nicht.");
+        var neu = await D(u, x => x.LinkErneuernAsync(id, 3));
+        var neuesToken = neu.Link.Split('/')[^1];
+        neuesToken.ShouldNotBe(token);
+        (await D(u, x => x.StudierendenAnsichtAsync(id, token))).ShouldBeNull();
+        await StudierendAsync(u, id, neuesToken);
+        (await D(u, x => x.StudierendenAnsichtAsync(id, neuesToken)))!.Antrag.Status.ShouldBe(AntragStatus.BeimErstpruefer);
     }
 
     [Fact]
-    public async Task Maildomain_der_Studierenden_wird_geprueft()
+    public async Task Zuruecknehmen_Zurueckziehen_und_Ablehnen()
     {
-        await using var u = await TestUmgebung.StartenAsync(new Dictionary<string, string?> { ["ProfOMat:StudierendenMailDomains:0"] = "hs-osnabrueck.de" });
-        var angaben = await AngabenAsync(u);
-        (await u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>().EntwurfAsync(angaben with { Email = "mia@stud.hs-osnabrueck.de" })))
-            .ShouldNotBeNull();
-        (await Should.ThrowAsync<FachlicherFehler>(() => u.InBereichAsync(d => d.GetRequiredService<DrittpruefungDienst>()
-            .EntwurfAsync(angaben with { Email = "mia@gmail.com" })))).Message.ShouldContain("Hochschul-Mailadresse");
+        await using var u = await TestUmgebung.StartenAsync();
+        var (id, _) = await EinladenAsync(u);
+        await D(u, x => x.EinladungZuruecknehmenAsync(id));
+        (await D(u, x => x.AnsichtAsync(id))).Antrag.Status.ShouldBe(AntragStatus.Zurueckgezogen);
+
+        // Studierende ziehen nach der Unterschrift zurück → Erstprüfende erfahren es
+        var (id2, token2) = await EinladenAsync(u);
+        await StudierendAsync(u, id2, token2);
+        await D(u, x => x.ZurueckziehenAsync(id2, token2));
+        (await LetzteMailAnAsync(u, "mustermann@demo.invalid")).Betreff.ShouldStartWith("Zurückgezogen");
+
+        // Ablehnen: nur die Erstprüferin; die Studentin sieht die Begründung über ihren Link
+        var (id3, token3) = await EinladenAsync(u);
+        await StudierendAsync(u, id3, token3);
+        await u.AlsAsync("probst");
+        (await Should.ThrowAsync<FachlicherFehler>(() => D(u, x => x.AblehnenAsync(id3, "x")))).Message.ShouldContain("Erstprüfer");
+        await u.AlsAsync("mustermann");
+        await D(u, x => x.AblehnenAsync(id3, "Ich prüfe dieses Modul nicht."));
+        (await D(u, x => x.StudierendenAnsichtAsync(id3, token3)))!.Antrag.Ablehnungsgrund.ShouldBe("Ich prüfe dieses Modul nicht.");
+    }
+
+    [Fact]
+    public async Task Postausgang_stellt_zu_und_haengt_das_PDF_an()
+    {
+        await using var u = await TestUmgebung.StartenAsync();
+        var (id, token) = await EinladenAsync(u);
+        await StudierendAsync(u, id, token);
+        var zustellung = new MerkendeZustellung();
+        var anzahl = await u.InBereichAsync(d => d.GetRequiredService<Postausgang>().ZustellenAsync(zustellung));
+        anzahl.ShouldBe(1);
+        zustellung.Gesendet.Single().An.ShouldBe("mustermann@demo.invalid");
+        zustellung.Gesendet.Single().MitAnhang.ShouldBeTrue();
+        (await MailsAsync(u)).ShouldAllBe(n => n.Versandt != null);
     }
 
     private sealed class MerkendeZustellung : IMailZustellung
     {
-        public List<(string An, string Betreff)> Gesendet { get; } = [];
+        public List<(string An, string Betreff, bool MitAnhang)> Gesendet { get; } = [];
 
         public Task<bool> ZustellenAsync(string an, string betreff, string text, (string Name, string Typ, byte[] Inhalt)? anhang, CancellationToken abbruch = default)
         {
-            Gesendet.Add((an, betreff));
+            Gesendet.Add((an, betreff, anhang is not null));
             return Task.FromResult(true);
         }
     }

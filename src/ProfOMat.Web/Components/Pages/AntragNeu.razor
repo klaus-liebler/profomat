@@ -1,0 +1,174 @@
+@page "/antraege/neu"
+@attribute [Authorize]
+@using ProfOMat.Application.Katalog
+@using ProfOMat.Application.Konten
+@using ProfOMat.Domain.Katalog
+@inject Vorgang Vorgang
+@inject Ortszeit Zeit
+
+<PageTitle>Einladung zur Drittprüfung · ProfOMat</PageTitle>
+
+<a class="pm-zurueck" href="antraege">← Zur Antragsliste</a>
+
+<div class="pm-head">
+    <div>
+        <h1>Einladung zur mündlichen Drittprüfung</h1>
+        <p>Sie füllen Name, Studiengang und Prüfung vor und schicken der bzw. dem Studierenden den Link. Dort ergänzt sie bzw. er Matrikelnummer
+            und Terminwünsche und unterschreibt. Danach ergänzen Sie Termin, Ort und Zweitprüfende und unterschreiben ebenfalls.</p>
+    </div>
+</div>
+
+@if (fehler is not null)
+{
+    <div class="pm-alert pm-crit" role="alert">@fehler</div>
+}
+
+@if (link is not null)
+{
+    <EinladungslinkKarte Link="@link" Name="@($"{vorname} {nachname}".Trim())" Pruefung="@(pruefungen.FirstOrDefault(p => p.Id == pruefungId)?.Anzeige ?? "")"
+                         Absender="@benutzer?.Name" />
+    <NaechsteSchritte Schritte="@([
+        new NaechsterSchritt("Zum Antrag", $"antraege/{link.AntragId}", "Dort sehen Sie den Stand und können Termin, Ort und Zweitprüfende ändern.", Hauptschritt: true),
+        new NaechsterSchritt("Weitere Einladung erstellen", "antraege/neu", "Neues, leeres Formular."),
+        new NaechsterSchritt("Alle Anträge", "antraege"),
+    ])" />
+}
+else
+{
+    <section class="pm-card">
+        <h2>Studierende/r</h2>
+        <div class="pm-fields">
+            <div class="pm-field">
+                <label class="pm-lbl" for="nachname">Nachname</label>
+                <input id="nachname" class="pm-input" @bind="nachname" maxlength="100" autocomplete="off" />
+            </div>
+            <div class="pm-field">
+                <label class="pm-lbl" for="vorname">Vorname</label>
+                <input id="vorname" class="pm-input" @bind="vorname" maxlength="100" autocomplete="off" />
+            </div>
+            <div class="pm-field">
+                <label class="pm-lbl">Studiengang</label>
+                <RadzenDropDown TValue="Guid?" Data="@studiengaenge" TextProperty="@nameof(Studiengang.Anzeige)" ValueProperty="@nameof(Studiengang.Id)"
+                                Value="@studiengangId" ValueChanged="@((Guid? v) => StudiengangGewaehltAsync(v))" AllowFiltering="true"
+                                FilterCaseSensitivity="FilterCaseSensitivity.CaseInsensitive" Placeholder="Studiengang wählen …" Style="width:100%" />
+                <label class="pm-check pm-small"><input type="checkbox" checked="@alteStudiengaenge" @onchange="AlteStudiengaengeAsync" /> auch ältere Prüfungsordnungen</label>
+            </div>
+            <div class="pm-field">
+                <label class="pm-lbl">Prüfung (Modul)</label>
+                <RadzenDropDown TValue="Guid?" Data="@pruefungen" TextProperty="@nameof(Pruefung.Anzeige)" ValueProperty="@nameof(Pruefung.Id)"
+                                @bind-Value="pruefungId" AllowFiltering="true" FilterCaseSensitivity="FilterCaseSensitivity.CaseInsensitive"
+                                Disabled="@(studiengangId is null)" Placeholder="@(studiengangId is null ? "zuerst Studiengang wählen" : "Prüfung wählen …")" Style="width:100%" />
+                <label class="pm-check pm-small"><input type="checkbox" checked="@altePruefungen" @onchange="AltePruefungenAsync" /> auch alte Prüfungen</label>
+            </div>
+        </div>
+        <p class="pm-small pm-muted">Diese Angaben kann die bzw. der Studierende nicht ändern. Bei einem Tippfehler die Einladung zurücknehmen und neu erstellen.</p>
+    </section>
+
+    <section class="pm-card">
+        <h2>Termin und Zweitprüfende (optional)</h2>
+        <p class="pm-small pm-muted">Steht der Termin schon fest, tragen Sie ihn hier ein; sonst ergänzen Sie ihn später vor Ihrer Unterschrift.
+            Die letzte Wiederholung findet in Präsenz statt (ATPO § 6 Abs. 1a Satz 2) und mit zwei Prüfenden (§ 16 Abs. 1 Satz 3).</p>
+        <div class="pm-fields">
+            <div class="pm-field">
+                <label class="pm-lbl">Datum und Uhrzeit</label>
+                <RadzenDatePicker TValue="DateTime?" @bind-Value="termin" ShowTime="true" HourFormat="24" DateFormat="dd.MM.yyyy HH:mm" Min="@DateTime.Today"
+                                  AllowClear="true" Style="width:100%" />
+            </div>
+            <div class="pm-field">
+                <label class="pm-lbl" for="ort">Ort (Raum)</label>
+                <input id="ort" class="pm-input" @bind="ort" maxlength="200" placeholder="z. B. SI 0012" />
+            </div>
+            <div class="pm-field">
+                <label class="pm-lbl">Zweitprüfende/r</label>
+                <RadzenDropDown TValue="Guid?" Data="@zweitAuswahl" TextProperty="@nameof(Konto.Sortiername)" ValueProperty="@nameof(Konto.Id)" @bind-Value="zweitId"
+                                AllowFiltering="true" FilterCaseSensitivity="FilterCaseSensitivity.CaseInsensitive" AllowClear="true"
+                                Placeholder="aus der Liste wählen …" Style="width:100%" />
+                <span class="pm-hilfe">Unterschreibt ebenfalls im ProfOMat und braucht dafür ein Konto.</span>
+            </div>
+            <div class="pm-field">
+                <label class="pm-lbl" for="tage">Link gültig (Tage)</label>
+                <input id="tage" class="pm-input" type="number" min="1" max="@Einladungsangaben.MaxGueltigTage" @bind="gueltigTage" style="max-width:120px" />
+                <span class="pm-hilfe">bis @Zeit.Datum(DateTimeOffset.UtcNow.AddDays(Math.Clamp(gueltigTage, 1, Einladungsangaben.MaxGueltigTage)))</span>
+            </div>
+        </div>
+        <div class="pm-row">
+            <BegruendeterButton Text="Link erzeugen" Haupt="true" Freigabe="@recht" Beschaeftigt="@beschaeftigt" Click="ErzeugenAsync" />
+        </div>
+    </section>
+}
+
+@code {
+    [CascadingParameter]
+    private Task<AuthenticationState>? Anmeldezustand { get; set; }
+
+    private Benutzer? benutzer;
+    private Freigabe recht = Freigabe.Ja;
+    private string? fehler;
+    private bool beschaeftigt;
+    private string vorname = "", nachname = "";
+    private Guid? studiengangId, pruefungId, zweitId;
+    private bool alteStudiengaenge, altePruefungen;
+    private DateTime? termin;
+    private string? ort;
+    private int gueltigTage = 14;
+    private IReadOnlyList<Studiengang> studiengaenge = [];
+    private IReadOnlyList<Pruefung> pruefungen = [];
+    private IReadOnlyList<Konto> zweitAuswahl = [];
+    private Einladungslink? link;
+
+    protected override async Task OnInitializedAsync()
+    {
+        benutzer = Anmeldezustand is null ? null : Anmeldung.AlsBenutzer((await Anmeldezustand).User);
+        recht = benutzer is null ? Freigabe.Nein("Bitte zuerst anmelden.") : DrittpruefungDienst.EinladungenErzeugen(benutzer);
+        await Vorgang.AusfuehrenAsync(async d =>
+        {
+            studiengaenge = await d.GetRequiredService<KatalogDienst>().StudiengaengeAsync(alteStudiengaenge);
+            zweitAuswahl = (await d.GetRequiredService<KontoDienst>().PruefendeAsync()).Where(k => k.Id != benutzer?.KontoId).ToList();
+            gueltigTage = d.GetRequiredService<DrittpruefungDienst>().EinladungGueltigTage;
+        });
+    }
+
+    private async Task AlteStudiengaengeAsync(ChangeEventArgs e)
+    {
+        alteStudiengaenge = e.Value is true;
+        studiengaenge = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<KatalogDienst>().StudiengaengeAsync(alteStudiengaenge));
+    }
+
+    private async Task AltePruefungenAsync(ChangeEventArgs e)
+    {
+        altePruefungen = e.Value is true;
+        await PruefungenLadenAsync();
+    }
+
+    private async Task StudiengangGewaehltAsync(Guid? id)
+    {
+        studiengangId = id;
+        pruefungId = null;
+        await PruefungenLadenAsync();
+    }
+
+    private async Task PruefungenLadenAsync()
+        => pruefungen = studiengangId is { } sg
+            ? await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<KatalogDienst>().PruefungenAsync(sg, altePruefungen))
+            : [];
+
+    private async Task ErzeugenAsync()
+    {
+        fehler = null;
+        beschaeftigt = true;
+        try
+        {
+            var angaben = new Einladungsangaben(vorname, nachname, studiengangId ?? Guid.Empty, pruefungId ?? Guid.Empty, gueltigTage);
+            var vorbelegung = new Festlegung(termin is { } t ? Zeit.AlsUtc(t) : null, ort, zweitId, null, null, null);
+            link = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<DrittpruefungDienst>().EinladenAsync(angaben, vorbelegung));
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+        }
+        finally
+        {
+            beschaeftigt = false;
+        }
+    }
+}

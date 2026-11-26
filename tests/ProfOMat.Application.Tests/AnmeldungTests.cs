@@ -128,37 +128,3 @@ public sealed class AnmeldungTests
         await Should.ThrowAsync<FachlicherFehler>(() => Mit(u, d => d.EinladungErzeugenAsync([], null, 7)));
     }
 }
-
-public sealed class MenschenpruefungTests
-{
-    private static (Menschenpruefung P, FakeTimeProvider Uhr) Neu()
-    {
-        var uhr = new FakeTimeProvider(new DateTimeOffset(2026, 11, 23, 9, 0, 0, TimeSpan.Zero));
-        return (new Menschenpruefung(uhr) { Maximum = 5_000 }, uhr);
-    }
-
-    [Fact]
-    public void Richtige_Loesung_gilt_genau_einmal()
-    {
-        var (p, _) = Neu();
-        var l = Menschenpruefung.Loesen(p.Neu());
-        p.Pruefen(l);
-        Should.Throw<FachlicherFehler>(() => p.Pruefen(l));
-    }
-
-    [Fact]
-    public void Falsche_manipulierte_abgelaufene_oder_fehlende_Loesungen_scheitern()
-    {
-        var (p, uhr) = Neu();
-        var a = p.Neu();
-        var l = Menschenpruefung.Loesen(a);
-        Should.Throw<FachlicherFehler>(() => p.Pruefen(null));
-        Should.Throw<FachlicherFehler>(() => p.Pruefen(l with { Zahl = (l.Zahl + 1) % 5_000 }));
-        Should.Throw<FachlicherFehler>(() => p.Pruefen(l with { Signatur = new string('0', 64) }));
-        Should.Throw<FachlicherFehler>(() => p.Pruefen(l with { Salz = l.Salz.Replace(".", "0.", StringComparison.Ordinal) }));
-        Should.Throw<FachlicherFehler>(() => p.Pruefen(l with { Koeder = "https://spam.example" }));
-        Should.Throw<FachlicherFehler>(() => new Menschenpruefung(uhr).Pruefen(l));   // anderer Schlüssel (z. B. nach Neustart)
-        uhr.Advance(Menschenpruefung.Gueltigkeit + TimeSpan.FromSeconds(1));
-        Should.Throw<FachlicherFehler>(() => p.Pruefen(l)).Message.ShouldContain("abgelaufen");
-    }
-}

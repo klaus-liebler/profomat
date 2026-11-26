@@ -9,7 +9,10 @@ source "$KIT/konfiguration.env"
 SICHERUNG="/root/profomat-sicherung/$(date +%Y%m%d-%H%M%S)-$(basename "$0" .sh)"
 PROGRAMM="/opt/$DIENST"
 DATEN="/var/lib/$DIENST"
-DB="$DATEN/profomat.db"
+DB="$DATEN/${DB_DATEI:-$DIENST.db}"
+MODUS="${MODUS:-framework}"
+APP="${APP:-$DIENST}"
+WARTEZEIT="${WARTEZEIT:-120}"
 LOGS="/var/log/$DIENST"
 SICHERUNGEN="/var/backups/$DIENST"
 UMGEBUNG="/etc/$DIENST/$DIENST.env"
@@ -19,6 +22,24 @@ info()  { printf '\033[1;34m»\033[0m %s\n' "$*"; }
 ok()    { printf '\033[1;32m✓\033[0m %s\n' "$*"; }
 warn()  { printf '\033[1;33m!\033[0m %s\n' "$*"; }
 fehler(){ printf '\033[1;31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
+rot()   { printf '\033[1;31m%s\033[0m\n' "$*"; }
+
+# Große rote Warnung (Datenverlust in der Anwendung, Rückweg mit Datenbank): Banner „ACHTUNG“ in Blockbuchstaben, darunter der Text.
+achtung() {
+    local zeile
+    printf '\033[1;31m'
+    cat <<'BANNER'
+
+   █████   ██████ ██   ██ ████████ ██    ██ ███    ██  ██████
+  ██   ██ ██      ██   ██    ██    ██    ██ ████   ██ ██
+  ███████ ██      ███████    ██    ██    ██ ██ ██  ██ ██   ███
+  ██   ██ ██      ██   ██    ██    ██    ██ ██  ██ ██ ██    ██
+  ██   ██  ██████ ██   ██    ██     ██████  ██   ████  ██████
+
+BANNER
+    for zeile in "$@"; do printf '  %s\n' "$zeile"; done
+    printf '\033[0m\n'
+}
 
 als_root() { [[ $EUID -eq 0 ]] || fehler "Bitte mit sudo starten: sudo bash $0"; }
 
@@ -49,7 +70,7 @@ vorlage_einspielen() {
     return 0
 }
 
-gesund() { for _ in $(seq 1 "${1:-90}"); do curl -fsS -o /dev/null "$GESUND" && return 0; sleep 1; done; return 1; }
+gesund() { for _ in $(seq 1 "${1:-90}"); do curl -fsS -o /dev/null "$GESUND" 2>/dev/null && return 0; sleep 1; done; return 1; }
 
 # Öffentlich erreichbar (ohne nginx-Passwort, wie Podium): Testanmeldung (Konto ohne Passwort wählen) und Demodaten sind verboten.
 oeffentlich_pruefen() {

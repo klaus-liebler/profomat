@@ -6,3 +6,5 @@
 *.env text eol=lf
 *.beispiel text eol=lf
 *.vorlage text eol=lf
+*.yml text eol=lf
+Dockerfile text eol=lf

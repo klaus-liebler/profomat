@@ -94,10 +94,6 @@ internal sealed class TestUmgebung : IAsyncDisposable
         return true;
     });
 
-    /// <summary>Gelöste Sicherheitsaufgabe wie aus dem Browser (öffentliches Antragsformular).</summary>
-    public static ProfOMat.Application.Betrieb.Rechenloesung Mensch(IServiceProvider d)
-        => ProfOMat.Application.Betrieb.Menschenpruefung.Loesen(d.GetRequiredService<ProfOMat.Application.Betrieb.Menschenpruefung>().Neu());
-
     public async Task<Konto> KontoAsync(string kennung) => await InBereichAsync(async d =>
     {
         var daten = d.GetRequiredService<IDaten>();

@@ -1,0 +1,243 @@
+@page "/drittpruefung/{Id:guid}/{Token}"
+@page "/drittpruefung/status/{Id:guid}/{Token}"
+@attribute [AllowAnonymous]
+@inject Vorgang Vorgang
+@inject Ortszeit Zeit
+@inject TimeProvider Uhr
+
+<PageTitle>Antrag auf mündliche Drittprüfung · ProfOMat</PageTitle>
+
+@if (ansicht is null)
+{
+    <section class="pm-card">
+        <h1>Link ungültig</h1>
+        <p>Der Link ist unvollständig oder gilt nicht mehr (zum Beispiel, weil inzwischen ein neuer Link erzeugt wurde).
+            Bitte den Link aus der neuesten Mail vollständig öffnen oder bei der Prüferin bzw. dem Prüfer nachfragen.</p>
+    </section>
+}
+else
+{
+    var a = ansicht.Antrag;
+    var offen = a.Status == AntragStatus.Eingeladen;
+    <div class="pm-head">
+        <div>
+            <h1>Antrag auf mündliche Wiederholungsprüfung</h1>
+            <p>2. Wiederholung (3. Versuch) als mündliche Prüfung mit zwei Prüfenden (ATPO § 18 Abs. 1 Satz 3, § 16 Abs. 1 Satz 3) · @a.Nummer</p>
+        </div>
+        <StatusPille Stil="@Darstellung.Stil(a.Status)">@a.Status.Anzeigename()</StatusPille>
+    </div>
+
+    @if (meldung is not null)
+    {
+        <div class="pm-alert pm-gut" role="status">@meldung</div>
+    }
+    @if (fehler is not null)
+    {
+        <div class="pm-alert pm-crit" role="alert">@fehler</div>
+    }
+
+    @if (offen)
+    {
+        <div class="pm-schritte" aria-label="Fortschritt">
+            <span class="@(vorlage is null ? "on" : "fertig")">1 · Angaben ergänzen</span>
+            <span class="@(vorlage is null ? "" : "on")">2 · Prüfen und unterschreiben</span>
+        </div>
+    }
+
+    @if (vorlage is null)
+    {
+        <div class="pm-grid-2">
+            <section class="pm-card">
+                <h2>Ihre Angaben</h2>
+                <p class="pm-small pm-muted">Von Ihrer Prüferin bzw. Ihrem Prüfer vorausgefüllt. Stimmt etwas nicht, bitte dort melden.</p>
+                <dl class="pm-dl">
+                    <dt>Name</dt><dd>@a.Nachname</dd>
+                    <dt>Vorname</dt><dd>@a.Vorname</dd>
+                    <dt>Studiengang</dt><dd>@ansicht.Studiengang.Anzeige</dd>
+                    @if (!offen)
+                    {
+                        <dt>Matrikelnummer</dt><dd>@(a.Matrikelnummer is { Length: > 0 } m ? m : "–")</dd>
+                        <dt>Terminwünsche</dt><dd >@(a.Terminwuensche ?? "–")</dd>
+                    }
+                </dl>
+            </section>
+            <section class="pm-card">
+                <h2>Prüfung</h2>
+                <dl class="pm-dl">
+                    <dt>Modul</dt><dd>@ansicht.Pruefung.Anzeige</dd>
+                    <dt>Erstprüfende/r</dt><dd>@ansicht.Erstpruefende.Anzeigename</dd>
+                    <dt>Zweitprüfende/r</dt><dd>@(a.ZweitpruefendeName ?? "wird noch festgelegt")</dd>
+                    <dt>Termin</dt><dd>@(ansicht.Termin ?? "wird noch festgelegt")</dd>
+                    <dt>Ort</dt><dd>@(a.Ort ?? "wird noch festgelegt")</dd>
+                    @if (a.Ablehnungsgrund is { } grund)
+                    {
+                        <dt>Abgelehnt von</dt><dd>@a.AbgelehntVon</dd>
+                        <dt>Begründung</dt><dd>@grund</dd>
+                    }
+                </dl>
+                @if (hatPdf)
+                {
+                    <div><a class="pm-btn @(offen ? "" : "pm-btn-haupt")" href="drittpruefung/@Id/@Token/pdf" target="_blank" data-enhance-nav="false">Formular (PDF) öffnen</a></div>
+                }
+            </section>
+        </div>
+    }
+
+    @if (offen && vorlage is null)
+    {
+        <section class="pm-card">
+            <h2>Bitte ergänzen</h2>
+            @if (!freigabe.Erlaubt)
+            {
+                <div class="pm-alert pm-warn">@freigabe.Begruendung</div>
+            }
+            else
+            {
+                <p class="pm-small pm-muted">Der Link gilt bis @Zeit.Kurz(a.GueltigBis!.Value). Der Antrag ist bis zum Ende des regulären Prüfungsanmeldezeitraums zu stellen
+                    (ATPO § 18 Abs. 1 Satz 4).</p>
+            }
+            <div class="pm-fields">
+                <div class="pm-field">
+                    <label class="pm-lbl" for="matrikel">Matrikelnummer</label>
+                    <input id="matrikel" class="pm-input" @bind="matrikel" inputmode="numeric" maxlength="10" autocomplete="off" />
+                </div>
+                <div class="pm-field pm-field-weit">
+                    <label class="pm-lbl" for="termine">Terminliche Einschränkungen und Wünsche</label>
+                    <textarea id="termine" class="pm-textarea" @bind="terminwuensche" maxlength="2000"
+                              placeholder="z. B. nicht montags; ab dem 10. vormittags; Praxissemester in …"></textarea>
+                </div>
+            </div>
+            <div class="pm-row">
+                <BegruendeterButton Text="Weiter: prüfen und unterschreiben" Haupt="true" Freigabe="@freigabe" Beschaeftigt="@beschaeftigt" Click="WeiterAsync" />
+            </div>
+        </section>
+    }
+    else if (vorlage is not null)
+    {
+        <Unterschreiben Text="@vorlage.Text" Titel="Antrag prüfen und unterschreiben" Unterzeichner="@vorlage.Unterzeichner"
+                        Knopftext="Unterschreiben und absenden" Beschaeftigt="@beschaeftigt" Unterschrieben="UnterschreibenAsync">
+            <button type="button" class="pm-btn" @onclick="() => { vorlage = null; fehler = null; }">Zurück zu den Angaben</button>
+        </Unterschreiben>
+    }
+
+    @if (!offen && ansicht.Signaturen.Any(s => s.Signatur.Ueberholt is null))
+    {
+        <section class="pm-card">
+            <h2>Unterschriften</h2>
+            <ul class="pm-zeilen">
+                @foreach (var s in ansicht.Signaturen.Where(s => s.Signatur.Ueberholt is null))
+                {
+                    <li>@s.Signatur.Schritt.Anzeigename(): @s.Signatur.Unterzeichner, @Zeit.Kurz(s.Signatur.Zeitpunkt)
+                        @if (s.Gueltig) { <StatusPille Stil="gut">geprüft</StatusPille> } else { <StatusPille Stil="krit">fehlerhaft</StatusPille> }</li>
+                }
+            </ul>
+            <p class="pm-small pm-muted">@Naechstes(a.Status)</p>
+        </section>
+    }
+
+    @if (a.Status.IstOffen() && vorlage is null)
+    {
+        <details class="pm-card">
+            <summary><b>Antrag zurückziehen</b></summary>
+            <p class="pm-muted">Solange die Prüfung nicht bestellt ist, können Sie den Antrag zurückziehen. Ihre Prüferin bzw. Ihr Prüfer wird informiert.</p>
+            <label class="pm-check"><input type="checkbox" @bind="zurueckziehenBestaetigt" /> Ja, ich ziehe den Antrag zurück.</label>
+            <div><BegruendeterButton Text="Zurückziehen" Gefahr="true" Click="ZurueckziehenAsync"
+                                     Freigabe="@(zurueckziehenBestaetigt ? Freigabe.Ja : Freigabe.Nein("Bitte zuerst das Kästchen ankreuzen."))" /></div>
+        </details>
+    }
+}
+
+@code {
+    [Parameter]
+    public Guid Id { get; set; }
+
+    [Parameter]
+    public string Token { get; set; } = string.Empty;
+
+    private AntragAnsicht? ansicht;
+    private Signiervorlage? vorlage;
+    private Freigabe freigabe = Freigabe.Ja;
+    private bool hatPdf;
+    private string? meldung, fehler;
+    private bool beschaeftigt, zurueckziehenBestaetigt;
+    private string matrikel = "";
+    private string? terminwuensche;
+
+    protected override Task OnParametersSetAsync() => LadenAsync();
+
+    private async Task LadenAsync()
+    {
+        (ansicht, hatPdf) = await Vorgang.AusfuehrenAsync(async d =>
+        {
+            var dienst = d.GetRequiredService<DrittpruefungDienst>();
+            var v = await dienst.StudierendenAnsichtAsync(Id, Token);
+            return (v, v is not null && await dienst.PdfFuerStudierendeAsync(Id, Token) is not null);
+        });
+        freigabe = ansicht?.Antrag.KannStudierendUnterschreiben(Uhr.GetUtcNow()) ?? Freigabe.Nein("Link ungültig.");
+    }
+
+    private static string Naechstes(AntragStatus status) => status switch
+    {
+        AntragStatus.BeimErstpruefer => "Als Nächstes legt Ihre Erstprüferin bzw. Ihr Erstprüfer Termin und Ort fest und unterschreibt.",
+        AntragStatus.BeimZweitpruefer => "Als Nächstes unterschreibt die Zweitprüferin bzw. der Zweitprüfer.",
+        AntragStatus.BeimStudiendekanat or AntragStatus.ExternWeiterleiten => "Als Nächstes bestellt das Studiendekanat die Prüfenden.",
+        AntragStatus.Abgeschlossen or AntragStatus.Weitergeleitet => "Das Formular geht an das Studierendensekretariat. Der Termin ist damit verbindlich.",
+        _ => "",
+    };
+
+    private async Task WeiterAsync()
+    {
+        fehler = null;
+        beschaeftigt = true;
+        try
+        {
+            vorlage = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<DrittpruefungDienst>().StudierendenVorlageAsync(Id, Token, matrikel, terminwuensche));
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+        }
+        finally
+        {
+            beschaeftigt = false;
+        }
+    }
+
+    private async Task UnterschreibenAsync(Unterschrift unterschrift)
+    {
+        var v = vorlage!;
+        fehler = null;
+        beschaeftigt = true;
+        try
+        {
+            await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<DrittpruefungDienst>()
+                .StudierendUnterschreibenAsync(Id, Token, matrikel, terminwuensche, v.Zeitpunkt, v.Text, unterschrift));
+            vorlage = null;
+            await LadenAsync();
+            meldung = "Danke! Ihr unterschriebener Antrag ist bei Ihrer Erstprüferin bzw. Ihrem Erstprüfer. Über diesen Link sehen Sie jederzeit den Stand "
+                      + "und das Formular; bitte heben Sie ihn auf.";
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+        }
+        finally
+        {
+            beschaeftigt = false;
+        }
+    }
+
+    private async Task ZurueckziehenAsync()
+    {
+        try
+        {
+            await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<DrittpruefungDienst>().ZurueckziehenAsync(Id, Token));
+            await LadenAsync();
+            meldung = "Der Antrag ist zurückgezogen.";
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+        }
+    }
+}

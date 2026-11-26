@@ -33,6 +33,17 @@ internal sealed class Daten(ProfOMatDbContext db) : IDaten
 /// <summary>Legt die Datenbank an bzw. prüft, ob die vorhandene Datei zum Modell passt.</summary>
 public static class DatenbankInitialisierung
 {
+    /// <summary>
+    /// Älteste Schemaversion, die <see cref="InitialisierenAsync"/> ohne Datenverlust aufwerten kann (Kette 7 → 8 → … unten).
+    /// Beim Entfernen einer Aufwertung nachziehen: Das Deploy-Skript entscheidet damit, ob eine vorhandene Datenbank übernommen
+    /// wird („Migration vorhanden“) oder nur mit <c>-DbNeu</c> ausgerollt werden darf.
+    /// </summary>
+    public const int AeltesteAufwertbareVersion = 7;
+
+    /// <summary>Für deploy.ps1 und ausrollen.sh (<c>ProfOMat.Web --schemainfo</c>): je eine Zeile „schlüssel=wert“.</summary>
+    public static string Schemainfo =>
+        FormattableString.Invariant($"schemaversion={ProfOMatDbContext.Schemaversion}\nmigrierbar_ab={AeltesteAufwertbareVersion}\n");
+
     public static async Task InitialisierenAsync(IServiceProvider dienste, CancellationToken abbruch = default)
     {
         await using var bereich = dienste.CreateAsyncScope();
@@ -126,6 +137,17 @@ public static class DatenbankInitialisierung
                 (typeof(ProfOMat.Domain.Finanzen.Topf), nameof(ProfOMat.Domain.Finanzen.Topf.Beschluss), "TEXT NULL"),
             ], abbruch);
             version = 17;
+        }
+
+        if (version == 17)
+        {
+            // Drittprüfung per Einladungslink: Verfahren (bisherige Anträge: altes Verfahren) und Gültigkeit des Links
+            await SpaltenErgaenzenAsync(db, 18,
+            [
+                (typeof(ProfOMat.Domain.Drittpruefung.Antrag), nameof(ProfOMat.Domain.Drittpruefung.Antrag.Verfahren), "TEXT NOT NULL DEFAULT 'Antrag'"),
+                (typeof(ProfOMat.Domain.Drittpruefung.Antrag), nameof(ProfOMat.Domain.Drittpruefung.Antrag.GueltigBis), "INTEGER NULL"),
+            ], abbruch);
+            version = 18;
         }
 
         if (version != ProfOMatDbContext.Schemaversion)

@@ -4,6 +4,7 @@
 |---|---|---|
 | 0 | Fundament: Lösung nach VibeVHS-Muster, Konten/Rollen, Katalog mit Abgleich und Alt-Status, Postausgang, Protokoll, Systemsiegel | fertig (21.11.2026) |
 | 1 | Anmeldung mündlicher Drittprüfungen: Antrag, Mailbestätigung, Festlegung, Unterschriften (Schlüssel/Feld), Bestellung, PDF an Sekretariat | fertig (21.11.2026) |
+| 1c | Drittprüfung per Einladung: Link der Prüfenden mit vorausgefüllten Angaben, Unterschrift der Studierenden, Zweitprüfende unterschreiben im ProfOMat, Studiendekanat im ProfOMat oder außerhalb, Formular-PDF der Fakultät nach jeder Unterschrift (FA-140–149); öffentliches Formular entfällt | fertig (26.11.2026) |
 | 1b | Mündliche Prüfung live: Fragen, Punkte, Bemerkungen und Zurückstellungen per Tastatur protokollieren, laufende Note nach Standardschlüssel, Protokoll-PDF mit Erst-/Zweitprüfung und festgelegter Note | fertig (23.11.2026) |
 | 2 | Klausuren: CSV-Import, Schlüssel (Ende der Matrikelnummer), Räume und Sitzplätze, Serienbrief-Datenquelle, Aufgaben/Punkte/Notenschlüssel, Veröffentlichung mit Statistik, Notenexport | fertig (21.11.2026) |
 | 2b | Grundriss-Editor, Tischnummerierung nach Muster, gestreute Platzvergabe, Serienbrief in Austeilreihenfolge, Sitzplan | fertig (21.11.2026) |

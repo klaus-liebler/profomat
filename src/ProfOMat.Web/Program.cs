@@ -19,6 +19,14 @@ var deutsch = CultureInfo.GetCultureInfo("de-DE");
 CultureInfo.DefaultThreadCurrentCulture = deutsch;
 CultureInfo.DefaultThreadCurrentUICulture = deutsch;
 
+// Für das Deploy-Skript: Schemastand dieses Programms ausgeben, ohne die Anwendung zu starten (keine Datenbank, keine Logs).
+// deploy.ps1 legt die Ausgabe als schemainfo.txt ins Paket; ausrollen.sh vergleicht sie vor jeder Änderung mit der Datenbank.
+if (args is ["--schemainfo"])
+{
+    Console.Write(DatenbankInitialisierung.Schemainfo);
+    return;
+}
+
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddSerilog((dienste, log) => log
@@ -83,6 +91,12 @@ if (hinterProxy)
         if (builder.Configuration["ReverseProxy:Host"] is { Length: > 0 } host)
         {
             o.AllowedHosts = [host];
+        }
+
+        // Modus docker: nginx erreicht die App über das Docker-Netz statt über Loopback – nur diese Netze dürfen Köpfe setzen.
+        foreach (var netz in builder.Configuration.GetSection("ReverseProxy:Netze").Get<string[]>() ?? [])
+        {
+            o.KnownIPNetworks.Add(System.Net.IPNetwork.Parse(netz));
         }
     });
 }
@@ -181,8 +195,8 @@ app.MapGet("/antraege/{id:guid}/pdf", async (Guid id, DrittpruefungDienst dienst
     }
 }).RequireAuthorization();
 
-// PDF für Studierende über ihren geheimen Link
-app.MapGet("/drittpruefung/status/{id:guid}/{token}/pdf", async (Guid id, string token, DrittpruefungDienst dienst, HttpContext http) =>
+// PDF für Studierende über ihren geheimen Link (auch alte Links „…/status/…“)
+async Task<IResult> StudierendenPdfAsync(Guid id, string token, DrittpruefungDienst dienst, HttpContext http)
 {
     var dok = await dienst.PdfFuerStudierendeAsync(id, token);
     if (dok is null)
@@ -192,7 +206,10 @@ app.MapGet("/drittpruefung/status/{id:guid}/{token}/pdf", async (Guid id, string
 
     http.Response.Headers.CacheControl = "no-store";
     return Results.File(dok.Inhalt, dok.Inhaltstyp, dok.Dateiname);
-}).AllowAnonymous();
+}
+
+app.MapGet("/drittpruefung/{id:guid}/{token}/pdf", StudierendenPdfAsync).AllowAnonymous();
+app.MapGet("/drittpruefung/status/{id:guid}/{token}/pdf", StudierendenPdfAsync).AllowAnonymous();
 
 // Protokoll der mündlichen Prüfung (nur wer es angelegt hat; prüft der Dienst)
 app.MapGet("/muendlich/{id:guid}/protokoll.pdf", async (Guid id, ProfOMat.Application.Muendlich.MuendlichDienst dienst, HttpContext http) =>

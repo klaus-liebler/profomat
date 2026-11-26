@@ -1,38 +1,46 @@
 namespace ProfOMat.Application.Drittpruefung;
 
-/// <summary>Texte der Mails im Ablauf (förmliche Anrede, kurze Sätze, immer mit direktem Link).</summary>
+/// <summary>
+/// Texte der Mails im Ablauf (förmliche Anrede, kurze Sätze, immer mit direktem Link). Studierende bekommen keine Mails:
+/// Den Einladungslink schicken die Erstprüfenden selbst, den Stand sehen Studierende über diesen Link.
+/// </summary>
 internal static class Mailtexte
 {
     private const string Fuss = "\n\n--\nDiese Nachricht wurde vom ProfOMat automatisch erzeugt.";
 
-    public static (string Betreff, string Text) Bestaetigen(AntragAnsicht a, string link, int fristTage) => (
-        $"Bitte bestätigen: Antrag auf mündliche Drittprüfung {a.Antrag.Nummer}",
-        $"""
-        Guten Tag {a.Antrag.Name},
-
-        Sie haben beantragt, die Prüfung „{a.Pruefung.Anzeige}“ ({a.Studiengang.Anzeige}) im dritten Versuch mündlich abzulegen.
-        Gewünschte/r Erstprüfende/r: {a.Erstpruefende.Anzeigename}
-
-        Bitte bestätigen Sie den Antrag innerhalb von {fristTage} Tagen über diesen Link. Erst dann geht er an die/den Erstprüfende/n:
-        {link}
-
-        Über denselben Link sehen Sie später den Stand und können den Antrag zurückziehen. Bitte geben Sie ihn nicht weiter.
-        Wenn Sie den Antrag nicht gestellt haben, ignorieren Sie diese Mail; er verfällt dann.
-        """ + Fuss);
-
     public static (string Betreff, string Text) AnErstpruefende(AntragAnsicht a) => (
-        $"Neuer Antrag auf mündliche Drittprüfung: {a.Pruefung.Titel} ({a.Antrag.Nummer})",
+        $"Unterschrieben zurück: mündliche Drittprüfung {a.Pruefung.Titel} ({a.Antrag.Nummer})",
         $"""
         Guten Tag {a.Erstpruefende.Anzeigename},
 
-        {a.Antrag.Name} (Matrikelnummer {a.Antrag.Matrikelnummer}, {a.Studiengang.Anzeige}) bittet Sie, die Prüfung
-        „{a.Pruefung.Anzeige}“ im dritten Versuch als mündliche Prüfung abzunehmen (ATPO § 18 Abs. 1 Satz 3).
+        {a.Antrag.Name} (Matrikelnummer {a.Antrag.Matrikelnummer}, {a.Studiengang.Anzeige}) hat den Antrag auf mündliche
+        Wiederholungsprüfung „{a.Pruefung.Anzeige}“ im dritten Versuch unterschrieben.
 
         Terminliche Einschränkungen und Wünsche: {a.Antrag.Terminwuensche ?? "keine angegeben"}
-        Wunsch Zweitprüfende/r: {a.Antrag.Zweitpruefungswunsch ?? "keiner angegeben"}
 
-        Bitte stimmen Sie Termin und Ort mit der/dem Zweitprüfenden ab und unterschreiben Sie dann hier:
+        Bitte ergänzen Sie Termin, Ort und Zweitprüfende (nach Rücksprache) und unterschreiben Sie dann hier:
         {a.Link}
+
+        Der aktuelle Stand des Formulars hängt an.
+        """ + Fuss);
+
+    public static (string Betreff, string Text) AnZweitpruefende(AntragAnsicht a, string anrede) => (
+        $"Bitte unterschreiben: mündliche Drittprüfung {a.Pruefung.Titel} ({a.Antrag.Nummer})",
+        $"""
+        Guten Tag {anrede},
+
+        {a.Erstpruefende.Anzeigename} hat Sie als Zweitprüferin bzw. Zweitprüfer einer mündlichen Prüfung im dritten Versuch
+        eingetragen und bereits unterschrieben:
+
+        Prüfling: {a.Antrag.Name} ({a.Antrag.Matrikelnummer}), {a.Studiengang.Anzeige}
+        Prüfung: {a.Pruefung.Anzeige}
+        Termin: {a.Termin}
+        Ort: {a.Antrag.Ort}
+
+        Bitte unterschreiben Sie hier (oder geben Sie mit Rückfrage zurück):
+        {a.Link}
+
+        Der aktuelle Stand des Formulars hängt an.
         """ + Fuss);
 
     public static (string Betreff, string Text) AnStudiendekanat(AntragAnsicht a, string anrede) => (
@@ -40,7 +48,7 @@ internal static class Mailtexte
         $"""
         Guten Tag {anrede},
 
-        {a.Erstpruefende.Anzeigename} hat die mündliche Drittprüfung festgelegt und unterschrieben:
+        die Prüfenden haben die mündliche Drittprüfung festgelegt und unterschrieben:
 
         Prüfling: {a.Antrag.Name} ({a.Antrag.Matrikelnummer}), {a.Studiengang.Anzeige}
         Prüfung: {a.Pruefung.Anzeige}
@@ -50,48 +58,16 @@ internal static class Mailtexte
 
         Bitte prüfen und unterschreiben Sie die Bestellung der Prüfenden hier:
         {a.Link}
+
+        Danach laden Sie dort das vollständige Formular herunter und schicken es an das Studierendensekretariat ({a.SekretariatEmail}).
         """ + Fuss);
 
-    public static (string Betreff, string Text) TerminAnStudierende(AntragAnsicht a) => (
-        $"Termin für Ihre mündliche Drittprüfung {a.Antrag.Nummer} (vorläufig)",
-        $"""
-        Guten Tag {a.Antrag.Name},
-
-        {a.Erstpruefende.Anzeigename} hat für „{a.Pruefung.Anzeige}“ folgenden Termin vorgesehen:
-
-        Termin: {a.Termin}
-        Ort: {a.Antrag.Ort}
-        Zweitprüfende/r: {a.Antrag.ZweitpruefendeName}
-
-        Der Termin wird verbindlich, sobald das Studiendekanat die Prüfenden bestellt hat; Sie erhalten dann eine weitere Mail.
-        Den Stand sehen Sie jederzeit über den Link aus Ihrer Bestätigungsmail.
-        """ + Fuss);
-
-    public static (string Betreff, string Text) AnSekretariat(AntragAnsicht a) => (
-        $"Mündliche Drittprüfung {a.Antrag.Matrikelnummer} – {a.Pruefung.Titel} ({a.Antrag.Nummer})",
-        $"""
-        Guten Tag,
-
-        anbei der vollständig unterschriebene Antrag auf mündliche Prüfung im dritten Versuch (ATPO § 18 Abs. 1 Satz 3):
-
-        Prüfling: {a.Antrag.Name}, Matrikelnummer {a.Antrag.Matrikelnummer}
-        Studiengang: {a.Studiengang.Anzeige}
-        Prüfung: {a.Pruefung.Anzeige}
-        Termin: {a.Termin}
-        Ort: {a.Antrag.Ort}
-        Prüfende: {a.Erstpruefende.Anzeigename} (Erstprüfung), {a.Antrag.ZweitpruefendeName} (Zweitprüfung)
-        Bestellt durch: {a.Studiendekanat?.Anzeigename}
-
-        Prüfwert (SHA-256): {a.Pruefwert}
-        Die Unterschriften sind im ProfOMat gespeichert und dort prüfbar: {a.Link}
-        """ + Fuss);
-
-    public static (string Betreff, string Text) AbgeschlossenAnBeteiligte(AntragAnsicht a, string anrede, string? link) => (
-        $"Bestätigt: mündliche Drittprüfung am {a.Termin} ({a.Antrag.Nummer})",
+    public static (string Betreff, string Text) AbgeschlossenAnPruefende(AntragAnsicht a, string anrede) => (
+        $"Bestellt: mündliche Drittprüfung am {a.Termin} ({a.Antrag.Nummer})",
         $"""
         Guten Tag {anrede},
 
-        die mündliche Prüfung im dritten Versuch ist bestellt und an das Studierendensekretariat gemeldet:
+        das Studiendekanat hat die Prüfenden der mündlichen Prüfung im dritten Versuch bestellt:
 
         Prüfling: {a.Antrag.Name}
         Prüfung: {a.Pruefung.Anzeige}
@@ -99,9 +75,10 @@ internal static class Mailtexte
         Ort: {a.Antrag.Ort}
         Prüfende: {a.Erstpruefende.Anzeigename} und {a.Antrag.ZweitpruefendeName}
 
-        Das unterschriebene Dokument hängt an.{(link is null ? "" : $"\nStand und Dokument: {link}")}
+        Das vollständig unterschriebene Formular hängt an. Stand und Unterschriften: {a.Link}
         """ + Fuss);
 
+    /// <summary>Nur für Anträge aus dem alten Verfahren (mit Mailadresse der Studierenden).</summary>
     public static (string Betreff, string Text) Abgelehnt(AntragAnsicht a) => (
         $"Ihr Antrag auf mündliche Drittprüfung {a.Antrag.Nummer} wurde abgelehnt",
         $"""
@@ -110,20 +87,19 @@ internal static class Mailtexte
         Ihr Antrag für „{a.Pruefung.Anzeige}“ wurde von {a.Antrag.AbgelehntVon} abgelehnt.
         Begründung: {a.Antrag.Ablehnungsgrund}
 
-        Sie können einen neuen Antrag stellen und dabei eine andere Erstprüferin oder einen anderen Erstprüfer wählen.
-        Bitte beachten Sie die Frist: Der Antrag ist bis zum Ende des regulären Prüfungsanmeldezeitraums zu stellen (ATPO § 18 Abs. 1 Satz 4).
-        Den Stand sehen Sie weiterhin über den Link aus Ihrer Bestätigungsmail.
+        Bitte wenden Sie sich an Ihre Prüferin bzw. Ihren Prüfer. Der Antrag ist bis zum Ende des regulären
+        Prüfungsanmeldezeitraums zu stellen (ATPO § 18 Abs. 1 Satz 4).
         """ + Fuss);
 
-    public static (string Betreff, string Text) Zurueckgegeben(AntragAnsicht a, string grund) => (
-        $"Rückfrage des Studiendekanats zur Drittprüfung {a.Antrag.Nummer}",
+    public static (string Betreff, string Text) Zurueckgegeben(AntragAnsicht a, string von, string grund) => (
+        $"Rückfrage zur mündlichen Drittprüfung {a.Antrag.Nummer}",
         $"""
         Guten Tag {a.Erstpruefende.Anzeigename},
 
-        das Studiendekanat hat die Festlegung zurückgegeben:
+        {von} hat den Antrag mit folgender Rückfrage an Sie zurückgegeben:
         {grund}
 
-        Bitte passen Sie die Angaben an und unterschreiben Sie erneut:
+        Ihre Unterschrift und die folgenden gelten damit nicht mehr. Bitte passen Sie die Angaben an und unterschreiben Sie erneut:
         {a.Link}
         """ + Fuss);
 

@@ -10,9 +10,9 @@ internal static class Darstellung
 {
     public static string Stil(AntragStatus status) => status switch
     {
-        AntragStatus.Abgeschlossen => "gut",
-        AntragStatus.BeimErstpruefer or AntragStatus.BeimStudiendekanat => "info",
-        AntragStatus.WartetAufBestaetigung => "warn",
+        AntragStatus.Abgeschlossen or AntragStatus.Weitergeleitet => "gut",
+        AntragStatus.BeimErstpruefer or AntragStatus.BeimZweitpruefer or AntragStatus.BeimStudiendekanat => "info",
+        AntragStatus.WartetAufBestaetigung or AntragStatus.Eingeladen or AntragStatus.ExternWeiterleiten => "warn",
         AntragStatus.Abgelehnt or AntragStatus.Verfallen => "krit",
         _ => "neutral",
     };
