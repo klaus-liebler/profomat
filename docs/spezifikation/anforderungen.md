@@ -31,6 +31,19 @@ Aufbau, Leitlinien und Bausteine wie VibeVHS/FraktionPerfekt. FA-/NFA-Nummern we
 | FA-022 | Persönlicher Postausgang („Mails zum Versenden“): Mails, die Prüfende selbst verschicken (z. B. Themenbestätigungen), legt ProfOMat als Entwürfe ab. „In Outlook öffnen“ liefert eine .eml-Datei mit `X-Unsent: 1`; das Desktop-Outlook öffnet sie als neue Mail (Empfänger, Betreff, Text, Signatur), es bleibt nur „Senden“. ProfOMat merkt sich das Öffnen; Entwürfe lassen sich als erledigt abhaken. Jede Person sieht nur ihre eigenen Entwürfe. | umgesetzt |
 | FA-023 | Optische Mailsignatur je Konto (Profil): Upload der Outlook-Signatur (`%APPDATA%\Microsoft\Signatures`, .htm, optional .txt und Bilder). Das HTML wird bereinigt (keine Skripte, Ereignisse, eingebetteten Rahmen, externen Bilder oder Stilverweise); Bilder (Dateien oder direkt eingebettete `data:`-Bilder) gehen als eingebettete Anhänge (cid) mit. Die Entwürfe enthalten Text- und HTML-Fassung. Testmail an sich selbst zum Prüfen. Die kryptografische Signatur (S/MIME) setzt Outlook beim Senden (Trust Center: „Ausgehenden Nachrichten digitale Signatur hinzufügen“); der private Schlüssel erreicht ProfOMat nie. | umgesetzt (S/MIME bei .eml in Outlook noch zu prüfen) |
 
+## Sicherheit und Betrieb (nicht-funktional, Zielbild Stufe 2)
+
+| Nr. | Anforderung | Stand |
+|---|---|---|
+| NFA-001 | Feldverschlüsselung besonders schutzbedürftiger Daten (Matrikelnummern in Drittprüfungen, Klausuren, Hausarbeiten und mündlichen Prüfungen; Endnote, Abweichungsbegründung und Bemerkungen der mündlichen Prüfungen): AES-256-GCM in der Anwendung, transparent für den Fachcode; jeder Wert trägt die Schlüsselversion (Wechsel im laufenden Betrieb, Bestand wird beim Start neu verschlüsselt). Matrikelnummern deterministisch (eindeutige Indizes), sonst zufällige Nonce. Schlüssel aus systemd-Credential bzw. Docker Secret. | umgesetzt |
+| NFA-002 | Sicherheitsprotokoll getrennt vom Betriebslog und vom fachlichen Protokoll: Anmeldungen, Fehlversuche, Sperren, Rechte- und Rollenänderungen, Exporte (jeder Download), Konfigurationsänderungen (beim Start). Nur anfügen (Trigger in der Datenbank), hash-verkettet, Prüfung der Kette; Personen nur als Konto-Id; zusätzlich als strukturiertes Log-Ereignis für ein SIEM. | umgesetzt |
+| NFA-003 | Rolle „Revision“ (nur lesend): Sicherheitsprotokoll mit Kettenprüfung, Rollen-Rechte-Matrix, wirksame Schalter, Sicherheitsbericht (JSON). Keine fachlichen Inhalte; zweiter Faktor Pflicht. | umgesetzt |
+| NFA-004 | Gesundheit: `/gesund` (wie bisher), `/gesund/live`, `/gesund/bereit` (Datenbank, freier Platz, Zertifikatsablauf), `/gesund/version`. | umgesetzt |
+| NFA-005 | Telemetrie: OpenTelemetry (Traces und Metriken per OTLP, Ziel per Konfiguration, Standard aus); Prometheus-Endpunkt `/metrics` nur aus konfigurierten Monitoring-Netzen; Logs auf Wunsch als JSON ins Journal; Tokens in Pfaden werden in Logs und Traces maskiert. | umgesetzt |
+| NFA-006 | Verwaltung je Instanz auf Netze beschränkbar (`Sicherheit:VerwaltungNetze`, Standard aus); persönliche Links der Studierenden bleiben von überall erreichbar. | umgesetzt |
+| NFA-007 | Sicherung: Rücksicherungsprobe bei jeder Sicherung, Verschlüsselung mit `age` (öffentlicher Schlüssel konfigurierbar, privater offline), Kopie außer Haus (rsync/rclone), Statusdatei für den Sicherheitsbericht. | umgesetzt (auf dem Server noch nicht eingerichtet) |
+| NFA-008 | Pakete: SHA-256-Prüfsumme und Stückliste (SBOM, CycloneDX) je Version; `ausrollen.sh` prüft die Prüfsumme vor jeder Änderung. `security.txt` (RFC 9116) aus der Konfiguration; befristetes Serverkonto `pruefer` (nur lesende sudo-Befehle). | umgesetzt |
+
 ## Iteration 1 – Anmeldung mündlicher Drittprüfungen (ATPO § 18 Abs. 1 Satz 3)
 
 | Nr. | Anforderung | Stand |

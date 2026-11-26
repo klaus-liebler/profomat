@@ -405,3 +405,5 @@ kbd { font-family: var(--pm-mono); font-size: 11.5px; border: 1px solid var(--pm
     .pm-login { padding: 16px; }
     .pm-anmeldekacheln { grid-template-columns: minmax(0, 1fr); }
 }
+
+.pm-stack { display: flex; flex-direction: column; gap: 16px; min-width: 0; }

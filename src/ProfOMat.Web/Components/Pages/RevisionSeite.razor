@@ -1,0 +1,114 @@
+@page "/revision"
+@attribute [Authorize]
+@using ProfOMat.Application.Betrieb
+@using ProfOMat.Domain.Betrieb
+@inject Vorgang Vorgang
+@inject Ortszeit Zeit
+@inject IConfiguration Konfiguration
+@inject Anmeldeangebot Angebot
+@* Für Prüfende (Rolle Revision) und die Systemverwaltung: nur lesend – Konfiguration, Rollen und Rechte, Sicherheitsprotokoll. Keine Inhalte. *@
+
+<PageTitle>Revision · ProfOMat</PageTitle>
+
+<div class="pm-head">
+    <div>
+        <h1>Revision</h1>
+        <p>Nur lesend: wirksame Sicherheitsschalter, Rollen und Rechte sowie das Sicherheitsprotokoll (nur anfügen, hash-verkettet).
+            Fachliche Inhalte (Anträge, Noten, Namen) erscheinen hier nicht.</p>
+    </div>
+</div>
+
+@if (fehler is not null)
+{
+    <div class="pm-alert pm-crit" role="alert">@fehler</div>
+}
+else if (eintraege is not null)
+{
+    <div class="pm-grid-2">
+        <section class="pm-card">
+            <h2>Sicherheitsprotokoll</h2>
+            @if (pruefung is { } k)
+            {
+                <div class="pm-alert @(k.Intakt ? "pm-gut" : "pm-crit")" role="status">
+                    @(k.Intakt ? $"Kette intakt: {k.Anzahl} Einträge geprüft." : $"Kette NICHT intakt bei Eintrag {k.ErsterFehler}: {k.Grund}.")
+                </div>
+            }
+            <div class="pm-row">
+                <button type="button" class="pm-btn" @onclick="PruefenAsync">Kette prüfen</button>
+                <a class="pm-btn" href="revision/sicherheitsbericht.json" download data-enhance-nav="false">Sicherheitsbericht (JSON)</a>
+            </div>
+            <div class="pm-tbl">
+                <table>
+                    <thead><tr><th>Nr.</th><th>Zeit</th><th>Art</th><th>Konto</th><th>Ereignis</th></tr></thead>
+                    <tbody>
+                        @foreach (var e in eintraege)
+                        {
+                            <tr>
+                                <td class="pm-mono">@e.Nummer</td>
+                                <td class="pm-nowrap">@Zeit.Kurz(e.Zeitpunkt)</td>
+                                <td>@e.Art</td>
+                                <td class="pm-mono">@(e.KontoId is { } id ? Pseudonym.Id(id) : "–")</td>
+                                <td>@e.Text.Split('\n')[0]</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+            <p class="pm-small pm-muted">Die letzten @eintraege.Count Einträge. Konten erscheinen als Pseudonym; im Bericht stehen die Konto-Ids.</p>
+        </section>
+        <div class="pm-stack">
+            <section class="pm-card">
+                <h2>Rollen und Rechte</h2>
+                <div class="pm-tbl">
+                    <table>
+                        <thead><tr><th>Bereich</th><th>Rollen</th></tr></thead>
+                        <tbody>
+                            @foreach (var z in RevisionDienst.Matrix)
+                            {
+                                <tr><td>@z.Bereich<br /><span class="pm-small pm-muted">@z.Hinweis</span></td>
+                                    <td>@string.Join(", ", z.Rollen.Select(r => r.Anzeigename()))</td></tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+            <section class="pm-card">
+                <h2>Wirksame Konfiguration</h2>
+                <p class="pm-small">Anmeldeverfahren: <b>@string.Join(", ", Angebot.Verfahren.Order())</b>@(Angebot.Testanmeldung ? " · Testanmeldung an" : "")</p>
+                <div class="pm-tbl">
+                    <table>
+                        <thead><tr><th>Schalter</th><th>Wert</th></tr></thead>
+                        <tbody>
+                            @foreach (var s in Sicherheitsereignisse.Schalter(Konfiguration))
+                            {
+                                <tr><td class="pm-mono">@s.Key</td><td class="pm-mono">@s.Value</td></tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+                <p class="pm-small pm-muted">Geheimnisse erscheinen nur als „(gesetzt)“.</p>
+            </section>
+        </div>
+    </div>
+}
+
+@code {
+    private IReadOnlyList<Sicherheitsereignis>? eintraege;
+    private Kettenpruefung? pruefung;
+    private string? fehler;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            eintraege = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<RevisionDienst>().ProtokollAsync());
+        }
+        catch (FachlicherFehler ex)
+        {
+            fehler = ex.Message;
+        }
+    }
+
+    private async Task PruefenAsync()
+        => pruefung = await Vorgang.AusfuehrenAsync(d => d.GetRequiredService<RevisionDienst>().PruefenAsync());
+}

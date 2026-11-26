@@ -87,6 +87,11 @@ public static class Rechte
         ? Domain.Gemeinsam.Freigabe.Ja
         : Domain.Gemeinsam.Freigabe.Nein("Den Katalog pflegen Systemverwaltung und Studiendekanat.");
 
+    /// <summary>Revision: Konfiguration, Rollen und Rechte, Sicherheitsprotokoll und Sicherheitsbericht – nur lesend, keine Inhalte.</summary>
+    public static Domain.Gemeinsam.Freigabe Revision(Benutzer wer) => wer.Hat(Rolle.Revision) || wer.Hat(Rolle.Systemverwaltung)
+        ? Domain.Gemeinsam.Freigabe.Ja
+        : Domain.Gemeinsam.Freigabe.Nein("Nur für Revision und Systemverwaltung.");
+
     /// <summary>Alle Anträge sehen (nicht nur die eigenen).</summary>
     public static bool AlleAntraegeSehen(Benutzer wer)
         => wer.Hat(Rolle.Systemverwaltung) || wer.Hat(Rolle.Studiendekanat) || wer.Hat(Rolle.Studierendensekretariat);

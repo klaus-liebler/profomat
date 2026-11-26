@@ -115,7 +115,7 @@ public sealed record ExterneIdentitaet(string Anbieter, string Schluessel, strin
 public static class Anmelderegeln
 {
     /// <summary>Rollen mit Verwaltungs- oder Freigaberechten: zweiter Faktor Pflicht.</summary>
-    public static readonly IReadOnlySet<Rolle> RollenMitPflichtZumZweitenFaktor = new HashSet<Rolle> { Rolle.Systemverwaltung, Rolle.Studiendekanat };
+    public static readonly IReadOnlySet<Rolle> RollenMitPflichtZumZweitenFaktor = new HashSet<Rolle> { Rolle.Systemverwaltung, Rolle.Studiendekanat, Rolle.Revision };
 
     public static bool ZweiterFaktorPflicht(IEnumerable<Rolle> rollen) => rollen.Any(RollenMitPflichtZumZweitenFaktor.Contains);
 

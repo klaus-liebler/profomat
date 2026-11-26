@@ -10,8 +10,8 @@
 | Webserver (nginx) | TLS 1.2/1.3, Umleitung auf HTTPS, `server_tokens off`; HSTS, CSP und Rate-Limits setzt die Anwendung, nicht nginx. |
 | Anwendung | Rechte im Dienst, EF Core, Antiforgery, strenge CSP; Kestrel nur auf `127.0.0.1:5082`. |
 | Anmeldung | ASP.NET Core Identity: je Instanz schaltbar SAML (Shibboleth), OIDC, Passwort + TOTP (Pflicht für Systemverwaltung und Studiendekanat), Passkeys; Sperre nach Fehlversuchen, Sicherheitsstempel. Anbindung an den IdP der Hochschule noch offen. |
-| Daten | SQLite-Datei nur für den Dienstbenutzer lesbar; **keine Feldverschlüsselung**, Sicherungen unverschlüsselt. |
-| Betrieb | systemd mit Härtung, Sicherung vor jedem Update und täglich, automatischer Rückweg beim Ausrollen; Logs nur lokal. |
+| Daten | SQLite-Datei nur für den Dienstbenutzer lesbar; **Feldverschlüsselung** (AES-256-GCM) für Matrikelnummern und Noten mündlicher Prüfungen; Sicherungen mit `age` verschlüsselbar (auf dem Server noch einzurichten). |
+| Betrieb | systemd mit Härtung, Sicherung mit Rücksicherungsprobe, automatischer Rückweg; Gesundheitsendpunkte, OpenTelemetry und `/metrics` vorbereitet (Standard aus); Sicherheitsprotokoll und Rolle Revision. |
 
 Ausführlich: [sicherheit-und-betrieb.md](../sicherheit-und-betrieb.md).
 
@@ -164,6 +164,21 @@ Noch offen:
    zusätzlich die **Matrikelnummer** (`schacPersonalUniqueCode`) – mit Begründung (Datenminimierung) und Eintrag im Verzeichnis der
    Verarbeitungstätigkeiten (FA-102).
 3. Keine direkte LDAP-Anmeldung: Dabei liefen die Hochschulpasswörter durch die Anwendung.
+
+## Sicherheit und Betrieb (Zielbild Stufe 2)
+
+| Baustein | Wo | Was |
+|---|---|---|
+| Feldverschlüsselung | `Infrastructure/Sicherheit/Feldverschluesselung.cs`, Konverter in `ProfOMatDbContext` | AES-256-GCM, Format `enc:v<Version>:<Base64(Nonce|Geheimtext|Tag)>`; Schlüssel je Version per HKDF (getrennt für AES und Nonce); Matrikelnummern deterministisch (Nonce = HMAC des Klartexts), sonst zufällig; `DatenbankInitialisierung.BestandVerschluesselnAsync` verschlüsselt Klartext und ältere Versionen beim Start |
+| Sicherheitsprotokoll | `Domain/Betrieb` (`Sicherheitsereignis`), `Infrastructure/Sicherheit/Sicherheitsprotokoll.cs`, Port `ISicherheitsprotokoll` | eigener DbContext je Eintrag, Nummern lückenlos, Hash über Nummer/Zeit/Art/Konto/Text/Vorgänger; Trigger verbieten UPDATE/DELETE; Einträge aus `KontoDienst`, `SicherheitDienst`, Anmeldeseiten, Download-Endpunkten (`Exportprotokoll`) und dem Start (`Sicherheitsereignisse.KonfigurationPruefenAsync`) |
+| Revision | `Application/Betrieb/Revision.cs`, `/revision`, `/revision/sicherheitsbericht.json` | `Rechte.Revision` (Revision, Systemverwaltung); Rechte-Matrix `RevisionDienst.Matrix` – bei neuen Rechten nachziehen |
+| Betrieb | `Web/Betrieb/Betriebsdienste.cs`, `Infrastructure/Betrieb/Betriebsregeln.cs` | OpenTelemetry, Gesundheitsprüfungen, `/metrics` mit Netzfilter, `security.txt`, Pfadmaske |
+| Netzbeschränkung | `Web/Sicherheit/Netzbeschraenkung.cs` | vor dem Routing; öffentlich bleiben Studierendenlinks, Blazor, statische Dateien, Gesundheit |
+
+**Entscheidung (26.11.2026): Signaturtexte und Postausgang bleiben im Klartext.** `Signaturen.Inhalt` ist der unterschriebene Inhalt
+(Format `profomat-antrag-v1`) samt Matrikelnummer; er muss unverändert und ohne Schlüssel prüfbar bleiben – auch in einer
+Sicherung, zu der der Feldschlüssel fehlt. Gleiches gilt für die Mails im Postausgang (Nachweis, was verschickt wurde). Geschützt sind
+diese Daten über die Laufwerksverschlüsselung des Servers und die verschlüsselten Sicherungen (`age`), nicht über die Feldverschlüsselung.
 
 ## Studiengänge und Prüfungen aus dem Hochschulsystem
 

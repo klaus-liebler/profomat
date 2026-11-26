@@ -16,8 +16,8 @@ Stand: 26.11.2026, abgeglichen mit Code und Konfiguration im Repository (nicht m
 | Webserver (nginx) | TLS 1.2/1.3, Umleitung auf HTTPS, `server_tokens off`; HSTS, CSP und Rate-Limits setzt die Anwendung, nicht nginx. |
 | Anwendung | Rechte im Dienst, EF Core, Antiforgery, strenge CSP; Kestrel nur auf `127.0.0.1:5082`. |
 | Anmeldung | ASP.NET Core Identity: Verfahren je Instanz schaltbar (SAML, OIDC, Passwort + TOTP, Passkey); TOTP Pflicht für Systemverwaltung und Studiendekanat; Sperre nach Fehlversuchen. **SAML an den IdP der Hochschule noch nicht angebunden.** |
-| Daten | SQLite-Datei nur für den Dienstbenutzer lesbar; **keine Feldverschlüsselung**, Sicherungen unverschlüsselt. |
-| Betrieb | systemd mit Härtung, Sicherung vor jedem Update und täglich, automatischer Rückweg beim Ausrollen; Logs nur lokal. |
+| Daten | SQLite-Datei nur für den Dienstbenutzer lesbar; **Feldverschlüsselung** (AES-256-GCM) für Matrikelnummern und Noten mündlicher Prüfungen; Sicherungen mit `age` verschlüsselbar (auf dem Server noch einzurichten). |
+| Betrieb | systemd mit Härtung, Sicherung mit Rücksicherungsprobe, automatischer Rückweg; Gesundheitsendpunkte, OpenTelemetry und `/metrics` vorbereitet (Standard aus); Sicherheitsprotokoll und Rolle Revision. |
 
 ## 1. Netz und Erreichbarkeit
 
@@ -38,7 +38,7 @@ Stand: 26.11.2026, abgeglichen mit Code und Konfiguration im Repository (nicht m
 | `server_tokens off` | ✅ | `liebler.conf`. |
 | Rate-Limit | ⚠️ | Nur in der Anwendung (Rate-Limit je IP für `/anmelden`, `/einladung`, `/Saml2`, `/signin-oidc` und die Studierendenlinks, Anmeldebremse je IP und Kennung, Sperre des Kontos). Kein `limit_req` in nginx. |
 | `client_max_body_size` | ✅ | 10 MB (`profomat-proxy.conf`). |
-| IP-Allowlist | ❌ | Nicht gesetzt (siehe Netz). |
+| IP-Allowlist | ⚠️ | In der Anwendung schaltbar (`Sicherheit:VerwaltungNetze`, Studierendenlinks bleiben öffentlich); auf dem Server nicht gesetzt. |
 
 ## 3. Anwendung (ASP.NET Core)
 
@@ -75,9 +75,9 @@ Grundlage ist ASP.NET Core Identity mit eigenem Speicher über das Kontomodell (
 | Punkt | Stand | Umsetzung / offen |
 |---|---|---|
 | Dateirechte | ✅ | `UMask=0027`, Daten nur für den Dienstbenutzer. |
-| Feldverschlüsselung | ❌ | Keine Spalte ist verschlüsselt. Kandidaten: Matrikelnummern, Noten, Bemerkungen aus mündlichen Prüfungen. Geplant nach dem SchoolCraft-Muster (AES-GCM, Schlüssel außerhalb der Datenbank). |
+| Feldverschlüsselung | ✅ | AES-256-GCM mit Schlüsselversion für Matrikelnummern (Drittprüfung, Klausur, Hausarbeit, mündliche Prüfung) sowie Endnote, Abweichungsbegründung und Bemerkungen mündlicher Prüfungen. Signaturtexte und Mails im Postausgang bleiben bewusst im Klartext: Der unterschriebene Inhalt muss unverändert und ohne Schlüssel prüfbar bleiben; geschützt über Laufwerks- und Sicherungsverschlüsselung (Entscheidung 26.11.2026). **Offen:** Schlüssel liegt ohne systemd-Credential im Schlüsselordner (und damit in dessen Sicherung) – auf dem Server als Credential ablegen. |
 | Laufwerksverschlüsselung | ❌ | Nicht durch das Kit eingerichtet (Sache des Servers). |
-| Sicherungen verschlüsselt | ❌ | Liegen als Datei in `/var/backups/profomat` (nur root). |
+| Sicherungen verschlüsselt | ⚠️ | `sicherung.sh` verschlüsselt mit `age`, sobald `/etc/profomat/sicherung.env` einen öffentlichen Schlüssel nennt; Kopie außer Haus per rsync/rclone. Auf dem Server noch nicht eingerichtet. Sicherungen vor Updates bleiben für den Rückweg unverschlüsselt (0640). |
 | Systemsiegel-, Cookie- und SAML-Schlüssel | ✅ | `/var/lib/profomat/schluessel` (auch die Data-Protection-Schlüssel für die TOTP-Geheimnisse und `saml-sp.pfx`), nie im Repository, in der Sicherung enthalten. Geht der Ordner verloren, müssen alle ihren zweiten Faktor neu einrichten. |
 | Personendaten in Logs | ✅ | Nur Pseudonyme und Antragsnummern (Regel in CLAUDE.md). |
 
@@ -88,15 +88,25 @@ Grundlage ist ASP.NET Core Identity mit eigenem Speicher über das Kontomodell (
 | Dienst | ✅ | systemd mit `NoNewPrivileges`, `ProtectSystem=strict`, `PrivateTmp` u. a. |
 | Ausrollen | ✅ | `deploy/server/deploy.ps1` + `schritte/ausrollen.sh`: Prüfphase ohne Änderung (Programme, Port, Platz, Unit, nginx, Datenbank), Sicherung, nur ergänzende Konfigurationsänderungen (systemd-Drop-in), Startbeobachtung mit Countdown und sofortigem Rückweg bei Absturz oder Fehler im Log, Rückweg von Hand (`-Zurueck`). Drei Arten: framework, self-contained, docker. Docker-Modus bisher nur in der Simulation geprüft, nicht auf einem echten Server. |
 | Datenbankschema | ⚠️ | `EnsureCreated` mit Schemaversion und handgeschriebenen Aufwertungen ab Version 7; das Deploy-Skript prüft vorher, ob die vorhandene Datenbank migrierbar ist, sonst nur `-DbNeu` mit roter Warnung. **Keine EF-Migrationen.** |
-| Sicherung | ✅ | Vor jedem Update und täglich 02:00 Uhr (Datenbank und Schlüssel). |
+| Sicherung | ✅ | Vor jedem Update und täglich 02:00 Uhr (Datenbank und Schlüssel), jedes Mal mit Rücksicherungsprobe (integrity_check, Schema, Tabellen) und Statusdatei. |
 | Patch-Management | ⚠️ | .NET-Runtime per Timer (VibeVHS-Kit), OS über Ubuntu-Updates; NuGet-Prüfung `dotnet list package --vulnerable` nur von Hand. |
-| Logs | ⚠️ | Serilog in `/var/log/profomat` (30 Tage) und journald. **Keine Anbindung an einen zentralen Log-Server** (syslog/GELF/OTel geplant). |
-| Monitoring | ⚠️ | `/profomat/gesund` antwortet „ok“. Keine Metriken (Prometheus/OTel geplant). |
+| Logs | ⚠️ | Serilog in `/var/log/profomat` (30 Tage) und journald, auf Wunsch als JSON (`Betrieb:Logformat=json`); Tokens in Pfaden maskiert. OTLP vorbereitet (`Betrieb:Otlp:Endpunkt`). **Keine Anbindung an einen zentralen Log-Server eingerichtet.** |
+| Monitoring | ✅ | `/gesund` (wie bisher), `/gesund/live`, `/gesund/bereit` (Datenbank, Platz, Zertifikatsablauf), `/gesund/version`; Prometheus `/metrics` nur aus `Betrieb:Metriken:Netze` (Standard aus). |
+
+## 7. Prüfungen und Audit
+
+| Punkt | Stand | Umsetzung / offen |
+|---|---|---|
+| Sicherheitsprotokoll | ✅ | Nur anfügen (Trigger), hash-verkettet, Kettenprüfung auf `/revision`; Anmeldungen, Fehlversuche, Rechte, Exporte, Konfigurationsänderungen. |
+| Rolle Revision | ✅ | Nur lesend: Protokoll, Rechte-Matrix, Schalter, Sicherheitsbericht (`/revision/sicherheitsbericht.json`). |
+| Serverkonto `pruefer` | ✅ | `deploy/server/werkzeuge/pruefer-konto.sh anlegen <tage> <schluessel.pub>` – befristet, nur lesende sudo-Befehle. |
+| security.txt | ⚠️ | Aus `Betrieb:SecurityTxt:Kontakt`; auf dem Server noch nicht gesetzt. |
+| Pakete | ✅ | SHA-256 und SBOM (CycloneDX) je Paket aus `deploy.ps1`; `ausrollen.sh` prüft die Prüfsumme. |
 
 ## Nächste Schritte
 
 1. SAML beim IdP der Hochschule registrieren (lokaler SP oder DFN-AAI), Attributfreigabe, REFEDS-MFA klären; danach `Anmeldung:Verfahren` auf dem Server erweitern.
-2. Feldverschlüsselung für Prüfungsdaten.
+2. Auf dem Server einrichten: Feldschlüssel als systemd-Credential, `age`-Sicherung mit Kopie außer Haus, Log-Weiterleitung, `security.txt` (docs/deploy.md, Abschnitt Stufe 2).
 3. EF-Migrationen statt `-DbNeu`.
-4. Log-Versand und Metriken für den Hochschulbetrieb.
+4. Laufwerksverschlüsselung (LUKS bzw. Hypervisor) für den Server klären – sie schützt auch Signaturtexte und Postausgang.
 5. HSTS und `limit_req` in nginx, verschlüsselte Sicherungen.

@@ -189,7 +189,8 @@ internal static class AnmeldeRegistrierung
 /// Letzter Schritt jeder Anmeldung (Passwort, Passkey, SAML, OIDC, Test): Konto aktiv und nicht vorübergehend gesperrt? Zweiter Faktor nötig
 /// (TOTP-Pflicht für Systemverwaltung und Studiendekanat)? Dann Zwischen-Cookie von Identity und weiter zur Code-Abfrage, sonst Sitzung.
 /// </summary>
-internal sealed class Anmeldeabschluss(SignInManager<Konto> anmeldung, KontoDienst konten, IOptions<AnmeldeOptionen> optionen, ILogger<Anmeldeabschluss> log)
+internal sealed class Anmeldeabschluss(SignInManager<Konto> anmeldung, KontoDienst konten, IOptions<AnmeldeOptionen> optionen, ILogger<Anmeldeabschluss> log,
+    ProfOMat.Web.Betrieb.Kennzahlen kennzahlen)
 {
     /// <returns>Ziel relativ zur Pfad-Basis (ohne führenden Schrägstrich).</returns>
     public async Task<string> AbschliessenAsync(HttpContext http, Konto konto, Anmeldeart art, bool mfaNachgewiesen, string? ruecksprung)
@@ -210,6 +211,7 @@ internal sealed class Anmeldeabschluss(SignInManager<Konto> anmeldung, KontoDien
 
         await anmeldung.SignInWithClaimsAsync(konto, isPersistent: false, Claims(art, mfaNachgewiesen));
         await konten.AnmeldungProtokollierenAsync(konto, art, mfaNachgewiesen);
+        kennzahlen.Anmeldungen.Add(1, new KeyValuePair<string, object?>("verfahren", art.ToString()));
         log.LogInformation("Anmeldung ({Art}{Mfa}) Konto {Konto}", art, mfaNachgewiesen ? ", MFA" : "", Pseudonym.Id(konto.Id));
         return ziel;
     }
@@ -233,6 +235,7 @@ internal sealed class Anmeldeabschluss(SignInManager<Konto> anmeldung, KontoDien
     public async Task ZweiterFaktorErledigtAsync(Konto konto, Anmeldeart art)
     {
         await konten.AnmeldungProtokollierenAsync(konto, art, zweiterFaktor: true);
+        kennzahlen.Anmeldungen.Add(1, new KeyValuePair<string, object?>("verfahren", art.ToString()));
         log.LogInformation("Anmeldung ({Art}, zweiter Faktor) Konto {Konto}", art, Pseudonym.Id(konto.Id));
     }
 
@@ -319,6 +322,7 @@ internal static class AnmeldeEndpunkte
             if (v == Anmeldeverfahren.Saml && !Anmelderegeln.ZugehoerigkeitErlaubt(Saml.Zugehoerigkeiten(k), ext.Zugehoerigkeiten))
             {
                 log.LogInformation("SAML-Anmeldung abgelehnt: keine erlaubte Zugehörigkeit ({Zugehoerigkeiten})", string.Join(", ", ext.Zugehoerigkeiten.Select(z => z.Split('@')[0])));
+                await http.RequestServices.GetRequiredService<ISicherheitsprotokoll>().EintragenAsync("Anmeldung.Abgelehnt", null, "SAML: Zugehörigkeit nicht erlaubt");
                 return Zurueck(http, "anmelden", Anmeldefehler.Zugehoerigkeit);
             }
 
@@ -361,6 +365,7 @@ internal static class AnmeldeEndpunkte
                     var konto = await identitaet.FindByLoginAsync(ext.Anbieter, ext.Schluessel);
                     if (konto is null)
                     {
+                        await http.RequestServices.GetRequiredService<ISicherheitsprotokoll>().EintragenAsync("Anmeldung.Abgelehnt", null, $"{v}: Kennung nicht verknüpft");
                         return Zurueck(http, "anmelden", Anmeldefehler.Unbekannt);
                     }
 

@@ -10,6 +10,7 @@ using ProfOMat.Domain.Beschriftung;
 using ProfOMat.Domain.Hausarbeiten;
 using ProfOMat.Domain.Gefache;
 using ProfOMat.Domain.Finanzen;
+using ProfOMat.Infrastructure.Sicherheit;
 
 namespace ProfOMat.Infrastructure.Datenbank;
 
@@ -20,7 +21,7 @@ namespace ProfOMat.Infrastructure.Datenbank;
 public sealed class ProfOMatDbContext(DbContextOptions<ProfOMatDbContext> optionen) : DbContext(optionen)
 {
     /// <summary>Erhöhen, wenn sich das Modell ändert: eine ältere Datei wird dann beim Start abgelehnt (statt still falsch zu laufen).</summary>
-    public const int Schemaversion = 19;
+    public const int Schemaversion = 20;
 
     /// <summary>Tabellen, die mit Version 10 dazugekommen sind (Aufwertung 9 → 10 legt nur diese an).</summary>
     internal static readonly string[] TabellenAbVersion10 = ["Hausarbeiten", "HausarbeitThemen", "HausarbeitPersonen", "HausarbeitTeams", "Teammitglieder", "Mailentwuerfe", "Mailsignaturen", "MailsignaturBilder"];
@@ -39,6 +40,17 @@ public sealed class ProfOMatDbContext(DbContextOptions<ProfOMatDbContext> option
 
     /// <summary>Tabellen, die mit Version 19 dazugekommen sind (ASP.NET Core Identity: verknüpfte Identitätsdienste, Passkeys).</summary>
     internal static readonly string[] TabellenAbVersion19 = ["ExterneAnmeldungen", "Passkeys"];
+
+    /// <summary>Tabellen, die mit Version 20 dazugekommen sind (Sicherheitsprotokoll, hash-verkettet).</summary>
+    internal static readonly string[] TabellenAbVersion20 = ["Sicherheitsprotokoll"];
+
+    /// <summary>Spalten mit Feldverschlüsselung (Tabelle, Spalte); die Aufwertung verschlüsselt Bestandswerte, siehe Feldverschluesselung.</summary>
+    public static readonly (string Tabelle, string Spalte)[] VerschluesselteSpalten =
+    [
+        ("Drittpruefungen", "Matrikelnummer"), ("Teilnahmen", "Matrikelnummer"), ("HausarbeitPersonen", "Matrikelnummer"),
+        ("MuendlichePruefungen", "Matrikelnummer"), ("MuendlichePruefungen", "Endnote"), ("MuendlichePruefungen", "Abweichungsbegruendung"),
+        ("GestellteFragen", "Bemerkung"),
+    ];
 
     protected override void ConfigureConventions(ModelConfigurationBuilder konventionen)
     {
@@ -134,6 +146,7 @@ public sealed class ProfOMatDbContext(DbContextOptions<ProfOMatDbContext> option
         {
             e.ToTable("Drittpruefungen");
             e.HasKey(a => a.Id);
+            e.Property(a => a.Matrikelnummer).HasConversion(Feldverschluesselung.Text(deterministisch: true));
             e.HasIndex(a => a.Nummer).IsUnique();
             e.HasIndex(a => a.Status);
             e.HasIndex(a => a.ErstpruefendeKontoId);
@@ -192,6 +205,7 @@ public sealed class ProfOMatDbContext(DbContextOptions<ProfOMatDbContext> option
         {
             e.ToTable("Teilnahmen");
             e.HasKey(t => t.Id);
+            e.Property(t => t.Matrikelnummer).HasConversion(Feldverschluesselung.Text(deterministisch: true));
             e.HasIndex(t => new { t.KlausurId, t.Matrikelnummer }).IsUnique();
             e.HasIndex(t => new { t.KlausurId, t.Code }).IsUnique();
             e.Ignore(t => t.Name);
@@ -235,14 +249,15 @@ public sealed class ProfOMatDbContext(DbContextOptions<ProfOMatDbContext> option
             e.Ignore(p => p.WeichtAb);
             e.Property(p => p.Bezeichnung).HasMaxLength(MuendlichePruefung.BezeichnungMaxLaenge);
             e.Property(p => p.Pruefling).HasMaxLength(MuendlichePruefung.NameMaxLaenge);
-            e.Property(p => p.Matrikelnummer).HasMaxLength(MuendlichePruefung.MatrikelnummerMaxLaenge);
+            e.Property(p => p.Matrikelnummer).HasConversion(Feldverschluesselung.TextOptional(deterministisch: true));
+            e.Property(p => p.Endnote).HasConversion(Feldverschluesselung.Zahl());
             e.Property(p => p.Studiengang).HasMaxLength(MuendlichePruefung.NameMaxLaenge);
             e.Property(p => p.ErstpruefendeName).HasMaxLength(MuendlichePruefung.NameMaxLaenge);
             e.Property(p => p.ZweitpruefendeName).HasMaxLength(MuendlichePruefung.NameMaxLaenge);
             e.Ignore(p => p.HatErstpruefung);
             e.HasOne<Konto>().WithMany().HasForeignKey(p => p.ErstpruefendeId).OnDelete(DeleteBehavior.Restrict);
             e.HasOne<Konto>().WithMany().HasForeignKey(p => p.ZweitpruefendeId).OnDelete(DeleteBehavior.Restrict);
-            e.Property(p => p.Abweichungsbegruendung).HasMaxLength(MuendlichePruefung.BegruendungMaxLaenge);
+            e.Property(p => p.Abweichungsbegruendung).HasConversion(Feldverschluesselung.TextOptional(deterministisch: false));
             e.HasOne<Konto>().WithMany().HasForeignKey(p => p.KontoId).OnDelete(DeleteBehavior.Restrict);
             e.HasMany(p => p.Fragen).WithOne().HasForeignKey(f => f.PruefungId).OnDelete(DeleteBehavior.Cascade);
             e.Navigation(p => p.Fragen).AutoInclude().UsePropertyAccessMode(PropertyAccessMode.Field);
@@ -253,7 +268,7 @@ public sealed class ProfOMatDbContext(DbContextOptions<ProfOMatDbContext> option
             e.HasKey(f => f.Id);
             e.Ignore(f => f.Stand);
             e.Property(f => f.Nummer).HasMaxLength(GestellteFrage.NummerMaxLaenge);
-            e.Property(f => f.Bemerkung).HasMaxLength(GestellteFrage.BemerkungMaxLaenge);
+            e.Property(f => f.Bemerkung).HasConversion(Feldverschluesselung.TextOptional(deterministisch: false));
         });
 
         m.Entity<Einladung>(e =>
@@ -354,6 +369,7 @@ public sealed class ProfOMatDbContext(DbContextOptions<ProfOMatDbContext> option
             e.ToTable("HausarbeitPersonen");
             e.HasKey(p => p.Id);
             e.HasIndex(p => new { p.HausarbeitId, p.Matrikelnummer }).IsUnique();
+            e.Property(p => p.Matrikelnummer).HasConversion(Feldverschluesselung.Text(deterministisch: true));
             e.Ignore(p => p.Name);
             e.Ignore(p => p.VollerName);
         });
@@ -585,6 +601,16 @@ public sealed class ProfOMatDbContext(DbContextOptions<ProfOMatDbContext> option
             e.ToTable("Dokumente");
             e.HasKey(d => d.Id);
             e.HasIndex(d => d.AntragId);
+        });
+        m.Entity<Sicherheitsereignis>(e =>
+        {
+            e.ToTable("Sicherheitsprotokoll");
+            e.HasKey(s => s.Id);
+            e.HasIndex(s => s.Nummer).IsUnique();
+            e.Ignore(s => s.Stimmt);
+            e.Property(s => s.Art).HasMaxLength(60);
+            e.Property(s => s.Hash).HasMaxLength(64);
+            e.Property(s => s.VorgaengerHash).HasMaxLength(64);
         });
         m.Entity<Protokolleintrag>(e =>
         {

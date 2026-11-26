@@ -24,8 +24,8 @@ für den Lasercutter). Aufbau und Leitlinien folgen
 | Webserver (nginx) | TLS 1.2/1.3, Umleitung auf HTTPS, `server_tokens off`; HSTS, CSP und Rate-Limits setzt die Anwendung, nicht nginx. |
 | Anwendung | Rechte im Dienst, EF Core, Antiforgery, strenge CSP; Kestrel nur auf `127.0.0.1:5082`. |
 | Anmeldung | ASP.NET Core Identity: Verfahren je Instanz schaltbar (SAML, OIDC, Passwort + TOTP, Passkey); TOTP Pflicht für Systemverwaltung und Studiendekanat; Sperre nach Fehlversuchen. **SAML an den IdP der Hochschule noch nicht angebunden.** |
-| Daten | SQLite-Datei nur für den Dienstbenutzer lesbar; **keine Feldverschlüsselung**, Sicherungen unverschlüsselt. |
-| Betrieb | systemd mit Härtung, Sicherung vor jedem Update und täglich, automatischer Rückweg beim Ausrollen; Logs nur lokal. |
+| Daten | SQLite-Datei nur für den Dienstbenutzer lesbar; **Feldverschlüsselung** (AES-256-GCM) für Matrikelnummern und Noten mündlicher Prüfungen; Sicherungen mit `age` verschlüsselbar (auf dem Server noch einzurichten). |
+| Betrieb | systemd mit Härtung, Sicherung mit Rücksicherungsprobe, automatischer Rückweg; Gesundheitsendpunkte, OpenTelemetry und `/metrics` vorbereitet (Standard aus); Sicherheitsprotokoll und Rolle Revision. |
 
 Ausführlich mit Fundstellen im Code und offenen Punkten: [sicherheit-und-betrieb.md](docs/sicherheit-und-betrieb.md).
 
@@ -106,6 +106,17 @@ Oidc__Authority=https://login.microsoftonline.com/<tenant>/v2.0
 Oidc__ClientId=<id>
 Oidc__ClientSecret=<geheim>                       # nur in /etc/profomat/profomat.env
 Oidc__MfaAcr=                                     # optional: acr-Werte, die als zweiter Faktor gelten
+```
+
+Sicherheit und Betrieb (Stufe 2, alles Standard aus bzw. unverändert):
+
+```ini
+Sicherheit__VerwaltungNetze__0=131.173.0.0/16     # Verwaltung nur aus diesen Netzen; Studierendenlinks bleiben öffentlich
+Betrieb__Otlp__Endpunkt=http://otel-collector:4317   # Traces und Metriken per OTLP
+Betrieb__Metriken__Netze__0=10.10.0.0/24          # /metrics (Prometheus) nur aus diesem Netz
+Betrieb__Logformat=json                           # Logs als JSON-Zeilen ins Journal
+Betrieb__SecurityTxt__Kontakt=mailto:sicherheit@example.invalid
+Feldverschluesselung__Schluesseldatei=            # sonst $CREDENTIALS_DIRECTORY/profomat-feldschluessel bzw. Schlüsselordner
 ```
 
 Testsystem auf dem Hochschulserver: `.\deploy\server\deploy.ps1` (Tests, Linux-Build, Upload, Einspielen mit Sicherung und

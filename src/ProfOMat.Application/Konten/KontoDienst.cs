@@ -40,7 +40,8 @@ public sealed record EinladungsInfo(EinladungsArt Art, string? Notiz, DateTimeOf
 /// weitere Konten nur per Einladungslink (mit Passwort oder über einen Identitätsdienst), vergessene Passwörter per Passwort-Link.
 /// Studierende brauchen kein Konto.
 /// </summary>
-public sealed partial class KontoDienst(IDaten daten, IAktuellerBenutzer aktuell, Protokoll protokoll, TimeProvider uhr, UserManager<Konto> identitaet)
+public sealed partial class KontoDienst(IDaten daten, IAktuellerBenutzer aktuell, Protokoll protokoll, TimeProvider uhr, UserManager<Konto> identitaet,
+    ISicherheitsprotokoll sicherheit)
 {
     public const int MinPasswortLaenge = 12;
     public const int EinladungTageStandard = 7;
@@ -81,6 +82,7 @@ public sealed partial class KontoDienst(IDaten daten, IAktuellerBenutzer aktuell
         if (konto is not { Aktiv: true, PasswortHash: not null })
         {
             Hasher.VerifyHashedPassword(Attrappe, AttrappenHash, passwort);   // gleiche Antwortzeit wie bei bekannter Kennung
+            await sicherheit.EintragenAsync("Anmeldung.Fehlversuch", konto?.Id, konto is null ? "unbekannte Kennung" : "Konto gesperrt oder ohne Passwort", abbruch);
             return new Passwortpruefung(Passwortergebnis.Falsch, null);
         }
 
@@ -99,10 +101,12 @@ public sealed partial class KontoDienst(IDaten daten, IAktuellerBenutzer aktuell
         if (await identitaet.IsLockedOutAsync(konto))
         {
             protokoll.Eintragen(AlsBenutzer(konto), "Anmeldung.Sperre", "Vorübergehend gesperrt nach zu vielen Fehlversuchen", konto.Id);
+            await sicherheit.EintragenAsync("Anmeldung.Sperre", konto.Id, "vorübergehend gesperrt nach zu vielen Fehlversuchen", abbruch);
             await daten.SpeichernAsync(abbruch);
             return new Passwortpruefung(Passwortergebnis.VoruebergehendGesperrt, null, konto.GesperrtBis);
         }
 
+        await sicherheit.EintragenAsync("Anmeldung.Fehlversuch", konto.Id, "Passwort falsch", abbruch);
         return new Passwortpruefung(Passwortergebnis.Falsch, null);
     }
 
@@ -111,6 +115,7 @@ public sealed partial class KontoDienst(IDaten daten, IAktuellerBenutzer aktuell
     {
         ArgumentNullException.ThrowIfNull(konto);
         protokoll.Eintragen(AlsBenutzer(konto), "Anmeldung", $"Anmeldung ({art}{(zweiterFaktor ? ", zweiter Faktor" : "")})", konto.Id);
+        await sicherheit.EintragenAsync("Anmeldung", konto.Id, $"{art}{(zweiterFaktor ? ", zweiter Faktor" : "")}", abbruch);
         await daten.SpeichernAsync(abbruch);
     }
 
@@ -158,6 +163,7 @@ public sealed partial class KontoDienst(IDaten daten, IAktuellerBenutzer aktuell
 
         daten.Hinzufuegen(konto);
         protokoll.Eintragen(wer, "Konto.Angelegt", $"Konto {k} angelegt ({string.Join(", ", konto.Rollen.Select(r => r.Rolle.Anzeigename()))})", konto.Id);
+        await sicherheit.EintragenAsync("Rechte", wer.KontoId, $"Konto {konto.Id:D} angelegt, Rollen: {string.Join(", ", konto.Rollen.Select(r => r.Rolle.Anzeigename()))}", abbruch);
         await daten.SpeichernAsync(abbruch);
         return konto;
     }
@@ -197,6 +203,7 @@ public sealed partial class KontoDienst(IDaten daten, IAktuellerBenutzer aktuell
         }
 
         protokoll.Eintragen(wer, "Konto.Geaendert", $"Konto {konto.Kennung} geändert ({string.Join(", ", rollen.Select(r => r.Anzeigename()))}{(aktiv ? "" : ", gesperrt")})", konto.Id);
+        await sicherheit.EintragenAsync("Rechte", wer.KontoId, $"Konto {konto.Id:D}: Rollen {string.Join(", ", rollen.Select(r => r.Anzeigename()))}, {(aktiv ? "aktiv" : "gesperrt")}", abbruch);
         await daten.SpeichernAsync(abbruch);
     }
 
@@ -218,6 +225,7 @@ public sealed partial class KontoDienst(IDaten daten, IAktuellerBenutzer aktuell
 
         konto.PasswortSetzen(Hash(konto, neuesPasswort));
         protokoll.Eintragen(wer, "Konto.Passwort", selbst ? "Eigenes Passwort geändert" : $"Passwort für {konto.Kennung} gesetzt", konto.Id);
+        await sicherheit.EintragenAsync("Konto.Passwort", wer.KontoId, selbst ? "eigenes Passwort geändert" : $"Passwort für Konto {konto.Id:D} gesetzt", abbruch);
         await daten.SpeichernAsync(abbruch);
     }
 
@@ -297,6 +305,7 @@ public sealed partial class KontoDienst(IDaten daten, IAktuellerBenutzer aktuell
 
         konto.ZweitenFaktorZuruecksetzen();
         protokoll.Eintragen(wer, "Konto.ZweiterFaktor", $"Zweiter Faktor für {konto.Kennung} zurückgesetzt", konto.Id);
+        await sicherheit.EintragenAsync("Konto.ZweiterFaktor", wer.KontoId, $"zweiter Faktor von Konto {konto.Id:D} zurückgesetzt", abbruch);
         await daten.SpeichernAsync(abbruch);
     }
 
@@ -322,6 +331,7 @@ public sealed partial class KontoDienst(IDaten daten, IAktuellerBenutzer aktuell
             daten.Hinzufuegen(konto);
             var benutzer = AlsBenutzer(konto);
             protokoll.Eintragen(benutzer, "Konto.Ersteinrichtung", $"Ersteinrichtung: Konto {konto.Kennung} (Systemverwaltung) angelegt", konto.Id);
+            await sicherheit.EintragenAsync("Rechte", konto.Id, "Ersteinrichtung: erstes Konto (Systemverwaltung) angelegt", abbruch);
             await daten.SpeichernAsync(abbruch);
             return benutzer;
         }
@@ -349,6 +359,7 @@ public sealed partial class KontoDienst(IDaten daten, IAktuellerBenutzer aktuell
         var e = new Einladung(EinladungsArt.Konto, hash, rollen, null, notiz, wer.KontoIdPflicht, jetzt, jetzt.AddDays(Math.Clamp(tage, 1, 30)));
         daten.Hinzufuegen(e);
         protokoll.Eintragen(wer, "Konto.Einladung", $"Einladungslink erzeugt ({string.Join(", ", e.RollenListe.Select(r => r.Anzeigename()))})", e.Id);
+        await sicherheit.EintragenAsync("Rechte", wer.KontoId, $"Einladungslink erzeugt, Rollen: {string.Join(", ", e.RollenListe.Select(r => r.Anzeigename()))}", abbruch);
         await daten.SpeichernAsync(abbruch);
         return new EinladungsLink(e, token);
     }
@@ -364,6 +375,7 @@ public sealed partial class KontoDienst(IDaten daten, IAktuellerBenutzer aktuell
         var e = new Einladung(EinladungsArt.Passwort, hash, [], konto.Id, $"Passwort für {konto.Kennung}", wer.KontoIdPflicht, jetzt, jetzt.AddDays(PasswortLinkTage));
         daten.Hinzufuegen(e);
         protokoll.Eintragen(wer, "Konto.PasswortLink", $"Passwort-Link für {konto.Kennung} erzeugt", konto.Id);
+        await sicherheit.EintragenAsync("Konto.Passwort", wer.KontoId, $"Passwort-Link für Konto {konto.Id:D} erzeugt", abbruch);
         await daten.SpeichernAsync(abbruch);
         return new EinladungsLink(e, token);
     }
@@ -426,6 +438,7 @@ public sealed partial class KontoDienst(IDaten daten, IAktuellerBenutzer aktuell
         e.Einloesen(konto.Id, uhr.GetUtcNow());
         protokoll.Eintragen(AlsBenutzer(konto), e.Art == EinladungsArt.Konto ? "Konto.Angelegt" : "Konto.Passwort",
             e.Art == EinladungsArt.Konto ? $"Konto {konto.Kennung} per Einladung angelegt" : $"Passwort für {konto.Kennung} per Link gesetzt", konto.Id);
+        await sicherheit.EintragenAsync(e.Art == EinladungsArt.Konto ? "Rechte" : "Konto.Passwort", konto.Id, e.Art == EinladungsArt.Konto ? $"Konto per Einladung angelegt, Rollen: {string.Join(", ", e.RollenListe.Select(r => r.Anzeigename()))}" : "Passwort per Link gesetzt", abbruch);
         await daten.SpeichernAsync(abbruch);
         return AlsBenutzer(konto);
     }
@@ -472,6 +485,7 @@ public sealed partial class KontoDienst(IDaten daten, IAktuellerBenutzer aktuell
         daten.Hinzufuegen(konto);
         e.Einloesen(konto.Id, jetzt);
         protokoll.Eintragen(AlsBenutzer(konto), "Konto.Angelegt", $"Konto {konto.Kennung} per Einladung über {ext.Anbieter} angelegt", konto.Id);
+        await sicherheit.EintragenAsync("Rechte", konto.Id, $"Konto per Einladung über {ext.Anbieter} angelegt, Rollen: {string.Join(", ", e.RollenListe.Select(r => r.Anzeigename()))}", abbruch);
         await daten.SpeichernAsync(abbruch);
         return konto;
     }

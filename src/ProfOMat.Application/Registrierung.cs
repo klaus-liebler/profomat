@@ -21,6 +21,7 @@ public static class Registrierung
         dienste.Configure<AnmeldeOptionen>(konfiguration.GetSection(AnmeldeOptionen.Abschnitt));
         dienste.AddScoped<KontoDienst>();
         dienste.AddScoped<SicherheitDienst>();
+        dienste.AddScoped<Betrieb.RevisionDienst>();
         dienste.AddScoped<KatalogDienst>();
         dienste.AddScoped<DrittpruefungDienst>();
         dienste.AddScoped<Klausuren.KlausurDienst>();

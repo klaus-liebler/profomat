@@ -163,6 +163,13 @@ beim_ende() {
 }
 trap beim_ende EXIT
 trap 'exit 130' INT TERM
+# Prüfsumme (deploy.ps1 legt <archiv>.sha256 daneben): stimmt sie nicht, wird nichts angefasst
+if [[ -f "$archiv.sha256" ]]; then
+    if (cd "$(dirname "$archiv")" && sha256sum --status -c <(sed "s#  .*#  $(basename "$archiv")#" "$archiv.sha256")); then ok "Prüfsumme stimmt (SHA-256 $(cut -c1-16 "$archiv.sha256")…)"
+    else pruef_fehler "Prüfsumme von $archiv stimmt nicht – Paket beschädigt oder verändert"; fi
+else
+    warn "keine Prüfsumme ($archiv.sha256) – Paket ungeprüft"
+fi
 if tar -xzf "$archiv" -C "$neu" --strip-components=1 2>/dev/null; then ok "Archiv entpackt ($(du -sh "$neu" | cut -f1))"
 else pruef_fehler "Archiv $archiv lässt sich nicht entpacken (beschädigt?)"; fi
 paket_pruefen "$neu"

@@ -11,6 +11,8 @@
 @inject NavigationManager Navigation
 @inject Anmeldebremse Bremse
 @inject ILogger<Anmelden> Log
+@inject ISicherheitsprotokoll Sicherheitsprotokoll
+@inject ProfOMat.Web.Betrieb.Kennzahlen Kennzahlen
 @* Anmeldeverfahren als getrennte Kacheln; welche erscheinen, legt die Konfiguration der Instanz fest (Abschnitt „Anmeldung“). *@
 
 <PageTitle>@(ersteinrichtung ? "Ersteinrichtung" : "Anmelden") · ProfOMat</PageTitle>
@@ -217,6 +219,7 @@
         if (pruefung is not { Erfolg: true, Konto: { } konto })
         {
             Bremse.Fehlversuch(Ip, kennung);
+            Kennzahlen.Fehlversuche.Add(1, new KeyValuePair<string, object?>("verfahren", "Passwort"));
             Log.LogWarning("Anmeldung mit Passwort fehlgeschlagen ({Ergebnis})", pruefung.Ergebnis);
             fehler = pruefung.Ergebnis == Passwortergebnis.VoruebergehendGesperrt
                 ? "Zu viele Fehlversuche – die Anmeldung ist vorübergehend gesperrt. Bitte später erneut versuchen."
@@ -240,6 +243,8 @@
         if (!ergebnis.Succeeded || ergebnis.User is not { } konto)
         {
             Log.LogWarning("Anmeldung mit Passkey fehlgeschlagen: {Grund}", ergebnis.Failure?.Message);
+            Kennzahlen.Fehlversuche.Add(1, new KeyValuePair<string, object?>("verfahren", "Passkey"));
+            await Sicherheitsprotokoll.EintragenAsync("Anmeldung.Fehlversuch", null, "Passkey nicht erkannt");
             fehler = "Dieser Passkey wurde nicht erkannt. Bitte erneut versuchen oder ein anderes Verfahren wählen.";
             return;
         }

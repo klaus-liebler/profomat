@@ -114,3 +114,20 @@ public sealed class ProfOMatOptionen
     /// <summary>Zeitzone für Anzeige und Eingabe von Prüfungsterminen.</summary>
     public string Zeitzone { get; set; } = "Europe/Berlin";
 }
+
+/// <summary>
+/// Sicherheitsprotokoll (Zielbild Abschnitt 6): nur anfügen, hash-verkettet, getrennt vom Betriebslog; zusätzlich als strukturiertes
+/// Log-Ereignis (Kategorie „ProfOMat.Sicherheitsprotokoll“) zur Weiterleitung an ein SIEM. Personen nur als Konto-Id.
+/// </summary>
+public interface ISicherheitsprotokoll
+{
+    /// <summary>Unabhängig von der laufenden Arbeit gespeichert (eigener Datenbankkontext) – auch abgelehnte Vorgänge erscheinen.</summary>
+    Task EintragenAsync(string art, Guid? kontoId, string text, CancellationToken abbruch = default);
+
+    Task<IReadOnlyList<Domain.Betrieb.Sicherheitsereignis>> LetzteAsync(int anzahl, CancellationToken abbruch = default);
+
+    Task<Kettenpruefung> PruefenAsync(CancellationToken abbruch = default);
+}
+
+/// <summary>Ergebnis der Kettenprüfung: intakt oder erster fehlerhafter Eintrag.</summary>
+public sealed record Kettenpruefung(bool Intakt, long Anzahl, long? ErsterFehler, string? Grund);

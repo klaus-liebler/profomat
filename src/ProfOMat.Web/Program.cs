@@ -8,6 +8,7 @@ using ProfOMat.Application.Konten;
 using ProfOMat.Domain.Gemeinsam;
 using ProfOMat.Infrastructure;
 using ProfOMat.Infrastructure.Datenbank;
+using ProfOMat.Web.Betrieb;
 using ProfOMat.Web.Components;
 using ProfOMat.Web.Sicherheit;
 using Radzen;
@@ -31,7 +32,10 @@ builder.Services.AddSerilog((dienste, log) => log
     .ReadFrom.Configuration(builder.Configuration)
     .ReadFrom.Services(dienste)
     .Enrich.FromLogContext()
-    .WriteTo.Console(formatProvider: deutsch)
+    // Betrieb:Logformat=json: eine JSON-Zeile je Ereignis auf stdout (journald nimmt sie strukturiert auf, Weiterleitung per rsyslog/OTLP)
+    .WriteTo.Logger(l => _ = string.Equals(builder.Configuration["Betrieb:Logformat"], "json", StringComparison.OrdinalIgnoreCase)
+        ? l.WriteTo.Console(new Serilog.Formatting.Compact.RenderedCompactJsonFormatter())
+        : l.WriteTo.Console(formatProvider: deutsch))
     .WriteTo.File(Path.Combine(builder.Environment.ContentRootPath, builder.Configuration["Speicher:Logs"] ?? "logs", "profomat-.log"),
         rollingInterval: RollingInterval.Day, retainedFileCountLimit: 30, formatProvider: deutsch));
 
@@ -52,6 +56,7 @@ builder.Services.AddScoped<BenutzerKontext>();
 builder.Services.AddScoped<IAktuellerBenutzer, AktuellerBenutzer>();
 builder.Services.AddScoped<Vorgang>();
 builder.Services.AddRateLimits(builder.Configuration);
+builder.Services.AddProfOMatBetrieb(builder.Configuration, Betriebsdienste.DatenOrdner(builder.Configuration, builder.Environment.ContentRootPath), schluesselOrdner);
 
 builder.Services
     .AddProfOMatAnwendung(builder.Configuration)
@@ -86,6 +91,7 @@ if (hinterProxy)
 var app = builder.Build();
 
 await DatenbankInitialisierung.InitialisierenAsync(app.Services);
+await Sicherheitsereignisse.KonfigurationPruefenAsync(app.Services, app.Configuration);
 
 await using (var bereich = app.Services.CreateAsyncScope())
 {
@@ -130,6 +136,7 @@ if (app.Configuration["PathBase"] is { Length: > 1 } pfadBasis)
     });
 }
 
+app.UseNetzbeschraenkung(app.Configuration);
 app.UseRouting();
 if (!app.Environment.IsDevelopment())
 {
@@ -139,7 +146,12 @@ if (!app.Environment.IsDevelopment())
 
 app.UseSicherheitsheader();
 app.UseRateLimiter();
-app.UseSerilogRequestLogging();
+// Tokens in Pfaden (Studierendenlinks, Kalender-Abo) erscheinen nie im Log
+app.UseSerilogRequestLogging(o =>
+{
+    o.MessageTemplate = "HTTP {RequestMethod} {Pfad} responded {StatusCode} in {Elapsed:0.0000} ms";
+    o.EnrichDiagnosticContext = (d, http) => d.Set("Pfad", Pfadmaske.Maskieren(http.Request.Path.Value));
+});
 app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
 app.UseRequestLocalization("de-DE");
 if (app.Services.GetRequiredService<Anmeldeangebot>().Hat(ProfOMat.Application.Konten.Anmeldeverfahren.Saml))
@@ -152,11 +164,27 @@ app.UseAuthorization();
 app.UseAntiforgery();
 app.MapStaticAssets();
 
-app.MapGet("/gesund", async (ProfOMatDbContext db) => await db.Database.CanConnectAsync()
-    ? Results.Text("ok")
-    : Results.Text("Datenbank nicht erreichbar", statusCode: StatusCodes.Status503ServiceUnavailable)).AllowAnonymous().DisableRateLimiting();
+app.MapProfOMatBetrieb();
 
 app.MapAnmeldung();
+
+// Sicherheitsbericht für Prüfende (Revision, Systemverwaltung); der Abruf steht im Sicherheitsprotokoll
+app.MapGet("/revision/sicherheitsbericht.json", async (HttpContext http, ProfOMat.Application.Betrieb.RevisionDienst revision) =>
+{
+    try
+    {
+        await revision.SicherstellenAsync("Sicherheitsbericht");
+    }
+    catch (FachlicherFehler)
+    {
+        return Results.StatusCode(StatusCodes.Status403Forbidden);
+    }
+
+    http.Response.Headers.CacheControl = "no-store";
+    http.Response.Headers.ContentDisposition = $"attachment; filename=\"profomat-sicherheitsbericht-{DateTime.UtcNow:yyyyMMdd}.json\"";
+    return Results.Json(await Sicherheitsereignisse.BerichtAsync(http.RequestServices, app.Configuration, app.Environment, schluesselOrdner),
+        new System.Text.Json.JsonSerializerOptions { WriteIndented = true, PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
+}).RequireAuthorization();
 
 // PDF für Beschäftigte (Rechte prüft der Dienst)
 app.MapGet("/antraege/{id:guid}/pdf", async (Guid id, DrittpruefungDienst dienst, HttpContext http) =>
@@ -176,7 +204,7 @@ app.MapGet("/antraege/{id:guid}/pdf", async (Guid id, DrittpruefungDienst dienst
     {
         return Results.StatusCode(StatusCodes.Status403Forbidden);
     }
-}).RequireAuthorization();
+}).RequireAuthorization().Exportprotokoll();
 
 // PDF für Studierende über ihren geheimen Link (auch alte Links „…/status/…“)
 async Task<IResult> StudierendenPdfAsync(Guid id, string token, DrittpruefungDienst dienst, HttpContext http)
@@ -208,7 +236,7 @@ app.MapGet("/muendlich/{id:guid}/protokoll.pdf", async (Guid id, ProfOMat.Applic
     {
         return Results.Text(ex.Message, "text/plain; charset=utf-8", statusCode: StatusCodes.Status409Conflict);
     }
-}).RequireAuthorization();
+}).RequireAuthorization().Exportprotokoll();
 
 // Beschriftungsstreifen (nur wer den Schrank angelegt hat; prüft der Dienst). r=<FeldId ohne Bindestriche>-<Reihe>,…
 app.MapGet("/beschriftung/{id:guid}/streifen.pdf", async (Guid id, string? r, ProfOMat.Application.Beschriftung.BeschriftungDienst dienst, HttpContext http) =>
@@ -229,7 +257,7 @@ app.MapGet("/beschriftung/{id:guid}/streifen.pdf", async (Guid id, string? r, Pr
     {
         return Results.Text(ex.Message, "text/plain; charset=utf-8", statusCode: StatusCodes.Status409Conflict);
     }
-}).RequireAuthorization();
+}).RequireAuthorization().Exportprotokoll();
 
 // Schnittvorlagen der Gefache: platte-<n>.svg, platte-<n>.dxf, schnittvorlagen.zip (nur wer das Gefach angelegt hat; prüft der Dienst)
 app.MapGet("/gefache/{id:guid}/{datei}", async (Guid id, string datei, ProfOMat.Application.Gefache.GefachDienst dienst, HttpContext http) =>
@@ -245,7 +273,7 @@ app.MapGet("/gefache/{id:guid}/{datei}", async (Guid id, string datei, ProfOMat.
     {
         return Results.Text(ex.Message, "text/plain; charset=utf-8", statusCode: StatusCodes.Status409Conflict);
     }
-}).RequireAuthorization();
+}).RequireAuthorization().Exportprotokoll();
 
 // Aufstellung einer Sammel-Auslagenabrechnung (nur Mitglieder des Laborteams; prüft der Dienst)
 app.MapGet("/finanzen/{team:guid}/auslagen/{id:guid}/aufstellung.xlsx", async (Guid team, Guid id, ProfOMat.Application.Finanzen.FinanzDienst dienst, HttpContext http) =>
@@ -260,7 +288,7 @@ app.MapGet("/finanzen/{team:guid}/auslagen/{id:guid}/aufstellung.xlsx", async (G
     {
         return Results.Text(ex.Message, "text/plain; charset=utf-8", statusCode: StatusCodes.Status409Conflict);
     }
-}).RequireAuthorization();
+}).RequireAuthorization().Exportprotokoll();
 
 // Klausur-Ausgaben (Rechte prüft der Dienst)
 app.MapGet("/klausuren/{id:guid}/{datei}", async (Guid id, string datei, ProfOMat.Application.Klausuren.KlausurDienst dienst, HttpContext http) =>
@@ -289,7 +317,7 @@ app.MapGet("/klausuren/{id:guid}/{datei}", async (Guid id, string datei, ProfOMa
     {
         return Results.Text(ex.Message, "text/plain; charset=utf-8", statusCode: StatusCodes.Status409Conflict);
     }
-}).RequireAuthorization();
+}).RequireAuthorization().Exportprotokoll();
 
 // Alle offenen eigenen Mailentwürfe (optional eines Anlasses) als ZIP mit .eml-Dateien
 app.MapGet("/entwuerfe/mails.zip", async (string? anlass, ProfOMat.Application.Betrieb.Mailentwuerfe dienst, HttpContext http) =>
@@ -304,7 +332,7 @@ app.MapGet("/entwuerfe/mails.zip", async (string? anlass, ProfOMat.Application.B
     {
         return Results.Text(ex.Message, "text/plain; charset=utf-8", statusCode: StatusCodes.Status409Conflict);
     }
-}).RequireAuthorization();
+}).RequireAuthorization().Exportprotokoll();
 
 // Gesprächstermine einer Hausarbeit als Kalenderdatei (nur Betreuende; prüft der Dienst)
 app.MapGet("/hausarbeiten/{id:guid}/gespraeche.ics", async (Guid id, ProfOMat.Application.Hausarbeiten.HausarbeitDienst dienst, HttpContext http) =>
@@ -319,7 +347,7 @@ app.MapGet("/hausarbeiten/{id:guid}/gespraeche.ics", async (Guid id, ProfOMat.Ap
     {
         return Results.Text(ex.Message, "text/plain; charset=utf-8", statusCode: StatusCodes.Status409Conflict);
     }
-}).RequireAuthorization();
+}).RequireAuthorization().Exportprotokoll();
 
 // Kalender-Abo ohne Anmeldung über den geheimen Link (Outlook: „Kalender aus dem Internet“); falscher Link → 404
 app.MapGet("/hausarbeit/kalender/{id:guid}/{token}.ics", async (Guid id, string token, ProfOMat.Application.Hausarbeiten.HausarbeitDienst dienst, HttpContext http) =>
@@ -348,14 +376,14 @@ app.MapGet("/entwuerfe/{id:guid}/mail.eml", async (Guid id, ProfOMat.Application
     {
         return Results.Text(ex.Message, "text/plain; charset=utf-8", statusCode: StatusCodes.Status409Conflict);
     }
-}).RequireAuthorization();
+}).RequireAuthorization().Exportprotokoll();
 
 app.MapGet("/profil/testmail.eml", async (ProfOMat.Application.Betrieb.Mailsignaturen dienst, HttpContext http) =>
 {
     var (inhalt, name) = await dienst.TestmailAsync();
     http.Response.Headers.CacheControl = "no-store";
     return Results.File(inhalt, "message/rfc822", name);
-}).RequireAuthorization();
+}).RequireAuthorization().Exportprotokoll();
 
 app.MapRazorComponents<App>().AddInteractiveServerRenderMode();
 

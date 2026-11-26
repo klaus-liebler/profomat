@@ -11,6 +11,8 @@
 @inject Anmeldeabschluss Abschluss
 @inject NavigationManager Navigation
 @inject ILogger<AnmeldenZweiterFaktor> Log
+@inject ISicherheitsprotokoll Sicherheitsprotokoll
+@inject ProfOMat.Web.Betrieb.Kennzahlen Kennzahlen
 @* Zweite Stufe der Anmeldung: Code aus der Authenticator-App (oder Wiederherstellungscode). Wer den Pflicht-Faktor noch nicht hat
    (Systemverwaltung, Studiendekanat), richtet ihn hier ein – mit QR-Code, ohne Inline-JavaScript. Grundlage ist das kurzlebige
    Zwischen-Cookie von ASP.NET Core Identity aus der ersten Stufe (5 Minuten). *@
@@ -169,6 +171,8 @@
         }
 
         Log.LogWarning("Zweiter Faktor fehlgeschlagen ({Ergebnis})", ergebnis.IsLockedOut ? "gesperrt" : "falsch");
+        Kennzahlen.Fehlversuche.Add(1, new KeyValuePair<string, object?>("verfahren", "TOTP"));
+        await Sicherheitsprotokoll.EintragenAsync(ergebnis.IsLockedOut ? "Anmeldung.Sperre" : "Anmeldung.Fehlversuch", konto?.Id, "zweiter Faktor: Code falsch");
         fehler = ergebnis.IsLockedOut ? "Zu viele Fehlversuche – die Anmeldung ist vorübergehend gesperrt." : "Der Code stimmt nicht. Bitte erneut versuchen.";
     }
 

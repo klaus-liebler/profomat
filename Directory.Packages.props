@@ -17,6 +17,12 @@
     <!-- Anmeldung: SAML 2.0 (Shibboleth, wie Podium) und OpenID Connect -->
     <PackageVersion Include="Sustainsys.Saml2.AspNetCore2" Version="2.11.2" />
     <PackageVersion Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="11.0.0" />
+    <!-- Betrieb: OpenTelemetry (Traces/Metriken per OTLP, Prometheus-Endpunkt), freigegeben 11/2026 -->
+    <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="1.21.0" />
+    <PackageVersion Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.21.0" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.21.0" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.Http" Version="1.21.0" />
+    <PackageVersion Include="OpenTelemetry.Exporter.Prometheus.AspNetCore" Version="1.21.0-beta.1" />
     <!-- transitiv von PDFsharp: auf die sichere Version heben -->
     <PackageVersion Include="System.Security.Cryptography.Pkcs" Version="11.0.0" />
     <PackageVersion Include="xunit.v3" Version="4.0.3" />

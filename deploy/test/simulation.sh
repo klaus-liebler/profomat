@@ -130,6 +130,21 @@ echo "Anmeldung__TestanmeldungErlaubt=true" >> /etc/profomat/profomat.env
 ausrollen --pruefen /tmp/v19.tar.gz >/dev/null 2>&1; pruefe "abgebrochen" '[[ $? -ne 0 ]]'
 sed -i '/TestanmeldungErlaubt/d' /etc/profomat/profomat.env
 
+szenario "Prüfsumme des Pakets falsch → Abbruch, Prüfsumme richtig → läuft"
+cp /tmp/v19.tar.gz /tmp/profomat.tar.gz
+echo "0000000000000000000000000000000000000000000000000000000000000000  profomat.tar.gz" > /tmp/profomat.tar.gz.sha256
+ausgabe=$(bash "$KIT/ausrollen.sh" --wartezeit 20 --pruefen /tmp/profomat.tar.gz 2>&1); rc=$?; echo "$ausgabe"
+pruefe "abgebrochen mit Hinweis auf die Prüfsumme" '[[ $rc -ne 0 ]] && grep -q "Prüfsumme" <<<"$ausgabe"'
+(cd /tmp && sha256sum profomat.tar.gz > profomat.tar.gz.sha256)
+ausgabe=$(bash "$KIT/ausrollen.sh" --wartezeit 20 --pruefen /tmp/profomat.tar.gz 2>&1); rc=$?; echo "$ausgabe"
+pruefe "Prüfung mit richtiger Prüfsumme bestanden" '[[ $rc -eq 0 ]] && grep -q "Prüfsumme stimmt" <<<"$ausgabe"'
+rm -f /tmp/profomat.tar.gz.sha256
+
+szenario "Sicherung: Rücksicherungsprobe und Statusdatei"
+ausgabe=$(/usr/local/sbin/profomat-sicherung.sh nacht 2>&1); rc=$?; echo "$ausgabe"
+pruefe "Sicherung mit Probe läuft" '[[ $rc -eq 0 ]] && grep -q "Probe:" /var/backups/profomat/letzte-sicherung.txt'
+pruefe "Prüfsumme der Sicherung" 'ls /var/backups/profomat/nacht-*.db.sha256 >/dev/null 2>&1'
+
 systemctl stop profomat
 printf '\n\033[1m%s bestanden, %s gescheitert\033[0m\n' "$bestanden" "$gescheitert"
 (( gescheitert == 0 ))

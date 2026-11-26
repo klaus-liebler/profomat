@@ -128,3 +128,57 @@ public sealed class Protokolleintrag
 
     public Guid? Bezug { get; private set; }
 }
+
+/// <summary>
+/// Eintrag im Sicherheitsprotokoll (getrennt vom Betriebslog und vom fachlichen Protokoll): Anmeldungen und Fehlversuche, Rechte- und
+/// Rollenänderungen, Exporte, Konfigurationsänderungen. Nur anfügen (Trigger in der Datenbank), hash-verkettet: Jeder Eintrag enthält den
+/// Hash des vorigen; eine nachträgliche Änderung oder Lücke fällt bei der Prüfung auf. Personen nur als Konto-Id (Pseudonym).
+/// </summary>
+public sealed class Sicherheitsereignis
+{
+    private Sicherheitsereignis()
+    {
+    }
+
+    public Sicherheitsereignis(long nummer, DateTimeOffset zeitpunkt, string art, Guid? kontoId, string text, string vorgaengerHash)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(art);
+        Id = Ids.Neu();
+        Nummer = nummer;
+        Zeitpunkt = zeitpunkt;
+        Art = art;
+        KontoId = kontoId;
+        Text = text ?? string.Empty;
+        VorgaengerHash = vorgaengerHash ?? string.Empty;
+        Hash = Berechnen(Nummer, Zeitpunkt, Art, KontoId, Text, VorgaengerHash);
+    }
+
+    public Guid Id { get; private set; }
+
+    /// <summary>Fortlaufend ab 1, ohne Lücken.</summary>
+    public long Nummer { get; private set; }
+
+    public DateTimeOffset Zeitpunkt { get; private set; }
+
+    /// <summary>z. B. Anmeldung, Anmeldung.Fehlversuch, Rechte, Export, Konfiguration.</summary>
+    public string Art { get; private set; } = string.Empty;
+
+    public Guid? KontoId { get; private set; }
+
+    public string Text { get; private set; } = string.Empty;
+
+    /// <summary>Hash des vorigen Eintrags; beim ersten leer.</summary>
+    public string VorgaengerHash { get; private set; } = string.Empty;
+
+    /// <summary>SHA-256 (hex) über Nummer, Zeitpunkt, Art, Konto, Text und Vorgänger.</summary>
+    public string Hash { get; private set; } = string.Empty;
+
+    public bool Stimmt => Hash == Berechnen(Nummer, Zeitpunkt, Art, KontoId, Text, VorgaengerHash);
+
+    public static string Berechnen(long nummer, DateTimeOffset zeitpunkt, string art, Guid? kontoId, string text, string vorgaenger)
+    {
+        var roh = string.Join('\n', nummer.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            zeitpunkt.ToUnixTimeMilliseconds().ToString(System.Globalization.CultureInfo.InvariantCulture), art, kontoId?.ToString("D") ?? "-", text, vorgaenger);
+        return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(roh))).ToLowerInvariant();
+    }
+}

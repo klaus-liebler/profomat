@@ -25,6 +25,9 @@ public static class Registrierung
         var verbindung = konfiguration.GetConnectionString("ProfOMat") ?? "Data Source=data/profomat.db";
         dienste.AddDbContext<ProfOMatDbContext>(o => o.UseSqlite(Pfad(verbindung, inhaltsordner)));
         dienste.AddScoped<IDaten, Daten>();
+        // Feldverschlüsselung (AES-256-GCM): Schlüssel aus systemd-Credential, Docker Secret oder dem Schlüsselordner
+        Feldverschluesselung.Einrichten(Feldverschluesselung.Laden(konfiguration, Path.Combine(inhaltsordner, konfiguration["Speicher:Schluessel"] ?? "data/schluessel")));
+        dienste.AddScoped<ISicherheitsprotokoll, Sicherheitsprotokoll>();
         dienste.AddProfOMatIdentitaet(konfiguration);
         dienste.AddSingleton<ISystemsiegel>(new Systemsiegel(Path.Combine(inhaltsordner, konfiguration["Speicher:Schluessel"] ?? "data/schluessel")));
         dienste.AddSingleton<IAntragPdf, AntragPdf>();

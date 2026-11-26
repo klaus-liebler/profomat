@@ -17,6 +17,9 @@ public enum Rolle
 
     /// <summary>Konten, Katalog, Postausgang, Protokoll.</summary>
     Systemverwaltung = 4,
+
+    /// <summary>Prüfende (Revision, Datenschutz, Penetrationstest): nur lesend – Konfiguration, Rollen und Rechte, Sicherheitsprotokoll; keine Inhalte.</summary>
+    Revision = 5,
 }
 
 /// <summary>Woher ein Konto stammt.</summary>
@@ -37,6 +40,7 @@ public static class RollenText
         Rolle.Studiendekanat => "Studiendekanat",
         Rolle.Studierendensekretariat => "Studierendensekretariat",
         Rolle.Systemverwaltung => "Systemverwaltung",
+        Rolle.Revision => "Revision",
         _ => rolle.ToString(),
     };
 }

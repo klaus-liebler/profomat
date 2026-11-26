@@ -147,3 +147,30 @@ Testanmeldung) – systemd und nginx sind dort nachgebildet. Der Docker-Modus is
   (Schritt 01 warnt sonst).
 - **Härtung:** eigener Dienstbenutzer ohne Shell, `ProtectSystem=strict`, Schreibrechte nur auf `/var/lib/profomat` und
   `/var/log/profomat`, `UMask=0027`, Schlüsselordner 0700.
+
+## Stufe 2: Feldschlüssel, Sicherung, Prüfungen
+
+**Feldschlüssel als systemd-Credential** (statt `feldschluessel.txt` im Schlüsselordner, der mitgesichert wird):
+
+```bash
+sudo install -d -m 0700 /etc/credstore.encrypted
+sudo cp /var/lib/profomat/schluessel/feldschluessel.txt /root/feldschluessel.txt      # vorhandenen Schlüssel übernehmen!
+sudo systemd-creds encrypt --name=profomat-feldschluessel /root/feldschluessel.txt /etc/credstore.encrypted/profomat-feldschluessel
+sudo shred -u /root/feldschluessel.txt
+# Drop-in: LoadCredentialEncrypted=profomat-feldschluessel:/etc/credstore.encrypted/profomat-feldschluessel
+```
+
+Danach die Datei im Schlüsselordner entfernen und eine Zweitablage im Passwortsafe anlegen. Schlüsselwechsel: neue Zeile
+`2:<Base64 von 32 Byte>` anhängen (die alte bleibt), Dienst neu starten – der Bestand wird beim Start neu verschlüsselt.
+
+**Verschlüsselte Sicherung:** `age-keygen -o profomat-sicherung.key` offline erzeugen, nur den öffentlichen Schlüssel auf den Server:
+`/etc/profomat/sicherung.env` mit `AGE_EMPFAENGER="age1…"` und optional `KOPIE_ZIEL="rsync:benutzer@host:/pfad"`; auf dem Server
+`apt install age`. Die letzte Sicherung steht in `/var/backups/profomat/letzte-sicherung.txt` (auch im Sicherheitsbericht).
+
+**Pakete:** `deploy.ps1` legt neben `profomat.tar.gz` die Prüfsumme (`.sha256`) und die Stückliste (`profomat-sbom.cdx.json`, auch im
+Paket als `sbom.cdx.json`) ab; das CycloneDX-Werkzeug kommt aus `dotnet-tools.json` (`dotnet tool restore`).
+
+**Prüferkonto:** `sudo bash /tmp/profomat-kit/werkzeuge/pruefer-konto.sh anlegen 14 pruefer.pub` – entfernen mit `… entfernen`.
+
+**Schalter** (in `/etc/profomat/profomat.env`): `Sicherheit__VerwaltungNetze__0=131.173.0.0/16`, `Betrieb__Metriken__Netze__0=…`,
+`Betrieb__Otlp__Endpunkt=…`, `Betrieb__Logformat=json`, `Betrieb__SecurityTxt__Kontakt=mailto:…`.

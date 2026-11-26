@@ -152,15 +152,27 @@ $verboten = Get-ChildItem $build -Recurse -File |
     Where-Object { $_.Name -match '\.(db(-wal|-shm)?|pem|pfx|key)$' -or $_.FullName -match '[\\/](data|logs|schluessel)[\\/]' }
 if ($verboten) { throw "Build enthält Daten- oder Schlüsseldateien (z. B. $($verboten[0].FullName)) – abgebrochen." }
 
+# Stückliste (SBOM, CycloneDX) je Version: liegt im Paket (sbom.cdx.json) und daneben – für Abhängigkeitsprüfung (z. B. Dependency-Track)
+Write-Host "» SBOM (CycloneDX)" -ForegroundColor Cyan
+$version = (Get-Item (Join-Path $build "ProfOMat.Web.dll")).VersionInfo.ProductVersion -replace '\+.*$', ''
+dotnet tool restore --tool-manifest (Join-Path $wurzel "dotnet-tools.json") | Out-Null
+dotnet tool run dotnet-CycloneDX (Join-Path $wurzel "src\ProfOMat.Web\ProfOMat.Web.csproj") -o $build -fn "sbom.cdx.json" -F Json -rs -ipr `
+    -sn "ProfOMat" -sv $version -dpr | Out-Null
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path (Join-Path $build "sbom.cdx.json"))) { throw "SBOM erzeugen fehlgeschlagen." }
+
 $archiv = Join-Path $ausgabe "profomat.tar.gz"
 & $tar -czf $archiv -C $ausgabe profomat
 if ($LASTEXITCODE -ne 0) { throw "Archiv packen fehlgeschlagen." }
-Write-Host ("✓ gebaut: {0} ({1:N1} MB)" -f $archiv, ((Get-Item $archiv).Length / 1MB)) -ForegroundColor Green
+Copy-Item (Join-Path $build "sbom.cdx.json") (Join-Path $ausgabe "profomat-sbom.cdx.json") -Force
+# Prüfsumme je Paket: ausrollen.sh prüft sie vor jeder Änderung (beschädigt oder unterwegs verändert → Abbruch)
+$pruefsumme = (Get-FileHash $archiv -Algorithm SHA256).Hash.ToLowerInvariant()
+[IO.File]::WriteAllText("$archiv.sha256", "$pruefsumme  profomat.tar.gz`n")
+Write-Host ("✓ gebaut: {0} ({1:N1} MB), SHA-256 {2}" -f $archiv, ((Get-Item $archiv).Length / 1MB), $pruefsumme) -ForegroundColor Green
 if ($NurBauen) { return }
 
 Kit-Hochladen
 Write-Host "» Archiv hochladen" -ForegroundColor Cyan
-scp @sshArgs $archiv "${Ziel}:/tmp/profomat.tar.gz"
+scp @sshArgs $archiv "$archiv.sha256" "${Ziel}:/tmp/"
 if ($LASTEXITCODE -ne 0) { throw "Archiv hochladen fehlgeschlagen." }
 $optionen = @("--modus", $Modus)
 if ($DbNeu) { $optionen += "--db-neu" }

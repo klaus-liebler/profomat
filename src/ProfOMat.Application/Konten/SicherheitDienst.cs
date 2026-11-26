@@ -14,7 +14,7 @@ public sealed record AuthenticatorEinrichtung(string Schluessel, string OtpauthU
 /// verknüpfte Identitätsdienste. Alles nur am eigenen Konto: Ist jemand angemeldet, muss es dessen Konto sein. Ohne Sitzung (Einrichtung
 /// des Pflicht-Faktors direkt nach Passwort oder SSO) übergibt die Anmeldeseite das Konto aus dem kurzlebigen Zwischen-Cookie von Identity.
 /// </summary>
-public sealed class SicherheitDienst(UserManager<Konto> identitaet, IAktuellerBenutzer aktuell, Protokoll protokoll, IDaten daten)
+public sealed class SicherheitDienst(UserManager<Konto> identitaet, IAktuellerBenutzer aktuell, Protokoll protokoll, IDaten daten, ISicherheitsprotokoll sicherheit)
 {
     public const int AnzahlWiederherstellungscodes = 10;
     public const string Aussteller = "ProfOMat";
@@ -49,6 +49,7 @@ public sealed class SicherheitDienst(UserManager<Konto> identitaet, IAktuellerBe
         await identitaet.SetTwoFactorEnabledAsync(konto, true);
         var codes = (await identitaet.GenerateNewTwoFactorRecoveryCodesAsync(konto, AnzahlWiederherstellungscodes))?.ToList() ?? [];
         protokoll.Eintragen(KontoDienst.AlsBenutzer(konto), "Konto.ZweiterFaktor", "Zweiter Faktor (Authenticator-App) eingerichtet", konto.Id);
+        await sicherheit.EintragenAsync("Konto.Sicherheit", konto.Id, "Zweiter Faktor (Authenticator-App) eingerichtet", abbruch);
         await daten.SpeichernAsync(abbruch);
         return codes;
     }
@@ -64,6 +65,7 @@ public sealed class SicherheitDienst(UserManager<Konto> identitaet, IAktuellerBe
 
         var codes = (await identitaet.GenerateNewTwoFactorRecoveryCodesAsync(konto, AnzahlWiederherstellungscodes))?.ToList() ?? [];
         protokoll.Eintragen(KontoDienst.AlsBenutzer(konto), "Konto.ZweiterFaktor", "Neue Wiederherstellungscodes erzeugt", konto.Id);
+        await sicherheit.EintragenAsync("Konto.Sicherheit", konto.Id, "Neue Wiederherstellungscodes erzeugt", abbruch);
         await daten.SpeichernAsync(abbruch);
         return codes;
     }
@@ -80,6 +82,7 @@ public sealed class SicherheitDienst(UserManager<Konto> identitaet, IAktuellerBe
 
         konto.ZweitenFaktorZuruecksetzen();
         protokoll.Eintragen(KontoDienst.AlsBenutzer(konto), "Konto.ZweiterFaktor", "Zweiter Faktor ausgeschaltet", konto.Id);
+        await sicherheit.EintragenAsync("Konto.Sicherheit", konto.Id, "Zweiter Faktor ausgeschaltet", abbruch);
         await daten.SpeichernAsync(abbruch);
     }
 
@@ -97,6 +100,7 @@ public sealed class SicherheitDienst(UserManager<Konto> identitaet, IAktuellerBe
         }
 
         protokoll.Eintragen(KontoDienst.AlsBenutzer(konto), "Konto.Passkey", "Passkey hinzugefügt", konto.Id);
+        await sicherheit.EintragenAsync("Konto.Sicherheit", konto.Id, "Passkey hinzugefügt", abbruch);
         await daten.SpeichernAsync(abbruch);
     }
 
@@ -112,6 +116,7 @@ public sealed class SicherheitDienst(UserManager<Konto> identitaet, IAktuellerBe
 
         await identitaet.RemovePasskeyAsync(konto, p.CredentialId);
         protokoll.Eintragen(KontoDienst.AlsBenutzer(konto), "Konto.Passkey", "Passkey entfernt", konto.Id);
+        await sicherheit.EintragenAsync("Konto.Sicherheit", konto.Id, "Passkey entfernt", abbruch);
         await daten.SpeichernAsync(abbruch);
     }
 
@@ -138,6 +143,7 @@ public sealed class SicherheitDienst(UserManager<Konto> identitaet, IAktuellerBe
         }
 
         protokoll.Eintragen(KontoDienst.AlsBenutzer(konto), "Konto.Verknuepft", $"Mit {ext.Anbieter} verknüpft", konto.Id);
+        await sicherheit.EintragenAsync("Konto.Sicherheit", konto.Id, $"Mit {ext.Anbieter} verknüpft", abbruch);
         await daten.SpeichernAsync(abbruch);
     }
 
@@ -153,6 +159,7 @@ public sealed class SicherheitDienst(UserManager<Konto> identitaet, IAktuellerBe
 
         await identitaet.RemoveLoginAsync(konto, a.Anbieter, a.Schluessel);
         protokoll.Eintragen(KontoDienst.AlsBenutzer(konto), "Konto.Verknuepft", $"Verknüpfung mit {a.Anbieter} getrennt", konto.Id);
+        await sicherheit.EintragenAsync("Konto.Sicherheit", konto.Id, $"Verknüpfung mit {a.Anbieter} getrennt", abbruch);
         await daten.SpeichernAsync(abbruch);
     }
 

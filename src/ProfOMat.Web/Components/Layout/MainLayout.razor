@@ -103,6 +103,7 @@
         new("Verwaltung", "Konten", "konten", Recht: ProfOMat.Application.Betrieb.Rechte.Verwaltung),
         new("Verwaltung", "Postausgang", "postausgang", Recht: ProfOMat.Application.Betrieb.Rechte.Verwaltung),
         new("Verwaltung", "Protokoll", "protokoll", Recht: ProfOMat.Application.Betrieb.Rechte.Verwaltung),
+        new("Verwaltung", "Revision", "revision", Recht: ProfOMat.Application.Betrieb.Rechte.Revision),
     ];
 
     private IEnumerable<Navigationspunkt> Sichtbar => Punkte.Where(p => !p.NurAngemeldet || benutzer is { Angemeldet: true });
