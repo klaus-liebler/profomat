@@ -177,9 +177,9 @@ pruefe "abgebrochen mit Hinweis auf den Port" '[[ $rc -ne 0 ]] && grep -q "Port 
 kill $fremd; wait $fremd 2>/dev/null; systemctl start "$DIENST"
 
 szenario "Verbotener Schalter in der Umgebungsdatei → Abbruch"
-echo "Demodaten__Anlegen=true" >> /etc/$DIENST/$DIENST.env
+echo "Anmeldung__TestanmeldungErlaubt=true" >> /etc/$DIENST/$DIENST.env
 ausrollen --pruefen /tmp/v2.tar.gz >/dev/null 2>&1; pruefe "abgebrochen" '[[ $? -ne 0 ]]'
-sed -i '/Demodaten__Anlegen/d' /etc/$DIENST/$DIENST.env
+sed -i "/TestanmeldungErlaubt/d" /etc/$DIENST/$DIENST.env
 
 szenario "Prüfsumme des Pakets falsch → Abbruch, Prüfsumme richtig → läuft"
 cp /tmp/v2.tar.gz /tmp/$DIENST.tar.gz
