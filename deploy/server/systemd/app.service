@@ -1,0 +1,45 @@
+# @SYSTEM@ als systemd-Dienst – Vorlage des Deploy-Kits (KIT-DATEI), gefüllt aus konfiguration.env und umgebung.kit,
+# abgelegt als /etc/systemd/system/@DIENST@.service. Eine vorhandene Unit ändert das Kit nie; Fehlendes kommt in ein Drop-in.
+# Programm in /opt/@DIENST@ (framework-abhängig: ASP.NET-Core-Runtime auf dem Server; self-contained: Runtime im Paket),
+# Daten getrennt in /var/lib/@DIENST@, Datenbank im Container @DIENST@-db (nur 127.0.0.1:@DB_PORT@).
+# Geheimnisse und bewusste Schalter stehen nur in /etc/@DIENST@/@DIENST@.env (root:@DIENST@, 0640).
+[Unit]
+Description=@SYSTEM@
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=@DIENST@
+Group=@DIENST@
+WorkingDirectory=/opt/@DIENST@
+ExecStart=/opt/@DIENST@/@APP@
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+# Nur lokal: nach außen spricht ausschließlich der Reverse Proxy (TLS)
+Environment=ASPNETCORE_URLS=http://127.0.0.1:@PORT@
+Environment=DOTNET_NOLOGO=1
+Environment=DOTNET_CLI_TELEMETRY_OPTOUT=1
+@UMGEBUNG_SYSTEMD@
+EnvironmentFile=-/etc/@DIENST@/@DIENST@.env
+
+# Neue Dateien nur für den Dienst lesbar (Schlüssel)
+UMask=0027
+
+# Härtung
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths=/var/lib/@DIENST@ /var/log/@DIENST@ /var/backups/@DIENST@
+
+[Install]
+WantedBy=multi-user.target

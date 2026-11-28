@@ -1,0 +1,13 @@
+# ProfOMat – feste Umgebung der Anwendung, eine Zeile SCHLÜSSEL=WERT (eigene Datei je System). Das Kit trägt sie in die systemd-Unit
+# (Environment=) bzw. in compose.yml (environment:) ein. Platzhalter: @HOST@ @PFAD@ @PORT@ @DIENST@ @DB_PORT@ @DB_NAME@.
+# Vorsilbe „nativ:“ bzw. „docker:“ = nur in dieser Betriebsart. Geheimnisse und Schalter gehören NICHT hierher, sondern in
+# /etc/@DIENST@/@DIENST@.env auf dem Server (Vorlage: profomat.env.beispiel).
+ASPNETCORE_ENVIRONMENT=Testsystem
+PathBase=@PFAD@
+ReverseProxy__Aktiv=true
+ReverseProxy__Host=@HOST@
+# im Container kommt nginx über das Docker-Netz (nicht Loopback): nur diesem Bereich die Weiterleitungs-Köpfe glauben
+docker:ReverseProxy__Netze__0=172.16.0.0/12
+ProfOMat__OeffentlicheAdresse=https://@HOST@@PFAD@/
+Speicher__Schluessel=/var/lib/@DIENST@/schluessel
+Speicher__Logs=/var/log/@DIENST@

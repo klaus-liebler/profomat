@@ -1,4 +1,4 @@
-# Voraussetzungen vor dem Ausrollen prüfen – ÄNDERT NICHTS (wird per „source“ eingebunden; erwartet gemeinsam.sh).
+# Voraussetzungen vor dem Ausrollen prüfen – ÄNDERT NICHTS (wird per „source“ eingebunden; erwartet gemeinsam.sh). KIT-DATEI.
 # Fehler werden gesammelt und am Ende gemeinsam gemeldet (pruef_ende), damit man alles in einem Durchgang beheben kann.
 # Allgemein gehalten für Ubuntu/Debian mit systemd; andere Distributionen laufen mit Warnung, solange die Programme da sind.
 
@@ -17,8 +17,8 @@ pruef_ende() {
 }
 
 # Paketnamen (Debian/Ubuntu) für fehlende Programme – nur für die Meldung
-declare -A PAKET_FUER=( [nginx]=nginx [curl]=curl [sqlite3]=sqlite3 [tar]=tar [ss]=iproute2 [journalctl]=systemd
-                        [systemctl]=systemd [docker]=docker.io [flock]=util-linux [df]=coreutils [awk]=gawk )
+declare -A PAKET_FUER=( [nginx]=nginx [curl]=curl [sqlite3]=sqlite3 [tar]=tar [ss]=iproute2 [journalctl]=systemd [systemd-run]=systemd
+                        [systemctl]=systemd [docker]="docker.io docker-compose-v2" [flock]=util-linux [df]=coreutils [awk]=gawk [sha256sum]=coreutils )
 
 system_pruefen() {
     local id="" like="" name=""
@@ -46,12 +46,15 @@ programme_pruefen() {
     fi
 }
 
-docker_pruefen() {
-    command -v docker >/dev/null 2>&1 || { pruef_fehler "Modus docker: docker fehlt – sudo apt install docker.io docker-compose-v2"; return; }
-    docker compose version >/dev/null 2>&1 \
-        || { pruef_fehler "Modus docker: „docker compose“ fehlt – sudo apt install docker-compose-v2"; return; }
-    docker info >/dev/null 2>&1 || { pruef_fehler "Modus docker: Docker-Dienst läuft nicht – sudo systemctl enable --now docker"; return; }
-    ok "Docker $(docker version --format '{{.Server.Version}}' 2>/dev/null) mit Compose $(docker compose version --short 2>/dev/null)"
+docker_pruefen() {   # Docker braucht jede Betriebsart (PostgreSQL läuft im Container), Compose nur der Modus docker
+    command -v docker >/dev/null 2>&1 || { pruef_fehler "docker fehlt (PostgreSQL läuft im Container) – sudo apt install docker.io docker-compose-v2"; return; }
+    docker info >/dev/null 2>&1 || { pruef_fehler "Docker-Dienst läuft nicht – sudo systemctl enable --now docker"; return; }
+    if [[ "$MODUS" == "docker" ]]; then
+        docker compose version >/dev/null 2>&1 || { pruef_fehler "Modus docker: „docker compose“ fehlt – sudo apt install docker-compose-v2"; return; }
+        ok "Docker $(docker version --format '{{.Server.Version}}' 2>/dev/null) mit Compose $(docker compose version --short 2>/dev/null)"
+    else
+        ok "Docker $(docker version --format '{{.Server.Version}}' 2>/dev/null) (für den Datenbank-Container)"
+    fi
 }
 
 # Belegt jemand anderes den Port? Der eigene Dienst bzw. Container darf ihn halten (wird beim Umschalten gestoppt).
@@ -72,38 +75,49 @@ docker_container_aktiv() {
     command -v docker >/dev/null 2>&1 && [[ "$(docker inspect -f '{{.State.Running}}' "$DIENST" 2>/dev/null)" == "true" ]]
 }
 
-# platz_pruefen <archiv>: genug Platz für entpacktes Paket, vorige Version und Sicherung?
+# platz_pruefen <archiv>: genug Platz für entpacktes Paket, vorige Version und Sicherung der Datenbanken?
 platz_pruefen() {
-    local archiv="$1" bedarf_kb frei_kb db_kb=0 ort
+    local archiv="$1" bedarf_kb frei_kb db_kb=0 ort noetig
     bedarf_kb=$(( $(stat -c %s "$archiv") / 1024 * 4 + 200 * 1024 ))   # entpackt ≈ 3× Archiv, plus Reserve
-    [[ -f "$DB" ]] && db_kb=$(( $(stat -c %s "$DB") / 1024 ))
-    for ort in /opt "$DATEN" "$SICHERUNGEN"; do
+    if db_container_bereit; then
+        db_kb=$(( $(psql_admin "SELECT COALESCE(sum(pg_database_size(datname)), 0) FROM pg_database WHERE NOT datistemplate" 2>/dev/null || echo 0) / 1024 ))
+    fi
+    for ort in /opt "$DATEN" "$SICHERUNGEN" /var/lib/docker; do
         [[ -d "$ort" ]] || continue
         frei_kb=$(df --output=avail -k "$ort" | tail -1 | tr -d ' ')
-        local noetig=$bedarf_kb
-        [[ "$ort" == "$SICHERUNGEN" || "$ort" == "$DATEN" ]] && noetig=$(( db_kb * 2 + 50 * 1024 ))
+        noetig=$bedarf_kb
+        [[ "$ort" == "$SICHERUNGEN" || "$ort" == /var/lib/docker ]] && noetig=$(( db_kb * 2 + 100 * 1024 ))
+        [[ "$ort" == "$DATEN" ]] && noetig=$(( 50 * 1024 ))
         if (( frei_kb < noetig )); then
             pruef_fehler "Zu wenig Platz in $ort: frei $((frei_kb / 1024)) MB, nötig etwa $((noetig / 1024)) MB (df -h $ort)."
             return
         fi
     done
-    ok "Speicherplatz reicht"
+    ok "Speicherplatz reicht (Datenbanken zusammen $((db_kb / 1024)) MB)"
 }
 
-# Grundgerüst aus Schritt 01 (Dienstbenutzer, Verzeichnisse, Umgebungsdatei, Sicherungsskript)
+# Grundgerüst aus einrichten.sh (Dienstbenutzer, Verzeichnisse, Umgebungsdatei, Sicherungsskript) und postgresql.sh (Container, Verbindung)
 grundgeruest_pruefen() {
     local fehlt=()
     id "$DIENST" >/dev/null 2>&1 || fehlt+=("Dienstbenutzer $DIENST")
     [[ -d "$DATEN" ]] || fehlt+=("$DATEN")
     [[ -d "$SICHERUNGEN" ]] || fehlt+=("$SICHERUNGEN")
+    [[ -f "$UMGEBUNG" ]] || fehlt+=("$UMGEBUNG")
     [[ -x "/usr/local/sbin/$DIENST-sicherung.sh" ]] || fehlt+=("/usr/local/sbin/$DIENST-sicherung.sh")
     if (( ${#fehlt[@]} )); then
-        pruef_fehler "Schritt 01 fehlt (${fehlt[*]}) – erst: sudo bash $KIT/schritte/01-einrichten.sh"
+        pruef_fehler "Einrichtung fehlt (${fehlt[*]}) – erst: sudo bash $KIT/schritte/einrichten.sh"
     else
-        ok "Grundgerüst aus Schritt 01 vorhanden"
+        ok "Grundgerüst vorhanden (einrichten.sh)"
     fi
-    if [[ -f "$UMGEBUNG" ]] && grep -qsE '^\s*(Anmeldung__TestanmeldungErlaubt|Demodaten__Anlegen)\s*=\s*[Tt]rue' "$UMGEBUNG"; then
-        pruef_fehler "In $UMGEBUNG ist Testanmeldung oder Demodaten eingeschaltet – auf dem öffentlichen Server verboten. Zeile entfernen."
+    if [[ -f "$UMGEBUNG" ]] && grep -qsE "$VERBOTEN_MUSTER" "$UMGEBUNG"; then
+        pruef_fehler "In $UMGEBUNG ist ein auf dem Server verbotener Schalter eingeschaltet: $(grep -E "$VERBOTEN_MUSTER" "$UMGEBUNG" | head -1) – Zeile entfernen."
+    fi
+    if ! grep -qsE "^\s*ConnectionStrings__${VERBINDUNG}=" "$UMGEBUNG" || [[ ! -f "$PG_UMGEBUNG" ]]; then
+        pruef_fehler "Datenbank nicht eingerichtet (ConnectionStrings__$VERBINDUNG in $UMGEBUNG bzw. $PG_UMGEBUNG fehlt) – erst: sudo bash $KIT/schritte/postgresql.sh"
+    elif ! db_container_bereit; then
+        pruef_fehler "PostgreSQL-Container $DB_CONTAINER läuft nicht bzw. antwortet nicht – sudo docker start $DB_CONTAINER (sonst postgresql.sh)"
+    else
+        ok "PostgreSQL bereit: Container $DB_CONTAINER ($(psql_admin 'SHOW server_version' 2>/dev/null | cut -d' ' -f1))"
     fi
 }
 

@@ -1,5 +1,5 @@
 # Konfiguration abgleichen: systemd-Unit und nginx (wird per „source“ eingebunden; erwartet gemeinsam.sh, pruefen.sh,
-# liebler-nginx.sh). Grundsatz: Bestehende Einträge werden NIE verändert.
+# liebler-nginx.sh). KIT-DATEI. Grundsatz: Bestehende Einträge werden NIE verändert.
 #   • Fehlt etwas, wird es ergänzt – bei systemd in einer eigenen Drop-in-Datei (/etc/systemd/system/<dienst>.service.d/50-kit.conf),
 #     die Unit selbst bleibt, wie sie ist.
 #   • Steht etwas anders da als erwartet (fremder Port, anderes Programm, fremde nginx-Datei mit unserem Pfad …), bricht die
@@ -42,11 +42,6 @@ konfig_zurueck() {
 }
 konfig_protokoll_schreiben() { printf '%s\n' "${KONFIG_PROTOKOLL[@]}" > "$1"; }
 
-# Vorlage mit den Werten aus konfiguration.env füllen (wie vorlage_einspielen, aber nur ausgeben)
-vorlage_fuellen() {
-    sed -e "s|@HOST@|$HOST|g" -e "s|@PFAD@|$PFAD|g" -e "s|@PORT@|$PORT|g" -e "s|@DIENST@|$DIENST|g" "$KIT/$1"
-}
-
 # ---------- systemd ----------
 # Einträge des Abschnitts [Service] als „schlüssel<TAB>wert“; Environment je Variable als „Environment:NAME“.
 _service_eintraege() {
@@ -70,7 +65,7 @@ DIENST_AKTION=""        # anlegen | ergaenzen | ""
 DIENST_ERGAENZUNG=()    # fehlende Zeilen für das Drop-in
 dienst_planen() {
     local soll fragment ist_dateien=() k v zeile
-    soll=$(mktemp); vorlage_fuellen systemd/profomat.service > "$soll"
+    soll=$(mktemp); vorlage_fuellen systemd/app.service > "$soll"
     DIENST_AKTION=""; DIENST_ERGAENZUNG=()
 
     fragment=$(systemctl show -p FragmentPath --value "$DIENST" 2>/dev/null || true)
@@ -130,7 +125,7 @@ dienst_anwenden() {
     case "$DIENST_AKTION" in
         anlegen)
             konfig_merken "$UNIT"
-            vorlage_fuellen systemd/profomat.service > "$UNIT"; chmod 0644 "$UNIT"; neu=1
+            vorlage_fuellen systemd/app.service > "$UNIT"; chmod 0644 "$UNIT"; neu=1
             ok "systemd: $UNIT angelegt" ;;
         ergaenzen)
             konfig_merken "$DROPIN"
@@ -157,6 +152,9 @@ NGINX_EINBINDUNG="" # Inhalt für liebler.d/<dienst>.conf
 _eigene_datei() {   # <ziel> <erste-zeile-der-vorlage>: gehört die vorhandene Datei dem Kit?
     [[ "$(head -1 "$1")" == "$2" ]]
 }
+# Inhalt von $LIEBLER_D/<dienst>.conf (eine Zeile Kopf zur Wiedererkennung, dann die Einbindung)
+nginx_einbindung() { printf '# %s – Ziel: %s/%s.conf (Deploy-Kit %s)\ninclude /etc/nginx/snippets/%s-locations.conf;' "$SYSTEM" "$LIEBLER_D" "$DIENST" "$DIENST" "$DIENST"; }
+
 nginx_planen() {
     local paar vorlage ziel soll erste
     NGINX_DATEIEN=()
@@ -170,7 +168,7 @@ nginx_planen() {
     grep -rqsE 'map\s+\$http_upgrade\s+\$connection_upgrade' /etc/nginx \
         || pruef_fehler "nginx: „map \$http_upgrade \$connection_upgrade“ fehlt (Blazor braucht WebSockets) – gehört ins Grundgerüst (VibeVHS-Kit)."
 
-    for paar in "nginx/profomat-proxy.conf|/etc/nginx/snippets/$DIENST-proxy.conf" "nginx/profomat-locations.conf|/etc/nginx/snippets/$DIENST-locations.conf"; do
+    for paar in "nginx/proxy.conf|/etc/nginx/snippets/$DIENST-proxy.conf" "nginx/locations.conf|/etc/nginx/snippets/$DIENST-locations.conf"; do
         vorlage="${paar%%|*}"; ziel="${paar#*|}"
         soll=$(vorlage_fuellen "$vorlage"); erste=$(head -1 <<<"$soll")
         if [[ -f "$ziel" ]]; then
@@ -182,8 +180,9 @@ nginx_planen() {
         fi
         NGINX_DATEIEN+=("$paar")
     done
-    NGINX_EINBINDUNG=$(printf '# ProfOMat – Ziel: %s/%s.conf (Kit profomat, Schritt 01)\ninclude /etc/nginx/snippets/%s-locations.conf;' "$LIEBLER_D" "$DIENST" "$DIENST")
-    if [[ -f "$LIEBLER_D/$DIENST.conf" ]] && ! _eigene_datei "$LIEBLER_D/$DIENST.conf" "$(head -1 <<<"$NGINX_EINBINDUNG")"; then
+    NGINX_EINBINDUNG=$(nginx_einbindung)
+    # eigene Datei = erste Zeile nennt das Ziel (auch die Kopfzeilen früherer Kit-Fassungen: „… – Ziel: …/<dienst>.conf (Kit …)“)
+    if [[ -f "$LIEBLER_D/$DIENST.conf" ]] && ! head -1 "$LIEBLER_D/$DIENST.conf" | grep -qF "Ziel: $LIEBLER_D/$DIENST.conf"; then
         pruef_fehler "nginx: $LIEBLER_D/$DIENST.conf stammt nicht aus diesem Kit – wird nicht überschrieben."
     fi
 

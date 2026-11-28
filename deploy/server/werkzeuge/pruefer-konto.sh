@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # Befristetes Serverkonto „pruefer“ für Sicherheitsprüfungen (Zielbild Abschnitt 6): Anmeldung nur per SSH-Schlüssel, darf
 # ausschließlich lesende Befehle mit sudo ausführen (wirksame Proxy- und Dienstkonfiguration, Firewall, Logs, Rechte der Datenordner).
-# Das Konto läuft automatisch ab (useradd -e); entfernen jederzeit mit „entfernen“.
+# Das Konto läuft automatisch ab (useradd -e); entfernen jederzeit mit „entfernen“. KIT-DATEI (Vorlage → /usr/local/sbin/@DIENST@-pruefer-konto.sh).
 #
 #   sudo bash pruefer-konto.sh anlegen <tage> <datei-mit-oeffentlichem-ssh-schluessel>
 #   sudo bash pruefer-konto.sh entfernen
 #   sudo bash pruefer-konto.sh zeigen
 set -euo pipefail
 KONTO="pruefer"
-DIENST="profomat"
+DIENST="@DIENST@"
 SUDOERS="/etc/sudoers.d/$DIENST-$KONTO"
 BERICHT="/usr/local/sbin/$DIENST-pruefbericht"
 
@@ -33,12 +33,13 @@ anlegen() {
 #!/usr/bin/env bash
 # Nur lesend: Kurzbericht für Prüfende (Geheimnisse maskiert)
 set -u
-echo "== Dienst";  systemctl show profomat -p ActiveState,SubState,User,ExecStart --no-pager
+echo "== Dienst";  systemctl show @DIENST@ -p ActiveState,SubState,User,ExecStart --no-pager
 echo "== Umgebung (Geheimnisse maskiert)"
-systemctl show profomat -p Environment --no-pager | tr ' ' '\n' | sed -E 's/((Passwort|Password|Secret|Schluessel|Key)[^=]*=).*/\1***/I'
-[[ -f /etc/profomat/profomat.env ]] && grep -vE '^\s*(#|$)' /etc/profomat/profomat.env | sed -E 's/((Passwort|Password|Secret|Schluessel|Key)[^=]*=).*/\1***/I'
-echo "== Dateirechte"; ls -la /var/lib/profomat /var/lib/profomat/schluessel /var/backups/profomat 2>/dev/null | sed -E 's/ [^ ]+$/ …&/'
-echo "== Letzte Sicherung"; cat /var/backups/profomat/letzte-sicherung.txt 2>/dev/null || echo "keine Statusdatei"
+systemctl show @DIENST@ -p Environment --no-pager | tr ' ' '\n' | sed -E 's/((Passwort|Password|Secret|Schluessel|Key)[^=]*=).*/\1***/I'
+[[ -f /etc/@DIENST@/@DIENST@.env ]] && grep -vE '^\s*(#|$)' /etc/@DIENST@/@DIENST@.env | sed -E 's/((Passwort|Password|Secret|Schluessel|Key)[^=]*=).*/\1***/I'
+echo "== Dateirechte"; ls -la /var/lib/@DIENST@ /var/lib/@DIENST@/schluessel /var/backups/@DIENST@ 2>/dev/null | sed -E 's/ [^ ]+$/ …&/'
+echo "== Datenbank"; docker ps --filter name=@DIENST@-db --format '{{.Names}} {{.Image}} {{.Status}} {{.Ports}}' 2>/dev/null
+echo "== Letzte Sicherung"; cat /var/backups/@DIENST@/letzte-sicherung.txt 2>/dev/null || echo "keine Statusdatei"
 SKRIPT
     chmod 0755 "$BERICHT"
 

@@ -1,7 +1,7 @@
-# ProfOMat als Container (Modus docker) – Vorlage; ausrollen.sh füllt @…@ aus konfiguration.env und legt sie als
-# /opt/@DIENST@-docker/compose.yml ab, dazu .env mit BILD (Version) und UID/GID des Dienstbenutzers.
-# Datenbank: ProfOMat nutzt SQLite – die Datei liegt im Datenordner des Hosts, ein eigener Datenbank-Container ist nicht nötig.
-# (SchoolCraft ergänzt hier einen Dienst „datenbank“ mit postgres:17 ohne veröffentlichten Port.)
+# Anwendung als Container (Modus docker) – Vorlage des Deploy-Kits (KIT-DATEI); ausrollen.sh füllt @…@ aus konfiguration.env und
+# umgebung.kit und legt sie als /opt/@DIENST@-docker/compose.yml ab, dazu .env (0600) mit BILD (Version), UID/GID des Dienstbenutzers
+# und dem Datenbankpasswort. Die Datenbank ist der Container @DB_CONTAINER@ (postgres:17, Schritt postgresql.sh) im Netz @DB_NETZ@ –
+# derselbe wie bei nativem Betrieb, ein Wechsel der Betriebsart lässt die Daten, wo sie sind.
 name: @DIENST@
 services:
   app:
@@ -13,21 +13,16 @@ services:
       - path: /etc/@DIENST@/@DIENST@.env
         required: false
     environment:
-      ASPNETCORE_ENVIRONMENT: Testsystem
-      PathBase: @PFAD@
-      ReverseProxy__Aktiv: "true"
-      ReverseProxy__Host: @HOST@
-      # nginx kommt über das Docker-Netz (nicht Loopback): nur diesem Bereich die Weiterleitungs-Köpfe glauben
-      ReverseProxy__Netze__0: 172.16.0.0/12
-      ProfOMat__OeffentlicheAdresse: https://@HOST@@PFAD@/
-      ConnectionStrings__ProfOMat: Data Source=/var/lib/@DIENST@/@DB_DATEI@
-      Speicher__Schluessel: /var/lib/@DIENST@/schluessel
-      Speicher__Logs: /var/log/@DIENST@
+@UMGEBUNG_COMPOSE@
+      # im Container-Netz zur Datenbank (überschreibt die Verbindung über 127.0.0.1 aus der Umgebungsdatei)
+      ConnectionStrings__@VERBINDUNG@: "Host=@DB_CONTAINER@;Port=5432;Database=@DB_NAME@;Username=@DIENST@;Password=${POSTGRES_PASSWORD:?}"
     ports:
-      - "127.0.0.1:@PORT@:8080"      # nur lokal, nach außen spricht nginx
+      - "127.0.0.1:@PORT@:8080"      # nur lokal, nach außen spricht der Reverse Proxy
+    networks: [datenbank]
     volumes:
       - /var/lib/@DIENST@:/var/lib/@DIENST@
       - /var/log/@DIENST@:/var/log/@DIENST@
+      - /var/backups/@DIENST@:/var/backups/@DIENST@
     # Härtung wie die systemd-Unit: nur Lesezugriff aufs Abbild, keine Zusatzrechte
     read_only: true
     tmpfs: [/tmp]
@@ -38,3 +33,7 @@ services:
       driver: journald
       options:
         tag: "@DIENST@"
+networks:
+  datenbank:
+    name: @DB_NETZ@
+    external: true

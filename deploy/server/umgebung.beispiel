@@ -1,10 +1,11 @@
 # /etc/profomat/profomat.env – Geheimnisse und Schalter (root:profomat, 0640). NICHT ins Repository.
-# Schritt 01 legt die Datei an, falls sie fehlt. Nach Änderungen: sudo systemctl restart profomat
+# Der Kit-Schritt einrichten.sh legt die Datei an, falls sie fehlt; postgresql.sh trägt die Datenbankverbindung ein
+# (ConnectionStrings__ProfOMat=…). Nach Änderungen: sudo systemctl restart profomat (Docker: sudo bash <kit>/schritte/ausrollen.sh --neustart)
 #
 # Anmeldung (ASP.NET Core Identity): KEIN Passwort in dieser Datei. Das erste Konto (Systemverwaltung) legt man nach dem ersten
 # Ausrollen auf der Anmeldeseite an (Ersteinrichtung, danach sofort zweiter Faktor per Authenticator-App); weitere Konten nur per
 # Einladungslink (Verwaltung → Konten).
-# Testanmeldung und Demodaten sind auf dem öffentlichen Server verboten – ausrollen.sh bricht sonst ab.
+# Testanmeldung und Demodaten sind auf dem öffentlichen Server verboten – ausrollen.sh bricht sonst ab (VERBOTEN_MUSTER in konfiguration.env).
 
 # Mail (ohne Host wird nur simuliert: Log „Mail simuliert“, nichts verlässt den Server)
 #Mail__Host=

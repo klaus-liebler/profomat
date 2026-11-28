@@ -1,0 +1,11 @@
+# Täglich in der Nacht, je System leicht versetzt (zufällige Verzögerung) – Vorlage des Deploy-Kits → /etc/systemd/system/@DIENST@-sicherung.timer
+[Unit]
+Description=@SYSTEM@: Datenbanken und Schlüssel täglich sichern
+
+[Timer]
+OnCalendar=*-*-* 01:30:00
+RandomizedDelaySec=45min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

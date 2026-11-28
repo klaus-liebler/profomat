@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Nachbildung von systemd-run --wait --pipe für den Test: Umgebung aus -E und -p EnvironmentFile=, Arbeitsordner, dann das Programm.
+ab="/"; dateien=()
+while (( $# )); do
+    case "$1" in
+        --quiet|--wait|--pipe|--collect) ;;
+        -E) export "$2"; shift ;;
+        -p) case "$2" in EnvironmentFile=*) dateien+=("${2#*=}") ;; WorkingDirectory=*) ab="${2#*=}" ;; esac; shift ;;
+        *) break ;;
+    esac
+    shift
+done
+for f in "${dateien[@]}"; do
+    [[ -f "$f" ]] || continue
+    while IFS= read -r z; do [[ "$z" =~ ^[[:space:]]*(#|$) ]] || export "$z"; done < "$f"
+done
+cd "$ab" && exec "$@"

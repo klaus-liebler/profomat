@@ -1,4 +1,4 @@
-# Start der neuen Version beobachten (wird per „source“ eingebunden; erwartet gemeinsam.sh).
+# Start der neuen Version beobachten (wird per „source“ eingebunden; erwartet gemeinsam.sh). KIT-DATEI.
 # Rückwärts laufender Balken mit Countdown bis zum automatischen Rückweg. Abgebrochen wird SOFORT, wenn
 #   • der Dienst bzw. Container nicht mehr läuft oder neu gestartet wurde (Absturz),
 #   • im Startlog eine Zeile auf FEHLER_MUSTER passt (konfiguration.env), z. B. „Datenbankschema veraltet“,

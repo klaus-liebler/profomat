@@ -1,21 +1,23 @@
 # Bereitstellung auf dem Webserver
 
-Ziel: **https://liebler.iui.hs-osnabrueck.de/profomat/** auf demselben Server wie VibeVHS, FraktionPerfekt und Podium. Das Kit in
-`deploy/server` folgt dem FraktionPerfekt-Kit (`C:\repos\fraktionperfekt\deploy`): framework-abhängiger Linux-Build (gemeinsame ASP.NET-Core-Runtime aus VibeVHS-Schritt 09; `deploy.ps1 -MitRuntime` = self-contained), Programm in `/opt`,
-Daten in `/var/lib`, systemd-Dienst nur auf `127.0.0.1`, nginx davor (TLS, ohne Passwort – die App meldet selbst an, wie Podium), jeder root-Schritt als eigenes Skript
-mit Sicherung und Rückweg. Die nginx-Einbindung nutzt das gemeinsame Schema `schritte/liebler-nginx.sh` (identisch in allen Kits).
+Ziel: **https://liebler.iui.hs-osnabrueck.de/profomat/** auf demselben Server wie VibeVHS, FraktionPerfekt und Podium. Ausgerollt
+wird mit dem **gemeinsamen Deploy-Kit** in `deploy/server` (in allen vier Systemen gleich, Beschreibung:
+[`deploy/server/README.md`](../deploy/server/README.md)); ProfOMat-eigen sind nur `konfiguration.env`, `umgebung.kit`,
+`umgebung.beispiel` und `nginx/locations.conf`. Drei Betriebsarten (framework-abhängig mit der gemeinsamen ASP.NET-Core-Runtime 11,
+self-contained, Docker), Datenbank PostgreSQL 17 im eigenen Container, nginx davor (TLS, ohne Passwort – die App meldet selbst an).
 
 | | ProfOMat |
 |---|---|
 | Pfad | `/profomat` |
-| Kestrel | `127.0.0.1:5082` (VibeVHS 5080, FraktionPerfekt 5081, Podium 5090) |
-| Programm | `/opt/profomat` (vorige Version: `/opt/profomat.vorher`) |
-| Daten | `/var/lib/profomat` (`profomat.db`, `schluessel/` mit Systemsiegel- und Cookie-Schlüsseln) |
-| Logs | `/var/log/profomat` (Serilog, 30 Tage) und `journalctl -u profomat` |
-| Sicherungen | `/var/backups/profomat` (Datenbank + Schlüssel, vor jedem Update und täglich 02:00 Uhr) |
-| Umgebung | `/etc/profomat/profomat.env` (Schalter und Geheimnisse, root:profomat 0640) |
+| Kestrel bzw. Container | `127.0.0.1:5082` (VibeVHS 5080, FraktionPerfekt 5081, Podium 5090) |
+| Programm | `/opt/profomat` (vorige Version: `/opt/profomat.vorher`); Docker: `/opt/profomat-docker/compose.yml` |
+| Datenbank | Container `profomat-db` (postgres:17, Volume `profomat-db`), nur `127.0.0.1:5443`; Datenbank `profomat` |
+| Daten | `/var/lib/profomat` (`schluessel/` mit Systemsiegel-, Cookie-, TOTP- und Feldschlüsseln, SAML-Zertifikat) |
+| Logs | `/var/log/profomat` (Serilog, 30 Tage) und `journalctl -u profomat` bzw. `journalctl CONTAINER_NAME=profomat` |
+| Sicherungen | `/var/backups/profomat` (pg_dump mit Rücksicherungsprobe + Schlüssel, vor jedem Update und nachts) |
+| Umgebung | `/etc/profomat/profomat.env` (Schalter, Geheimnisse, Datenbankverbindung; root:profomat 0640), `/etc/profomat/postgres.env` (0600) |
 | nginx | `/etc/nginx/liebler.d/profomat.conf` → `/etc/nginx/snippets/profomat-*.conf` |
-| Schema | EnsureCreated + `Schemaversion`, Aufwertungen ab Version 7 im Code (siehe „Update“) |
+| Schema | EF-Core-Migrationen; Vorabprüfung `ProfOMat.Web --datenbankstand` |
 
 ## Sicherheitsstand – bitte zuerst lesen
 
@@ -28,7 +30,7 @@ mit Sicherung und Rückweg. Die nginx-Einbindung nutzt das gemeinsame Schema `sc
     Server-Log; in der Datenbank liegt nur ihr SHA-256.
   - Passwörter: PBKDF2-HMAC-SHA512 (210 000 Iterationen), mindestens 12 Zeichen; nach 5 Fehlversuchen je IP und Kennung wachsende
     Wartezeit bis 5 Minuten. Sperren, Rollenänderung oder neues Passwort beenden bestehende Sitzungen.
-  - Kein Passwort in `profomat.env`. **Testanmeldung und Demodaten sind verboten** – `01-einrichten.sh` und `ausrollen.sh` brechen ab,
+  - Kein Passwort in `profomat.env`. **Testanmeldung und Demodaten sind verboten** – `einrichten.sh` und `ausrollen.sh` brechen ab,
     wenn `Anmeldung__TestanmeldungErlaubt=true` oder `Demodaten__Anlegen=true` gesetzt ist.
 - **Studierende** brauchen kein Konto: Den Antrag auf mündliche Drittprüfung unterschreiben sie über einen persönlichen Einladungslink,
   den die Erstprüfenden im ProfOMat erzeugen und selbst per Mail verschicken (Zufallstoken, in der Datenbank nur als SHA-256,
@@ -39,101 +41,77 @@ mit Sicherung und Rückweg. Die nginx-Einbindung nutzt das gemeinsame Schema `sc
 - **Systemsiegel:** Der Schlüssel entsteht beim ersten Start in `/var/lib/profomat/schluessel/systemsiegel.pem`. Geht er verloren,
   sind bestehende Siegel nicht mehr prüfbar – deshalb sichert `profomat-sicherung.sh` den Ordner mit. `-DbNeu` lässt ihn unberührt.
 
-## Vor dem ersten Lauf entscheiden bzw. eintragen
+## Umstellung SQLite → PostgreSQL (einmalig, 11/2026)
 
-1. `deploy/server/konfiguration.env`: Host, Pfad (`/profomat`), Port (`5082`, Schritt 01 prüft, ob er frei ist).
-2. In `/etc/profomat/profomat.env` (Schritt 01 legt die Datei aus `profomat.env.beispiel` an): optional Mailserver. Sonst nichts.
-
-## Erstinstallation
-
-Voraussetzung: Das VibeVHS-Kit ist eingerichtet (nginx mit `liebler.conf`, Zertifikat, Firewall, Pakete `sqlite3`, `apache2-utils`).
+Bis 11/2026 lag die Datenbank als SQLite-Datei in `/var/lib/profomat/profomat.db`. Übernommen wird sie **einmal** und **prüfbar**:
 
 ```powershell
-.\deploy\server\deploy.ps1 -NurKit                                          # Kit nach /tmp/profomat-kit
-ssh -t srvadmin@liebler.iui.hs-osnabrueck.de "sudo bash /tmp/profomat-kit/schritte/01-einrichten.sh"   # Benutzer, Verzeichnisse, Unit, nginx
-.\deploy\server\deploy.ps1                                                  # testen, bauen, hochladen, einspielen
+.\deploy\server\deploy.ps1 -Schritt einrichten         # Kit-Stand auf dem Server: Unit-Ergänzungen, neue Sicherung, Prüferkonto
+.\deploy\server\deploy.ps1 -Schritt postgresql         # Container profomat-db, Passwort, Verbindung in profomat.env
+.\deploy\server\deploy.ps1 -Pruefen -SqliteUebernehmen # Trockenlauf mit Probe-Übernahme in eine Wegwerf-Datenbank
+.\deploy\server\deploy.ps1 -SqliteUebernehmen          # echte Übernahme und Start
+```
+
+Was dabei passiert (`ProfOMat.Web --sqlite-uebernehmen <datei> [--probe]`, `SqliteUebernahme.cs`):
+
+1. Die Quelle wird nie verändert: Die App zieht eine konsistente Kopie (SQLite-Backup, auch bei WAL) und wertet die **Kopie** mit der
+   bekannten Kette (Schemaversion 7 bis 20) auf den letzten SQLite-Stand auf.
+2. Das Ziel muss leer sein. Es wird vollständig migriert und dann Tabelle für Tabelle per `COPY` befüllt – in **einer** Transaktion.
+   Werte gehen roh über (verschlüsselte Felder bleiben Geheimtext, Zeitpunkte Millisekunden, Passwort-Hashes unverändert).
+3. Vor dem Festschreiben vergleicht sie je Tabelle **Zeilenzahl und SHA-256 über alle Zeilen** aus Quelle und Ziel; weicht etwas ab,
+   wird zurückgerollt. Danach lädt EF jede Entität einmal (Konverter, Pflichtfelder).
+4. Das Kit macht das zweimal: in Schritt 1 als **Probe** (Wegwerf-Datenbank `profomat_uebernahmeprobe`, danach gelöscht, alte Version
+   läuft weiter), in Schritt 4 echt bei angehaltener alter Version. Danach liegt die SQLite-Datei unter
+   `/var/lib/profomat/beiseite/profomat.db.uebernommen-<Zeit>`, der Bericht unter `/var/backups/profomat/uebernahme-<Zeit>.txt`.
+5. Scheitert der Start, setzt der automatische Rückweg die vorige (SQLite-)Version mit ihrer Datei wieder ein; die neue Datenbank
+   bleibt als `profomat_verworfen_<Zeit>` im Container.
+
+Wer die alten Daten nicht braucht: `deploy.ps1 -SqliteIgnorieren` (startet leer, die Datei bleibt liegen).
+
+## Erstinstallation (neuer Server)
+
+Voraussetzung: nginx mit TLS-Server-Block (`NGINX_SITE`), Docker, ASP.NET-Core-Runtime 11 (für `framework`).
+
+```powershell
+.\deploy\server\deploy.ps1 -Schritt einrichten    # Benutzer, Verzeichnisse, Unit, Sicherung, nginx
+.\deploy\server\deploy.ps1 -Schritt postgresql    # Datenbank
+.\deploy\server\deploy.ps1                        # testen, bauen, hochladen, einspielen
 # sofort danach: https://liebler.iui.hs-osnabrueck.de/profomat/anmelden → Ersteinrichtung
 ```
 
 Prüfen: `https://liebler.iui.hs-osnabrueck.de/profomat/anmelden` zeigt die Ersteinrichtung (bzw. danach die Anmeldung);
-persönliche Links der Studierenden (`…/profomat/drittpruefung/<id>/<token>`) sind ohne Anmeldung erreichbar. Auf dem Server:
-`curl http://127.0.0.1:5082/profomat/gesund` → `ok`, Logs `journalctl -u profomat -f` und `/var/log/profomat/`.
+persönliche Links der Studierenden sind ohne Anmeldung erreichbar. Auf dem Server: `curl http://127.0.0.1:5082/profomat/gesund`
+→ `ok`, Logs `journalctl -u profomat -f` und `/var/log/profomat/`.
 
 ## Update
 
 ```powershell
 .\deploy\server\deploy.ps1 -Pruefen          # Trockenlauf: bauen, hochladen, auf dem Server alles prüfen – ändert nichts
 .\deploy\server\deploy.ps1                   # Tests, Build, Upload, Einspielen mit Startbeobachtung
-.\deploy\server\deploy.ps1 -Modus docker     # dasselbe als Container
-.\deploy\server\deploy.ps1 -DbNeu            # nur wenn die Datenbank nicht migrierbar ist (große rote Warnung)
-.\deploy\server\deploy.ps1 -Zurueck          # letzten Lauf zurücknehmen
+.\deploy\server\deploy.ps1 -Modus docker     # dasselbe als Container (Wechsel jederzeit, Daten bleiben im Datenbank-Container)
+.\deploy\server\deploy.ps1 -Zurueck          # letzten Lauf zurücknehmen (Programm, Konfiguration, Datenbank)
+.\deploy\server\deploy.ps1 -Neustart         # nach Änderungen an /etc/profomat/profomat.env
 ```
 
-`deploy.ps1` führt zuerst alle Tests aus (`-OhneTests` nur im Notfall), baut in `deploy/ausgabe` (eigener Artefakt-Ordner; die
-lokal laufende Instanz bleibt unberührt), legt `schemainfo.txt` ins Paket (`ProfOMat.Web --schemainfo`: erwartete Schemaversion und
-älteste aufwertbare Version) und prüft, dass weder Datenbanken noch Schlüssel, `data/` oder `logs/` im Archiv liegen. Übertragen wird
-**nur** die Ausgabe von `dotnet publish`. Auf dem Server arbeitet `schritte/ausrollen.sh` in sechs Abschnitten:
+Ablauf, Prüfungen, Konfigurationsabgleich, Rückweg und Betriebsarten beschreibt [`deploy/server/README.md`](../deploy/server/README.md).
+Neue EF-Migrationen spielt die Anwendung beim Start ein; der Prüflauf zeigt sie vorher als „Migrierbar“, die Sicherung davor setzt
+ein Rückweg wieder ein. Eine Datenbank mit Migrationen, die das Paket nicht kennt (ältere Version), bricht vor jeder Änderung ab.
 
-| Abschnitt | Was passiert | Bei Problemen |
-|---|---|---|
-| 1 Prüfen | System (Ubuntu/Debian, systemd), Programme je Modus (`curl`, `sqlite3`, `nginx` …; bei Docker `docker compose` und das Basisabbild), Uhr, Grundgerüst aus Schritt 01, Paket passt zum Modus (Runtime vorhanden bzw. self-contained), Platz, Port, systemd-Unit, nginx, Datenbank | **Ändert nichts.** Alle Probleme werden gesammelt mit Fundstelle gemeldet, dann Abbruch. `-Pruefen` endet hier. |
-| 2 Sichern | Datenbank und Schlüssel (`vor-update-<Zeit>`), Stand für den Rückweg (`/root/profomat-sicherung/letzter-lauf.env`) | Abbruch ohne Änderung |
-| 3 Ergänzen | Fehlende Einträge in systemd und nginx (siehe unten) | ab hier: automatischer Rückweg |
-| 4 Umschalten | alte Version anhalten, neue an ihre Stelle (`/opt/profomat.vorher` bzw. voriges Abbild bleibt), starten | automatischer Rückweg |
-| 5 Beobachten | rückwärts laufender Balken mit Countdown (`WARTEZEIT`, Standard 120 s, `-Wartezeit`) | **sofortiger** Rückweg, wenn der Dienst stirbt oder neu startet oder im Startlog eine Zeile auf `FEHLER_MUSTER` passt (z. B. „Datenbankschema veraltet“, „Unhandled exception.“, „FTL“); sonst Rückweg bei Ablauf ohne Antwort von `/gesund` |
-| 6 Abschluss | Erfolg erst, wenn `/gesund` antwortet und der Dienst danach 10 s stabil bleibt | – |
-
-**Konfiguration: bestehende Einträge werden nie verändert.** Fehlt in der systemd-Unit ein Eintrag der Vorlage (z. B. eine
-Umgebungsvariable), schreibt das Skript ihn in ein eigenes Drop-in `/etc/systemd/system/profomat.service.d/50-kit.conf`; die Unit
-selbst bleibt, wie sie ist. Steht ein Eintrag **anders** da als erwartet (z. B. `ASPNETCORE_URLS=http://0.0.0.0:5082`), bricht die
-Prüfung mit Datei und Zeile ab. Ausnahme: Härtungs- und Neustart-Schalter (`ProtectSystem`, `RestartSec` …) darf der Betrieb bewusst
-anders setzen, das gibt nur eine Warnung. Bei nginx schreibt das Kit nur seine eigenen Dateien (`snippets/profomat-*.conf`,
-`liebler.d/profomat.conf`, erkannt an der ersten Zeile); eine gleichnamige fremde Datei, ein anderer Block für `/profomat` oder
-`127.0.0.1:5082`, eine schon vorher fehlerhafte Konfiguration (`nginx -t`) oder ein fehlendes `map $http_upgrade` führen zum Abbruch.
-
-**Datenbank und Migration.** Vor jeder Änderung vergleicht das Skript die Schemaversion der Datei mit `schemainfo.txt`:
-
-| Lage | Folge |
-|---|---|
-| gleich | ausrollen |
-| älter, aber ≥ `migrierbar_ab` (Aufwertungen 7 → 18 stehen im Code, `DatenbankInitialisierung`) | ausrollen; die App wertet beim Start auf. Der Rückweg setzt die Sicherung von vor dem Lauf wieder ein. |
-| älter als `migrierbar_ab`, neuer als das Paket oder unlesbar | **Abbruch vor jeder Änderung** mit großer roter Warnung und dem Hinweis auf `-DbNeu` |
-
-**`-DbNeu`** legt die Datei samt `-wal`/`-shm` nach `/var/lib/profomat/beiseite/` (nicht löschen) und lässt die Anwendung eine neue
-anlegen. `deploy.ps1` zeigt vorher in großen roten Buchstaben, dass danach in der Anwendung **alle Daten weg** sind (Ersteinrichtung
-nötig), und verlangt die Eingabe „ja“. Zurück kommen die Daten nur mit `-Zurueck`.
-
-**Rückweg.** Automatisch bei jedem Abbruch ab Abschnitt 3 und bei gescheitertem Start; von Hand mit `deploy.ps1 -Zurueck`
-(bzw. `sudo bash /tmp/profomat-kit/schritte/ausrollen.sh --zurueck`). Er setzt Programm, Konfiguration (aus der Sicherung des
-Laufs) und – nach `-DbNeu` oder einer Migration – die Datenbank auf den Stand vor dem Lauf und startet die vorige Variante. Hat
-seither jemand gearbeitet, warnt er rot und fragt nach; die heutige Datei bleibt unter `beiseite/…verworfen-<Zeit>`.
-
-**Drei Arten (`-Modus`, Standard `MODUS` in `konfiguration.env`):**
-
-| Modus | Paket | Auf dem Server nötig | Läuft als |
-|---|---|---|---|
-| `framework` | nur die App (~20 MB) | ASP.NET-Core-Runtime 11 (VibeVHS-Schritt 09, Updates per Timer) | systemd-Dienst `profomat` |
-| `self-contained` | App mit Runtime (~70 MB, früher `-MitRuntime`) | nichts von .NET | systemd-Dienst `profomat` |
-| `docker` | wie `framework`; das Abbild baut der Server (`docker/Dockerfile`, Basis `mcr.microsoft.com/dotnet/aspnet:11.0`) | Docker mit Compose-Plugin, Zugriff auf mcr.microsoft.com | Container `profomat` (`/opt/profomat-docker/compose.yml`), nur `127.0.0.1:5082`, schreibgeschützt, ohne Capabilities, Logs ins Journal |
-
-ProfOMat nutzt SQLite; die Datei liegt auch im Docker-Modus im Datenordner des Hosts, ein eigener Datenbank-Container entfällt
-(SchoolCraft bringt dafür `postgres:17` mit). Ein Wechsel des Modus ist ein normales Ausrollen: Das Skript hält die alte Variante
-an und startet sie beim Rückweg wieder.
-
-**Getestet:** `deploy/test/simulation.sh` spielt in einem Wegwerf-Container 14 Abläufe durch (Erstinstallation, Absturz, Hänger,
-Absturz in der Stabilitätsprüfung, Migration, Rückweg mit Datenbank, `-DbNeu`, Konflikte in Unit, nginx und Port, verbotene
-Testanmeldung) – systemd und nginx sind dort nachgebildet. Der Docker-Modus ist noch nicht auf einem echten Server gelaufen.
+**Getestet:** `deploy/test/simulation.sh` spielt das Kit in einem Wegwerf-Container mit echtem PostgreSQL durch (56 Prüfungen:
+Einrichtung, Datenbank, SQLite-Übernahme mit Probe, Absturz, Hänger, Migration, Rückweg mit Datenbank, fremder Stand, `-DbNeu`,
+Konflikte in Unit, nginx und Port, verbotene Schalter, Prüfsumme, Sicherung mit Rücksicherungsprobe). Der Docker-Modus ist noch nicht
+auf einem echten Server gelaufen.
 
 ## Sicherung und Rücksicherung
 
-- Täglich 02:00 Uhr (`profomat-sicherung.timer`) und vor jedem Update: `sqlite3 .backup` (konsistent im laufenden Betrieb),
-  Plausibilitätsprüfung über die Tabelle `Schemainfo`, dazu der Schlüsselordner als `…-schluessel.tar.gz` (0600). Aufbewahrung
-  14 Tage (vor Updates 30 Tage).
-- Rücksicherung: `sudo systemctl stop profomat` → Sicherung als `/var/lib/profomat/profomat.db` einsetzen (vorher `-wal`/`-shm`
-  beiseitelegen, Besitzer `profomat`, Rechte 0640), bei Bedarf Schlüssel mit
-  `sudo tar -xzf <…-schluessel.tar.gz> -C /var/lib/profomat` → `sudo systemctl start profomat`.
+- Nachts (`profomat-sicherung.timer`) und vor jedem Update: `pg_dump` aller Datenbanken des Containers, jede **in eine
+  Wegwerf-Datenbank zurückgespielt** (Rücksicherungsprobe), dazu der Schlüsselordner als `…-schluessel.tar.gz`. Aufbewahrung
+  14 Tage (vor Updates 30 Tage). Status: `/var/backups/profomat/letzte-sicherung.txt`.
+- Rücksicherung von Hand: Dienst anhalten, dann
+  `sudo docker exec -i profomat-db pg_restore -U profomat -d profomat --clean --if-exists < /var/backups/profomat/<…>-profomat.dump`,
+  bei Bedarf Schlüssel mit `sudo tar -xzf <…-schluessel.tar.gz> -C /var/lib/profomat`, Dienst starten.
 - Letzten Lauf zurück (Programm, Konfiguration, ggf. Datenbank): `.\deploy\server\deploy.ps1 -Zurueck`.
-- Alles aus (Daten bleiben): `sudo bash /tmp/profomat-kit/schritte/01-zurueck.sh`.
+- Alles aus (Daten bleiben): `.\deploy\server\deploy.ps1 -Schritt einrichten-zurueck`.
 
 ## Betriebsdetails
 
@@ -144,7 +122,7 @@ Testanmeldung) – systemd und nginx sind dort nachgebildet. Der Docker-Modus is
   `ProfOMat__OeffentlicheAdresse` (Links in Mails und PDFs) setzt die Unit aus Host und Pfad.
 - **Schriften:** Die PDFs betten Liberation Sans/Mono ein – auf dem Server müssen keine Schriften installiert sein.
 - **Zeitzone:** gerechnet wird mit `ProfOMat:Zeitzone` (Europe/Berlin), gespeichert in UTC; die Serveruhr muss stimmen
-  (Schritt 01 warnt sonst).
+  (das Kit warnt sonst).
 - **Härtung:** eigener Dienstbenutzer ohne Shell, `ProtectSystem=strict`, Schreibrechte nur auf `/var/lib/profomat` und
   `/var/log/profomat`, `UMask=0027`, Schlüsselordner 0700.
 
@@ -170,7 +148,7 @@ Danach die Datei im Schlüsselordner entfernen und eine Zweitablage im Passworts
 **Pakete:** `deploy.ps1` legt neben `profomat.tar.gz` die Prüfsumme (`.sha256`) und die Stückliste (`profomat-sbom.cdx.json`, auch im
 Paket als `sbom.cdx.json`) ab; das CycloneDX-Werkzeug kommt aus `dotnet-tools.json` (`dotnet tool restore`).
 
-**Prüferkonto:** `sudo bash /tmp/profomat-kit/werkzeuge/pruefer-konto.sh anlegen 14 pruefer.pub` – entfernen mit `… entfernen`.
+**Prüferkonto:** `sudo /usr/local/sbin/profomat-pruefer-konto.sh anlegen 14 pruefer.pub` – entfernen mit `… entfernen`.
 
 **Schalter** (in `/etc/profomat/profomat.env`): `Sicherheit__VerwaltungNetze__0=131.173.0.0/16`, `Betrieb__Metriken__Netze__0=…`,
 `Betrieb__Otlp__Endpunkt=…`, `Betrieb__Logformat=json`, `Betrieb__SecurityTxt__Kontakt=mailto:…`.

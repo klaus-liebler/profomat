@@ -1,0 +1,8 @@
+# Nächtliche Sicherung von Datenbanken und Schlüsseln (Vorlage des Deploy-Kits → /etc/systemd/system/@DIENST@-sicherung.service)
+[Unit]
+Description=@SYSTEM@: Datenbanken und Schlüssel sichern
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/@DIENST@-sicherung.sh nacht

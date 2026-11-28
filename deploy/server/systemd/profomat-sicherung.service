@@ -1,7 +1,0 @@
-# Nächtliche Sicherung von Datenbank und Schlüsseln (Vorlage, Schritt 01 → /etc/systemd/system/@DIENST@-sicherung.service)
-[Unit]
-Description=ProfOMat: Datenbank und Schlüssel sichern
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/sbin/@DIENST@-sicherung.sh nacht
