@@ -5,10 +5,10 @@ using ProfOMat.Infrastructure.Datenbank;
 namespace ProfOMat.Application.Tests;
 
 /// <summary>
-/// Das Deploy-Skript verlässt sich auf <see cref="DatenbankInitialisierung.Schemainfo"/>: Liegt die Version der Datenbank zwischen
-/// „migrierbar_ab“ und „schemaversion“, rollt es ohne -DbNeu aus. Diese Tests halten die Grenzen fest.
+/// Aufwertungskette alter SQLite-Dateien (<see cref="SqliteAltbestand"/>): Die Übernahme nach PostgreSQL bringt eine Kopie der Quelle damit
+/// auf den letzten SQLite-Stand. Diese Tests halten die Grenzen fest.
 /// </summary>
-public sealed class SchemainfoTests : IDisposable
+public sealed class SqliteAltbestandTests : IDisposable
 {
     private readonly string _ordner = Directory.CreateTempSubdirectory("profomat-schema-").FullName;
 
@@ -19,7 +19,8 @@ public sealed class SchemainfoTests : IDisposable
     }
 
     private ServiceProvider Dienste() => new ServiceCollection()
-        .AddDbContext<ProfOMatDbContext>(o => o.UseSqlite($"Data Source={Path.Combine(_ordner, "test.db")}"))
+        .AddDbContext<ProfOMatDbContext>(o => o.UseSqlite($"Data Source={Path.Combine(_ordner, "test.db")}")
+            .ReplaceService<Microsoft.EntityFrameworkCore.Infrastructure.IModelCacheKeyFactory, ModellJeAnbieter>())
         .BuildServiceProvider();
 
     private static async Task VersionSetzenAsync(ServiceProvider dienste, int version)
@@ -30,30 +31,22 @@ public sealed class SchemainfoTests : IDisposable
     }
 
     [Fact]
-    public void Schemainfo_nennt_Version_und_aelteste_aufwertbare_Version()
-    {
-        DatenbankInitialisierung.Schemainfo.ShouldBe(
-            FormattableString.Invariant($"schemaversion={ProfOMatDbContext.Schemaversion}\nmigrierbar_ab={DatenbankInitialisierung.AeltesteAufwertbareVersion}\n"));
-        DatenbankInitialisierung.AeltesteAufwertbareVersion.ShouldBeLessThanOrEqualTo(ProfOMatDbContext.Schemaversion);
-    }
-
-    [Fact]
     public async Task Aktuelle_Datenbank_wird_ohne_Aenderung_angenommen()
     {
         await using var dienste = Dienste();
-        await DatenbankInitialisierung.InitialisierenAsync(dienste, TestContext.Current.CancellationToken);
-        await DatenbankInitialisierung.InitialisierenAsync(dienste, TestContext.Current.CancellationToken);
+        await SqliteAltbestand.InitialisierenAsync(dienste, TestContext.Current.CancellationToken);
+        await SqliteAltbestand.InitialisierenAsync(dienste, TestContext.Current.CancellationToken);
     }
 
     [Fact]
     public async Task Aeltere_Version_als_migrierbar_ab_wird_abgelehnt()
     {
         await using var dienste = Dienste();
-        await DatenbankInitialisierung.InitialisierenAsync(dienste, TestContext.Current.CancellationToken);
-        await VersionSetzenAsync(dienste, DatenbankInitialisierung.AeltesteAufwertbareVersion - 1);
+        await SqliteAltbestand.InitialisierenAsync(dienste, TestContext.Current.CancellationToken);
+        await VersionSetzenAsync(dienste, SqliteAltbestand.AeltesteAufwertbareVersion - 1);
 
         var fehler = await Should.ThrowAsync<InvalidOperationException>(
-            () => DatenbankInitialisierung.InitialisierenAsync(dienste, TestContext.Current.CancellationToken));
+            () => SqliteAltbestand.InitialisierenAsync(dienste, TestContext.Current.CancellationToken));
         fehler.Message.ShouldContain("Datenbankschema veraltet");
     }
 
@@ -61,11 +54,11 @@ public sealed class SchemainfoTests : IDisposable
     public async Task Neuere_Datenbank_als_das_Programm_wird_abgelehnt()
     {
         await using var dienste = Dienste();
-        await DatenbankInitialisierung.InitialisierenAsync(dienste, TestContext.Current.CancellationToken);
+        await SqliteAltbestand.InitialisierenAsync(dienste, TestContext.Current.CancellationToken);
         await VersionSetzenAsync(dienste, ProfOMatDbContext.Schemaversion + 1);
 
         await Should.ThrowAsync<InvalidOperationException>(
-            () => DatenbankInitialisierung.InitialisierenAsync(dienste, TestContext.Current.CancellationToken));
+            () => SqliteAltbestand.InitialisierenAsync(dienste, TestContext.Current.CancellationToken));
     }
 
     /// <summary>
@@ -77,7 +70,7 @@ public sealed class SchemainfoTests : IDisposable
     {
         var abbruch = TestContext.Current.CancellationToken;
         await using var dienste = Dienste();
-        await DatenbankInitialisierung.InitialisierenAsync(dienste, abbruch);
+        await SqliteAltbestand.InitialisierenAsync(dienste, abbruch);
         var hasher = new Microsoft.AspNetCore.Identity.PasswordHasher<ProfOMat.Domain.Konten.Konto>();
         Guid id;
         string hash;
@@ -104,7 +97,7 @@ public sealed class SchemainfoTests : IDisposable
         }
 
         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-        await DatenbankInitialisierung.InitialisierenAsync(dienste, abbruch);
+        await SqliteAltbestand.InitialisierenAsync(dienste, abbruch);
 
         await using (var bereich = dienste.CreateAsyncScope())
         {
@@ -125,6 +118,6 @@ public sealed class SchemainfoTests : IDisposable
             (await db.Set<ProfOMat.Domain.Konten.ExterneAnmeldung>().CountAsync(abbruch)).ShouldBe(1);
         }
 
-        await DatenbankInitialisierung.InitialisierenAsync(dienste, abbruch);   // aktuelle Version: nichts mehr zu tun
+        await SqliteAltbestand.InitialisierenAsync(dienste, abbruch);   // aktuelle Version: nichts mehr zu tun
     }
 }

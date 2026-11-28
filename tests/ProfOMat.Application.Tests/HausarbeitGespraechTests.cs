@@ -243,7 +243,7 @@ public sealed class HausarbeitGespraechTests
     [Fact]
     public async Task Datenbank_von_Version_15_bekommt_die_Gespraechsplanung_ohne_Datenverlust()
     {
-        await using var u = await TestUmgebung.StartenAsync();
+        await using var u = await TestUmgebung.StartenAsync(sqlite: true);
         await u.AlsAsync("mustermann");
         var h = await Mit(u, d => d.AusListeAnlegenAsync(PruefungslisteTests.MehrerePruefungen(), "Vorher", "11B1370-1-VL-MB", null));
         await u.InBereichAsync(async d =>
@@ -259,7 +259,7 @@ public sealed class HausarbeitGespraechTests
             await db.Database.ExecuteSqlRawAsync("UPDATE \"Schemainfo\" SET \"Version\" = 15;");
         });
 
-        await DatenbankInitialisierung.InitialisierenAsync(u.Dienste, TestContext.Current.CancellationToken);
+        await SqliteAltbestand.InitialisierenAsync(u.Dienste, TestContext.Current.CancellationToken);
 
         var geladen = await Mit(u, d => d.LadenAsync(h.Id));
         (geladen.Titel, geladen.GespraechMinuten, geladen.TagBeginnMinuten, geladen.TagEndeMinuten).ShouldBe(("Vorher", 30, 480, 1080));

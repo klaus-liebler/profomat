@@ -22,8 +22,8 @@ public static class Registrierung
         bool hintergrundjobs)
     {
         ArgumentNullException.ThrowIfNull(konfiguration);
-        var verbindung = konfiguration.GetConnectionString("ProfOMat") ?? "Data Source=data/profomat.db";
-        dienste.AddDbContext<ProfOMatDbContext>(o => o.UseSqlite(Pfad(verbindung, inhaltsordner)));
+        var verbindung = Datenbankverbindung(konfiguration.GetConnectionString("ProfOMat"));
+        dienste.AddDbContext<ProfOMatDbContext>(o => o.UseProfOMatPostgres(verbindung.ConnectionString));
         dienste.AddScoped<IDaten, Daten>();
         // Feldverschlüsselung (AES-256-GCM): Schlüssel aus systemd-Credential, Docker Secret oder dem Schlüsselordner
         Feldverschluesselung.Einrichten(Feldverschluesselung.Laden(konfiguration, Path.Combine(inhaltsordner, konfiguration["Speicher:Schluessel"] ?? "data/schluessel")));
@@ -57,16 +57,46 @@ public static class Registrierung
         return dienste;
     }
 
-    private static string Pfad(string verbindung, string inhaltsordner)
+    /// <summary>Verbindung zum lokalen Entwicklungscontainer (deploy/docker-compose.yml); nur in appsettings.Development.json und Tests.</summary>
+    public const string Entwicklungsverbindung = "Host=127.0.0.1;Port=5443;Database=profomat;Username=profomat;Password=entwicklung";
+
+    /// <summary>Prüft die Verbindungszeichenfolge „ConnectionStrings:ProfOMat“ (PostgreSQL) mit verständlicher Meldung.</summary>
+    public static Npgsql.NpgsqlConnectionStringBuilder Datenbankverbindung(string? verbindung)
     {
-        var b = new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder(verbindung);
-        if (b.DataSource is { Length: > 0 } quelle && quelle != ":memory:" && !Path.IsPathRooted(quelle) && !b.DataSource.StartsWith("file:", StringComparison.Ordinal))
+        if (string.IsNullOrWhiteSpace(verbindung))
         {
-            b.DataSource = Path.Combine(inhaltsordner, quelle);
+            throw new InvalidOperationException("ConnectionStrings:ProfOMat fehlt. Entwicklung: docker compose -f deploy/docker-compose.yml up -d "
+                                                + "(appsettings.Development.json kennt die Verbindung); Server: /etc/profomat/profomat.env (Schritt postgresql.sh).");
         }
 
-        return b.ToString();
+        if (verbindung.TrimStart().StartsWith("Data Source=", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("ConnectionStrings:ProfOMat zeigt noch auf eine SQLite-Datei – ProfOMat nutzt seit 11/2026 PostgreSQL. "
+                                                + "Alte Daten einmalig übernehmen: ProfOMat.Web --sqlite-uebernehmen <datei> (docs/deploy.md).");
+        }
+
+        try
+        {
+            return new Npgsql.NpgsqlConnectionStringBuilder(verbindung);
+        }
+        catch (ArgumentException ex)
+        {
+            throw new InvalidOperationException("ConnectionStrings:ProfOMat ist keine gültige PostgreSQL-Verbindung (Host=…;Database=…). "
+                                                + "Bei systemd den ganzen Wert in Anführungszeichen setzen.", ex);
+        }
     }
+
+    /// <summary>PostgreSQL mit den Einstellungen der Anwendung (auch für Werkzeuge und Tests).</summary>
+    public static DbContextOptionsBuilder UseProfOMatPostgres(this DbContextOptionsBuilder o, string verbindung)
+    {
+        ArgumentNullException.ThrowIfNull(o);
+        return o.UseNpgsql(verbindung, n => n.MigrationsHistoryTable("__EFMigrationsHistory"))
+            .ReplaceService<Microsoft.EntityFrameworkCore.Infrastructure.IModelCacheKeyFactory, ModellJeAnbieter>();
+    }
+
+    /// <inheritdoc cref="UseProfOMatPostgres(DbContextOptionsBuilder, string)"/>
+    public static DbContextOptionsBuilder<ProfOMatDbContext> UseProfOMatPostgres(this DbContextOptionsBuilder<ProfOMatDbContext> o, string verbindung)
+        => (DbContextOptionsBuilder<ProfOMatDbContext>)UseProfOMatPostgres((DbContextOptionsBuilder)o, verbindung);
 }
 
 /// <summary>SMTP-Einstellungen (Abschnitt „Mail“). Ohne Host wird nur simuliert (Entwicklung). Passwort nur per Umgebungsvariable.</summary>

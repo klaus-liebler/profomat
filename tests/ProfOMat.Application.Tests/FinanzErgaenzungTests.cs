@@ -219,7 +219,7 @@ public sealed class FinanzErgaenzungTests
     [Fact]
     public async Task Datenbank_von_Version_14_bekommt_Notizen_Prognose_und_Erinnerungen_ohne_Datenverlust()
     {
-        await using var u = await TestUmgebung.StartenAsync();
+        await using var u = await TestUmgebung.StartenAsync(sqlite: true);
         var (team, kst) = await TeamAsync(u);
         await u.InBereichAsync(async d =>
         {
@@ -229,7 +229,7 @@ public sealed class FinanzErgaenzungTests
             await db.Database.ExecuteSqlRawAsync("UPDATE \"Schemainfo\" SET \"Version\" = 14;");
         });
 
-        await DatenbankInitialisierung.InitialisierenAsync(u.Dienste, TestContext.Current.CancellationToken);
+        await SqliteAltbestand.InitialisierenAsync(u.Dienste, TestContext.Current.CancellationToken);
 
         (await Mit(u, d => d.TeamAsync(team))).Team.ErinnerungVorlaufTage.ShouldBe(Laborteam.StandardVorlaufTage);
         var b = (await Mit(u, d => d.BuchungenAsync(team, kst, 2026)))[1];

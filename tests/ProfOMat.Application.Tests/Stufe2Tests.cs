@@ -1,7 +1,6 @@
 using System.Net;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
@@ -82,12 +81,12 @@ public sealed class FeldverschluesselungTests
         });
 
         // roh in der Datenbank: nur Geheimtext
-        var roh = await RohAsync(u, $"SELECT Matrikelnummer || '|' || Endnote || '|' || Abweichungsbegruendung FROM MuendlichePruefungen WHERE Id = '{id.ToString().ToUpperInvariant()}'");
+        var roh = await RohAsync(u, $"SELECT \"Matrikelnummer\" || '|' || \"Endnote\" || '|' || \"Abweichungsbegruendung\" FROM \"MuendlichePruefungen\" WHERE \"Id\" = '{id}'");
         roh.ShouldNotContain("7654321");
         roh.ShouldNotContain("2.7");
         roh.ShouldNotContain("überzeugend");
         roh.Split('|').ShouldAllBe(t => t.StartsWith("enc:v"));
-        (await RohAsync(u, "SELECT Bemerkung FROM GestellteFragen")).ShouldStartWith("enc:v");
+        (await RohAsync(u, "SELECT \"Bemerkung\" FROM \"GestellteFragen\"")).ShouldStartWith("enc:v");
 
         // Fachcode: Klartext
         var gelesen = await u.InBereichAsync(d => d.GetRequiredService<IDaten>().FindenAsync<MuendlichePruefung>(id));
@@ -97,11 +96,11 @@ public sealed class FeldverschluesselungTests
         gelesen.Fragen.Single().Bemerkung.ShouldBe("unsicher bei Integralen");
 
         // Bestand im Klartext (wie vor Version 20) wird beim Start verschlüsselt
-        await RohAsync(u, $"UPDATE MuendlichePruefungen SET Matrikelnummer = '1111111', Endnote = '1.3' WHERE Id = '{id.ToString().ToUpperInvariant()}'", schreiben: true);
+        await RohAsync(u, $"UPDATE \"MuendlichePruefungen\" SET \"Matrikelnummer\" = '1111111', \"Endnote\" = '1.3' WHERE \"Id\" = '{id}'", schreiben: true);
         (await u.InBereichAsync(d => d.GetRequiredService<IDaten>().FindenAsync<MuendlichePruefung>(id)))!.Matrikelnummer.ShouldBe("1111111");
         var anzahl = await u.InBereichAsync(d => DatenbankInitialisierung.BestandVerschluesselnAsync(d.GetRequiredService<ProfOMatDbContext>()));
         anzahl.ShouldBe(2);
-        (await RohAsync(u, $"SELECT Matrikelnummer FROM MuendlichePruefungen WHERE Id = '{id.ToString().ToUpperInvariant()}'")).ShouldStartWith("enc:v");
+        (await RohAsync(u, $"SELECT \"Matrikelnummer\" FROM \"MuendlichePruefungen\" WHERE \"Id\" = '{id}'")).ShouldStartWith("enc:v");
         var danach = await u.InBereichAsync(d => d.GetRequiredService<IDaten>().FindenAsync<MuendlichePruefung>(id));
         danach!.Matrikelnummer.ShouldBe("1111111");
         danach.Endnote.ShouldBe(1.3m);
@@ -142,12 +141,13 @@ public sealed class SicherheitsprotokollTests
         letzte[0].VorgaengerHash.ShouldBe(letzte[1].Hash);
 
         // Die Datenbank verbietet Änderungen und Löschungen
-        await Should.ThrowAsync<SqliteException>(() => FeldverschluesselungTests.RohAsync(u, "UPDATE Sicherheitsprotokoll SET Text = 'x'", schreiben: true));
-        await Should.ThrowAsync<SqliteException>(() => FeldverschluesselungTests.RohAsync(u, "DELETE FROM Sicherheitsprotokoll", schreiben: true));
+        await Should.ThrowAsync<Npgsql.PostgresException>(() => FeldverschluesselungTests.RohAsync(u, "UPDATE \"Sicherheitsprotokoll\" SET \"Text\" = 'x'", schreiben: true));
+        await Should.ThrowAsync<Npgsql.PostgresException>(() => FeldverschluesselungTests.RohAsync(u, "DELETE FROM \"Sicherheitsprotokoll\"", schreiben: true));
+        await Should.ThrowAsync<Npgsql.PostgresException>(() => FeldverschluesselungTests.RohAsync(u, "TRUNCATE \"Sicherheitsprotokoll\"", schreiben: true));
 
         // Wer die Trigger entfernt und ändert, fällt bei der Prüfung auf
-        await FeldverschluesselungTests.RohAsync(u, "DROP TRIGGER Sicherheitsprotokoll_nur_anfuegen_update", schreiben: true);
-        await FeldverschluesselungTests.RohAsync(u, "UPDATE Sicherheitsprotokoll SET Text = 'zwei (geändert)' WHERE Text = 'zwei'", schreiben: true);
+        await FeldverschluesselungTests.RohAsync(u, "DROP TRIGGER \"Sicherheitsprotokoll_nur_anfuegen\" ON \"Sicherheitsprotokoll\"", schreiben: true);
+        await FeldverschluesselungTests.RohAsync(u, "UPDATE \"Sicherheitsprotokoll\" SET \"Text\" = 'zwei (geändert)' WHERE \"Text\" = 'zwei'", schreiben: true);
         var nachher = await p.PruefenAsync(TestContext.Current.CancellationToken);
         nachher.Intakt.ShouldBeFalse();
         nachher.Grund.ShouldBe("Inhalt verändert");

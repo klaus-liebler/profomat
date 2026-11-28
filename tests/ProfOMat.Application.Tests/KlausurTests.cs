@@ -146,7 +146,7 @@ public sealed class KlausurTests
     [Fact]
     public async Task Datenbank_von_Version_8_ersetzt_alte_Klausur_IDs_durch_Schluessel()
     {
-        await using var u = await TestUmgebung.StartenAsync();
+        await using var u = await TestUmgebung.StartenAsync(sqlite: true);
         var id = await AnlegenAsync(u, 3);
         await u.InBereichAsync(async d =>
         {
@@ -160,7 +160,7 @@ public sealed class KlausurTests
             await db.Database.ExecuteSqlRawAsync(sqlVersion);
         });
 
-        await DatenbankInitialisierung.InitialisierenAsync(u.Dienste, TestContext.Current.CancellationToken);
+        await SqliteAltbestand.InitialisierenAsync(u.Dienste, TestContext.Current.CancellationToken);
 
         var a = await u.InBereichAsync(d => d.GetRequiredService<KlausurDienst>().AnsichtAsync(id));
         a.Klausur.Teilnahmen.Select(t => t.Code).Order().ShouldBe(["0000", "0001", "0002"]);

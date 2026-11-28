@@ -209,7 +209,7 @@ public sealed class MuendlichTests
     [Fact]
     public async Task Datenbank_von_Version_7_wird_ohne_Datenverlust_aufgewertet()
     {
-        await using var u = await TestUmgebung.StartenAsync();
+        await using var u = await TestUmgebung.StartenAsync(sqlite: true);
         await u.AlsAsync("liebler");
         var p = await Mit(u, d => d.AnlegenAsync("vor der Aufwertung"));
 
@@ -228,11 +228,11 @@ public sealed class MuendlichTests
             await db.Database.ExecuteSqlRawAsync(sqlVersion);
         });
 
-        await DatenbankInitialisierung.InitialisierenAsync(u.Dienste, TestContext.Current.CancellationToken);
+        await SqliteAltbestand.InitialisierenAsync(u.Dienste, TestContext.Current.CancellationToken);
 
         (await u.InBereichAsync(d => d.GetRequiredService<ProfOMatDbContext>().Set<Schemainfo>().SingleAsync())).Version.ShouldBe(ProfOMatDbContext.Schemaversion);
         var nachher = await Mit(u, d => d.AngabenSpeichernAsync(p.Id, new PruefungsAngaben(null, null, null, null, null, "Dr. Erika Extern", null)));
         (nachher.Bezeichnung, nachher.ErstpruefendeName).ShouldBe(("vor der Aufwertung", "Dr. Erika Extern"));
-        await DatenbankInitialisierung.InitialisierenAsync(u.Dienste, TestContext.Current.CancellationToken);   // zweiter Start: nichts mehr zu tun
+        await SqliteAltbestand.InitialisierenAsync(u.Dienste, TestContext.Current.CancellationToken);   // zweiter Start: nichts mehr zu tun
     }
 }

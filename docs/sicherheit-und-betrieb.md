@@ -16,7 +16,7 @@ Stand: 26.11.2026, abgeglichen mit Code und Konfiguration im Repository (nicht m
 | Webserver (nginx) | TLS 1.2/1.3, Umleitung auf HTTPS, `server_tokens off`; HSTS, CSP und Rate-Limits setzt die Anwendung, nicht nginx. |
 | Anwendung | Rechte im Dienst, EF Core, Antiforgery, strenge CSP; Kestrel nur auf `127.0.0.1:5082`. |
 | Anmeldung | ASP.NET Core Identity: Verfahren je Instanz schaltbar (SAML, OIDC, Passwort + TOTP, Passkey); TOTP Pflicht für Systemverwaltung und Studiendekanat; Sperre nach Fehlversuchen. **SAML an den IdP der Hochschule noch nicht angebunden.** |
-| Daten | SQLite-Datei nur für den Dienstbenutzer lesbar; **Feldverschlüsselung** (AES-256-GCM) für Matrikelnummern und Noten mündlicher Prüfungen; Sicherungen mit `age` verschlüsselbar (auf dem Server noch einzurichten). |
+| Daten | PostgreSQL 17 nur lokal bzw. im Container-Netz, eigenes Passwort je Instanz; **Feldverschlüsselung** (AES-256-GCM) für Matrikelnummern und Noten mündlicher Prüfungen; Sicherungen mit `age` verschlüsselbar (auf dem Server noch einzurichten). |
 | Betrieb | systemd mit Härtung, Sicherung mit Rücksicherungsprobe, automatischer Rückweg; Gesundheitsendpunkte, OpenTelemetry und `/metrics` vorbereitet (Standard aus); Sicherheitsprotokoll und Rolle Revision. |
 
 ## 1. Netz und Erreichbarkeit
@@ -26,7 +26,7 @@ Stand: 26.11.2026, abgeglichen mit Code und Konfiguration im Repository (nicht m
 | Nur intern / VPN | ❌ | Bewusst öffentlich: Studierende unterschreiben ohne Konto über persönliche Links (`deploy/server/nginx/profomat-locations.conf`). Für einen rein internen Betrieb müsste nginx die Verwaltungspfade per `allow`/`deny` auf Hochschulnetz und VPN beschränken; die Studierendenlinks blieben öffentlich. |
 | Host-Firewall | ✅ | ufw auf dem gemeinsamen Server: 80 und 443 offen, SSH nur aus dem VPN (VibeVHS-Kit, Schritt 07). |
 | Kestrel nur lokal | ✅ | `ASPNETCORE_URLS=http://127.0.0.1:5082` in `deploy/server/systemd/profomat.service`. |
-| Datenbank nicht im Netz | ✅ | SQLite-Datei `/var/lib/profomat/profomat.db`, kein Netzwerkdienst. |
+| Datenbank nicht im Netz | ✅ | PostgreSQL 17 im eigenen Container `profomat-db`, nur auf `127.0.0.1` (nativ) bzw. im Container-Netz ohne veröffentlichten Port (Docker); Passwort zufällig je Instanz in `/etc/profomat/postgres.env` (0600). Bis 11/2026 SQLite. |
 
 ## 2. Webserver (nginx)
 
@@ -87,7 +87,7 @@ Grundlage ist ASP.NET Core Identity mit eigenem Speicher über das Kontomodell (
 |---|---|---|
 | Dienst | ✅ | systemd mit `NoNewPrivileges`, `ProtectSystem=strict`, `PrivateTmp` u. a. |
 | Ausrollen | ✅ | `deploy/server/deploy.ps1` + `schritte/ausrollen.sh`: Prüfphase ohne Änderung (Programme, Port, Platz, Unit, nginx, Datenbank), Sicherung, nur ergänzende Konfigurationsänderungen (systemd-Drop-in), Startbeobachtung mit Countdown und sofortigem Rückweg bei Absturz oder Fehler im Log, Rückweg von Hand (`-Zurueck`). Drei Arten: framework, self-contained, docker. Docker-Modus bisher nur in der Simulation geprüft, nicht auf einem echten Server. |
-| Datenbankschema | ⚠️ | `EnsureCreated` mit Schemaversion und handgeschriebenen Aufwertungen ab Version 7; das Deploy-Skript prüft vorher, ob die vorhandene Datenbank migrierbar ist, sonst nur `-DbNeu` mit roter Warnung. **Keine EF-Migrationen.** |
+| Datenbankschema | ✅ | EF-Core-Migrationen; vor jedem Ausrollen meldet die NEUE Version per `--datenbankstand`, was ein Start täte (neu, aktuell, migrierbar, fremd). Alte SQLite-Daten einmalig per `--sqlite-uebernehmen` mit Zeilen- und Prüfsummenvergleich je Tabelle (Trockenlauf `--probe`). |
 | Sicherung | ✅ | Vor jedem Update und täglich 02:00 Uhr (Datenbank und Schlüssel), jedes Mal mit Rücksicherungsprobe (integrity_check, Schema, Tabellen) und Statusdatei. |
 | Patch-Management | ⚠️ | .NET-Runtime per Timer (VibeVHS-Kit), OS über Ubuntu-Updates; NuGet-Prüfung `dotnet list package --vulnerable` nur von Hand. |
 | Logs | ⚠️ | Serilog in `/var/log/profomat` (30 Tage) und journald, auf Wunsch als JSON (`Betrieb:Logformat=json`); Tokens in Pfaden maskiert. OTLP vorbereitet (`Betrieb:Otlp:Endpunkt`). **Keine Anbindung an einen zentralen Log-Server eingerichtet.** |

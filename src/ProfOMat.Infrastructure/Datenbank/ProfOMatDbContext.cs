@@ -15,12 +15,13 @@ using ProfOMat.Infrastructure.Sicherheit;
 namespace ProfOMat.Infrastructure.Datenbank;
 
 /// <summary>
-/// EF Core + SQLite. Entwicklungsphase: Schema per EnsureCreated (wie VibeVHS); vor dem ersten Produktivbetrieb werden
-/// EF-Migrationen eingeführt. Zeitpunkte als UTC-Millisekunden (sortier- und vergleichbar in SQLite), Enums als Text.
+/// EF Core + PostgreSQL 17 (seit 11/2026, vorher SQLite). Schema über EF-Migrationen (Ordner Migrationen; die Migration „Initial“ wird nie
+/// neu erzeugt). Zeitpunkte als UTC-Millisekunden (bigint, wie bisher – so bleibt die Übernahme alter SQLite-Daten verlustfrei), Enums als Text.
+/// Dasselbe Modell dient mit SQLite nur noch als Quelle der einmaligen Übernahme (<see cref="SqliteUebernahme"/>).
 /// </summary>
 public sealed class ProfOMatDbContext(DbContextOptions<ProfOMatDbContext> optionen) : DbContext(optionen)
 {
-    /// <summary>Erhöhen, wenn sich das Modell ändert: eine ältere Datei wird dann beim Start abgelehnt (statt still falsch zu laufen).</summary>
+    /// <summary>Letzte Schemaversion der SQLite-Zeit (Tabelle Schemainfo). Die Übernahme wertet ältere Dateien vorher bis hierhin auf.</summary>
     public const int Schemaversion = 20;
 
     /// <summary>Tabellen, die mit Version 10 dazugekommen sind (Aufwertung 9 → 10 legt nur diese an).</summary>
@@ -56,6 +57,8 @@ public sealed class ProfOMatDbContext(DbContextOptions<ProfOMatDbContext> option
     {
         ArgumentNullException.ThrowIfNull(konventionen);
         konventionen.Properties<DateTimeOffset>().HaveConversion<UtcMillisekunden>();
+        // Ortszeiten ohne Zone (Gesprächstermine) bleiben ohne Zone – wie bisher in SQLite; timestamptz verlangte UTC
+        konventionen.Properties<DateTime>().HaveColumnType("timestamp without time zone");
         konventionen.Properties<Enum>().HaveConversion<string>().HaveMaxLength(40);
     }
 
@@ -618,11 +621,15 @@ public sealed class ProfOMatDbContext(DbContextOptions<ProfOMatDbContext> option
             e.HasKey(p => p.Id);
             e.HasIndex(p => p.Zeitpunkt);
         });
-        m.Entity<Schemainfo>(e =>
+        if (Database.ProviderName == "Microsoft.EntityFrameworkCore.Sqlite")
         {
-            e.ToTable("Schemainfo");
-            e.HasKey(s => s.Id);
-        });
+            // nur in alten SQLite-Dateien (Quelle der Übernahme); PostgreSQL führt den Stand in __EFMigrationsHistory
+            m.Entity<Schemainfo>(e =>
+            {
+                e.ToTable("Schemainfo");
+                e.HasKey(s => s.Id);
+            });
+        }
 
         // Ids vergibt die Anwendung (UUIDv7): neue Einträge in Sammlungen sonst fälschlich als „geändert“ statt „neu“ erkannt.
         foreach (var typ in m.Model.GetEntityTypes())
@@ -640,7 +647,20 @@ public sealed class ProfOMatDbContext(DbContextOptions<ProfOMatDbContext> option
         v => DateTimeOffset.FromUnixTimeMilliseconds(v));
 }
 
-/// <summary>Eine Zeile: Schemaversion der Datei.</summary>
+/// <summary>
+/// Modell je Datenbankanbieter zwischenspeichern: Dieselbe Kontextklasse läuft mit PostgreSQL (Betrieb) und mit SQLite (Quelle der
+/// Übernahme) – ohne diesen Schlüssel bekäme die zweite Verbindung das Modell der ersten.
+/// </summary>
+public sealed class ModellJeAnbieter : Microsoft.EntityFrameworkCore.Infrastructure.IModelCacheKeyFactory
+{
+    public object Create(DbContext context, bool designTime)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        return (context.GetType(), context.Database.ProviderName, designTime);
+    }
+}
+
+/// <summary>Eine Zeile: Schemaversion der Datei (nur SQLite).</summary>
 public sealed class Schemainfo
 {
     public int Id { get; set; } = 1;

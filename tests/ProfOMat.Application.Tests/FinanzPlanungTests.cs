@@ -280,7 +280,7 @@ public sealed class FinanzPlanungTests
     [Fact]
     public async Task Datenbank_von_Version_13_bekommt_die_Planungstabellen_ohne_Datenverlust()
     {
-        await using var u = await TestUmgebung.StartenAsync();
+        await using var u = await TestUmgebung.StartenAsync(sqlite: true);
         var a = await AufbauAsync(u);
         await u.InBereichAsync(async d =>
         {
@@ -292,7 +292,7 @@ public sealed class FinanzPlanungTests
             await db.Database.ExecuteSqlRawAsync("UPDATE \"Schemainfo\" SET \"Version\" = 13;");
         });
 
-        await DatenbankInitialisierung.InitialisierenAsync(u.Dienste, TestContext.Current.CancellationToken);
+        await SqliteAltbestand.InitialisierenAsync(u.Dienste, TestContext.Current.CancellationToken);
 
         (await ZahlenAsync(u, a.Team, a.Kst.Id)).Frei.ShouldBe(7851.44m);
         await Mit(u, d => d.AusgabeAnlegenAsync(a.Team, "nach der Aufwertung", D(2026, 12), [new Anteil(a.Kst.Id, 1m)]));

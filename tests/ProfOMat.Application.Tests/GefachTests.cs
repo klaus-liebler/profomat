@@ -364,7 +364,7 @@ public sealed class GefachTests
     [Fact]
     public async Task Datenbank_von_Version_10_bekommt_die_Tabelle_der_Gefache_ohne_Datenverlust()
     {
-        await using var u = await TestUmgebung.StartenAsync();
+        await using var u = await TestUmgebung.StartenAsync(sqlite: true);
         var konten = await u.InBereichAsync(async d =>
         {
             var db = d.GetRequiredService<ProfOMatDbContext>();
@@ -373,7 +373,7 @@ public sealed class GefachTests
             return await db.Set<ProfOMat.Domain.Konten.Konto>().CountAsync();
         });
 
-        await DatenbankInitialisierung.InitialisierenAsync(u.Dienste, TestContext.Current.CancellationToken);
+        await SqliteAltbestand.InitialisierenAsync(u.Dienste, TestContext.Current.CancellationToken);
 
         await u.AlsAsync("liebler");
         await Mit(u, d => d.AnlegenAsync("Nach der Aufwertung"));
@@ -385,7 +385,7 @@ public sealed class GefachTests
     [Fact]
     public async Task Datenbank_von_Version_11_bekommt_die_Spalte_Oeffentlich_ohne_Datenverlust()
     {
-        await using var u = await TestUmgebung.StartenAsync();
+        await using var u = await TestUmgebung.StartenAsync(sqlite: true);
         await u.AlsAsync("liebler");
         var g = await Mit(u, d => d.AnlegenAsync("Vorher angelegt", Euro with { HoeheMm = 150 }));
         await u.InBereichAsync(async d =>
@@ -395,7 +395,7 @@ public sealed class GefachTests
             await db.Database.ExecuteSqlRawAsync("UPDATE \"Schemainfo\" SET \"Version\" = 11;");
         });
 
-        await DatenbankInitialisierung.InitialisierenAsync(u.Dienste, TestContext.Current.CancellationToken);
+        await SqliteAltbestand.InitialisierenAsync(u.Dienste, TestContext.Current.CancellationToken);
 
         var geladen = await Mit(u, d => d.LadenAsync(g.Id));
         (geladen.HoeheMm, geladen.Oeffentlich).ShouldBe((150m, false));

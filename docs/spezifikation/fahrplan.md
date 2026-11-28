@@ -18,7 +18,7 @@
 | 3 | Anmeldung über das Hochschulsystem (SAML/Shibboleth), Vorausfüllen für Studierende | nach Klärung mit dem IT-Service |
 | 4 | Echte Katalogquelle (Webservice oder Exportdatei), PAdES-Siegel des Abschluss-PDFs, X.509-Zertifikate für Schlüssel | offen |
 | B | Server liebler.iui.hs-osnabrueck.de/profomat: Deploy-Kit (`deploy/`), Pfad-Basis, Sicherung inkl. Siegelschlüssel; Anmeldung wie Podium (Ersteinrichtung, Einladungs-/Passwort-Links, ohne nginx-Passwort), Captcha für das öffentliche Formular | fertig (23.11.2026) |
-| – | Vor dem Produktivbetrieb: EF-Migrationen statt EnsureCreated, SSO, echter Mailversand, echte Katalogquelle | offen |
+| – | Vor dem Produktivbetrieb: ~~EF-Migrationen statt EnsureCreated~~ (11/2026 mit PostgreSQL erledigt), SSO, echter Mailversand, echte Katalogquelle | offen |
 
 ## Offene Abklärungen
 

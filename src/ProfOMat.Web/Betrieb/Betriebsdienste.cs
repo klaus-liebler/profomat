@@ -80,13 +80,20 @@ internal static class Betriebsdienste
             : OpenTelemetry.Exporter.OtlpExportProtocol.Grpc;
     }
 
-    /// <summary>Ordner der SQLite-Datei (für die Platzprüfung); bei In-Memory-Verbindungen der Inhaltsordner.</summary>
+    /// <summary>
+    /// Ordner der Anwendungsdaten auf diesem Rechner (für die Platzprüfung): „Speicher:Daten“, sonst der Ordner über dem Schlüsselordner.
+    /// Die Datenbank selbst liegt seit 11/2026 in PostgreSQL; hier liegen Schlüssel, Logs, Sicherungen der Anwendung.
+    /// </summary>
     public static string DatenOrdner(IConfiguration k, string inhaltsordner)
     {
-        var quelle = new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder(k.GetConnectionString("ProfOMat") ?? "Data Source=data/profomat.db").DataSource;
-        return string.IsNullOrEmpty(quelle) || quelle == ":memory:" || quelle.StartsWith("file:", StringComparison.Ordinal)
-            ? inhaltsordner
-            : Path.GetDirectoryName(Path.GetFullPath(Path.Combine(inhaltsordner, quelle))) ?? inhaltsordner;
+        ArgumentNullException.ThrowIfNull(k);
+        if (k["Speicher:Daten"] is { Length: > 0 } daten)
+        {
+            return Path.GetFullPath(Path.Combine(inhaltsordner, daten));
+        }
+
+        var schluessel = Path.GetFullPath(Path.Combine(inhaltsordner, k["Speicher:Schluessel"] ?? "data/schluessel"));
+        return Path.GetDirectoryName(schluessel) ?? inhaltsordner;
     }
 
     public static IReadOnlyList<IPNetwork> MonitoringNetze(IConfiguration k) => Netze(k.GetSection($"{Abschnitt}:Metriken:Netze").Get<string[]>());

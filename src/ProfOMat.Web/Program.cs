@@ -18,14 +18,6 @@ var deutsch = CultureInfo.GetCultureInfo("de-DE");
 CultureInfo.DefaultThreadCurrentCulture = deutsch;
 CultureInfo.DefaultThreadCurrentUICulture = deutsch;
 
-// Für das Deploy-Skript: Schemastand dieses Programms ausgeben, ohne die Anwendung zu starten (keine Datenbank, keine Logs).
-// deploy.ps1 legt die Ausgabe als schemainfo.txt ins Paket; ausrollen.sh vergleicht sie vor jeder Änderung mit der Datenbank.
-if (args is ["--schemainfo"])
-{
-    Console.Write(DatenbankInitialisierung.Schemainfo);
-    return;
-}
-
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddSerilog((dienste, log) => log
@@ -89,6 +81,47 @@ if (hinterProxy)
 }
 
 var app = builder.Build();
+
+if (args.Contains("--datenbankstand"))
+{
+    // Vorabprüfung beim Ausrollen (Deploy-Kit): Was würde DIESE Version mit der Datenbank tun? Liest nur.
+    // Je Datenbank eine Zeile „DATENBANKSTAND|rolle|datenbank|zustand|eingespielt|offen|hinweis“, Exitcode siehe Datenbankstand.Exitcode.
+    var zustaende = await Datenbankstand.PruefenAsync(app.Services);
+    foreach (var z in zustaende)
+    {
+        Console.WriteLine(z.Zeile);
+    }
+
+    Environment.ExitCode = Datenbankstand.Exitcode(zustaende);
+    return;
+}
+
+if (Array.IndexOf(args, "--sqlite-uebernehmen") is var stelle and >= 0)
+{
+    // Einmalige Übernahme der alten SQLite-Datenbank (bis 11/2026) nach PostgreSQL, mit Vergleich je Tabelle; --probe = Trockenlauf
+    // in eine Wegwerf-Datenbank. Ausgabe: je Tabelle „UEBERNAHME|tabelle|quelle|ziel|gleich“, zuletzt „UEBERNAHME_ERGEBNIS|ok|…“.
+    if (stelle + 1 >= args.Length || args[stelle + 1].StartsWith("--", StringComparison.Ordinal))
+    {
+        Console.Error.WriteLine("Aufruf: ProfOMat.Web --sqlite-uebernehmen <datei.db> [--probe]");
+        Environment.ExitCode = 2;
+        return;
+    }
+
+    try
+    {
+        var bericht = await SqliteUebernahme.UebernehmenAsync(args[stelle + 1], app.Services, args.Contains("--probe"), Console.WriteLine);
+        Console.WriteLine(FormattableString.Invariant(
+            $"UEBERNAHME_ERGEBNIS|{(bericht.Erfolgreich ? "ok" : "fehler")}|{bericht.Tabellen.Count} Tabellen|{bericht.Zeilen} Zeilen|{bericht.Entitaeten} Datensätze per EF gelesen|{(bericht.Probe ? "Probe" : "übernommen")}"));
+        Environment.ExitCode = bericht.Erfolgreich ? 0 : 1;
+    }
+    catch (Exception ex) when (ex is InvalidOperationException or Npgsql.NpgsqlException or Microsoft.Data.Sqlite.SqliteException or NotSupportedException)
+    {
+        Console.WriteLine("UEBERNAHME_ERGEBNIS|fehler|" + ex.Message.ReplaceLineEndings(" "));
+        Environment.ExitCode = 1;
+    }
+
+    return;
+}
 
 await DatenbankInitialisierung.InitialisierenAsync(app.Services);
 await Sicherheitsereignisse.KonfigurationPruefenAsync(app.Services, app.Configuration);

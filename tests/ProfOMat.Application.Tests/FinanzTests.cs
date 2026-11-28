@@ -307,7 +307,7 @@ public sealed class FinanzTests
     [Fact]
     public async Task Datenbank_von_Version_12_bekommt_die_Finanztabellen_ohne_Datenverlust()
     {
-        await using var u = await TestUmgebung.StartenAsync();
+        await using var u = await TestUmgebung.StartenAsync(sqlite: true);
         var konten = await u.InBereichAsync(async d =>
         {
             var db = d.GetRequiredService<ProfOMatDbContext>();
@@ -322,7 +322,7 @@ public sealed class FinanzTests
             return await db.Set<ProfOMat.Domain.Konten.Konto>().CountAsync();
         });
 
-        await DatenbankInitialisierung.InitialisierenAsync(u.Dienste, TestContext.Current.CancellationToken);
+        await SqliteAltbestand.InitialisierenAsync(u.Dienste, TestContext.Current.CancellationToken);
 
         var team = await TeamAsync(u);
         await Mit(u, d => d.ImportUebernehmenAsync(team, "a.xls", Auszug(Jahr2026())));

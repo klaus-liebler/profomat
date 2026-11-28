@@ -10,7 +10,7 @@ nachziehen; FA-/NFA-Nummern nie neu vergeben.
 
 ## Stack
 
-.NET 11, Blazor Server + Radzen, EF Core + SQLite, Serilog, Quartz.NET, PDFsharp/MigraDoc, QRCoder. Tests: xUnit v3, Shouldly.
+.NET 11, Blazor Server + Radzen, EF Core + PostgreSQL 17 (Npgsql), Serilog, Quartz.NET, PDFsharp/MigraDoc, QRCoder. Tests: xUnit v3, Shouldly.
 Nicht verwenden: QuestPDF, MediatR, AutoMapper, FluentAssertions. Neue Pakete nur nach Rückfrage (z. B. SAML-Bibliothek, ClosedXML für Iteration 2).
 
 ## Befehle
@@ -28,6 +28,8 @@ Klaus' laufende Instanz nie beenden.
 - Private Schlüssel und deren Passwörter dürfen den Browser nie verlassen (nur `signatur.js` liest sie; kein `@bind` auf Passwortfelder).
 - Geheimnisse (Passwörter, Siegelschlüssel, Zertifikate) nie ins Repository. Personendaten nicht in Logs (Pseudonyme, Antragsnummern).
 - CSP ohne `unsafe-inline` für Skripte: kein Inline-JavaScript.
-- Datenbank: EnsureCreated + `Schemaversion` (bei Modelländerung erhöhen); vor dem Produktivbetrieb EF-Migrationen einführen.
+- Datenbank: PostgreSQL 17 (Entwicklung/Tests: `docker compose -f deploy/docker-compose.yml up -d`, Port 5443). Modelländerung =
+  neue EF-Migration (`Datenbank/Migrationen`), „Initial“ nie neu erzeugen. SQLite nur noch als Quelle der einmaligen Übernahme
+  (`--sqlite-uebernehmen`, `SqliteAltbestand`); rohes SQL mit Bezeichnern in Anführungszeichen.
 - Build ohne Warnungen, alle Tests grün; neue Funktionen mit Tests (Rechte, Grenzfälle) und bei Oberfläche Browserprüfung (auch 390 px).
 - Committen und pushen nur auf Aufforderung; vor dem Push Aktuelles von GitHub holen und mergen.

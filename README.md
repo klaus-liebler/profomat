@@ -24,7 +24,7 @@ für den Lasercutter). Aufbau und Leitlinien folgen
 | Webserver (nginx) | TLS 1.2/1.3, Umleitung auf HTTPS, `server_tokens off`; HSTS, CSP und Rate-Limits setzt die Anwendung, nicht nginx. |
 | Anwendung | Rechte im Dienst, EF Core, Antiforgery, strenge CSP; Kestrel nur auf `127.0.0.1:5082`. |
 | Anmeldung | ASP.NET Core Identity: Verfahren je Instanz schaltbar (SAML, OIDC, Passwort + TOTP, Passkey); TOTP Pflicht für Systemverwaltung und Studiendekanat; Sperre nach Fehlversuchen. **SAML an den IdP der Hochschule noch nicht angebunden.** |
-| Daten | SQLite-Datei nur für den Dienstbenutzer lesbar; **Feldverschlüsselung** (AES-256-GCM) für Matrikelnummern und Noten mündlicher Prüfungen; Sicherungen mit `age` verschlüsselbar (auf dem Server noch einzurichten). |
+| Daten | PostgreSQL 17 nur lokal bzw. im Container-Netz, eigenes Passwort je Instanz; **Feldverschlüsselung** (AES-256-GCM) für Matrikelnummern und Noten mündlicher Prüfungen; Sicherungen mit `age` verschlüsselbar (auf dem Server noch einzurichten). |
 | Betrieb | systemd mit Härtung, Sicherung mit Rücksicherungsprobe, automatischer Rückweg; Gesundheitsendpunkte, OpenTelemetry und `/metrics` vorbereitet (Standard aus); Sicherheitsprotokoll und Rolle Revision. |
 
 Ausführlich mit Fundstellen im Code und offenen Punkten: [sicherheit-und-betrieb.md](docs/sicherheit-und-betrieb.md).
@@ -32,11 +32,14 @@ Ausführlich mit Fundstellen im Code und offenen Punkten: [sicherheit-und-betrie
 ## Starten
 
 ```powershell
+docker compose -f deploy/docker-compose.yml up -d     # PostgreSQL 17 auf 127.0.0.1:5443 (einmalig; auch für die Tests)
 dotnet run --project src\ProfOMat.Web --launch-profile http
 ```
 
-<http://localhost:5310> öffnen. In der Entwicklung entstehen Demodaten (`src/ProfOMat.Web/data/profomat.db`; zum Zurücksetzen den
-Ordner `data` löschen; nach Modelländerungen meldet der Start „Datenbankschema veraltet“, dann ebenso). Mails werden nur simuliert und stehen unter **Verwaltung → Postausgang**, dort ist auch der Bestätigungslink
+<http://localhost:5310> öffnen. In der Entwicklung entstehen Demodaten in der Datenbank `profomat` des Containers (zum Zurücksetzen:
+`docker compose -f deploy/docker-compose.yml exec db dropdb -U profomat --force profomat`). Modelländerungen brauchen eine
+EF-Migration: `dotnet ef migrations add <Name> -p src/ProfOMat.Infrastructure -s src/ProfOMat.Infrastructure -o Datenbank/Migrationen`;
+die Migration „Initial“ wird nie neu erzeugt. Mails werden nur simuliert und stehen unter **Verwaltung → Postausgang**, dort ist auch der Bestätigungslink
 für Studierende zu finden.
 
 Testkonten (Testanmeldung ohne Passwort; Mailadressen `…@demo.invalid`, außer Liebler und Niemeyer alle Personen erfunden):
@@ -120,4 +123,4 @@ Feldverschluesselung__Schluesseldatei=            # sonst $CREDENTIALS_DIRECTORY
 ```
 
 Testsystem auf dem Hochschulserver: `.\deploy\server\deploy.ps1` (Tests, Linux-Build, Upload, Einspielen mit Sicherung und
-Rückweg; `-DbNeu` nach geänderter Schemaversion). Einrichtung und Sicherheitsstand: [docs/deploy.md](docs/deploy.md).
+Rückweg; einmalig `-SqliteUebernehmen` für die alten SQLite-Daten). Einrichtung und Sicherheitsstand: [docs/deploy.md](docs/deploy.md).

@@ -10,22 +10,22 @@
 | Webserver (nginx) | TLS 1.2/1.3, Umleitung auf HTTPS, `server_tokens off`; HSTS, CSP und Rate-Limits setzt die Anwendung, nicht nginx. |
 | Anwendung | Rechte im Dienst, EF Core, Antiforgery, strenge CSP; Kestrel nur auf `127.0.0.1:5082`. |
 | Anmeldung | ASP.NET Core Identity: je Instanz schaltbar SAML (Shibboleth), OIDC, Passwort + TOTP (Pflicht für Systemverwaltung und Studiendekanat), Passkeys; Sperre nach Fehlversuchen, Sicherheitsstempel. Anbindung an den IdP der Hochschule noch offen. |
-| Daten | SQLite-Datei nur für den Dienstbenutzer lesbar; **Feldverschlüsselung** (AES-256-GCM) für Matrikelnummern und Noten mündlicher Prüfungen; Sicherungen mit `age` verschlüsselbar (auf dem Server noch einzurichten). |
+| Daten | PostgreSQL 17 nur lokal bzw. im Container-Netz, eigenes Passwort je Instanz; **Feldverschlüsselung** (AES-256-GCM) für Matrikelnummern und Noten mündlicher Prüfungen; Sicherungen mit `age` verschlüsselbar (auf dem Server noch einzurichten). |
 | Betrieb | systemd mit Härtung, Sicherung mit Rücksicherungsprobe, automatischer Rückweg; Gesundheitsendpunkte, OpenTelemetry und `/metrics` vorbereitet (Standard aus); Sicherheitsprotokoll und Rolle Revision. |
 
 Ausführlich: [sicherheit-und-betrieb.md](../sicherheit-und-betrieb.md).
 
 ## Aufbau (wie VibeVHS)
 
-.NET 11, Blazor Server (SSR + InteractiveServer) mit Radzen, EF Core + SQLite, Serilog, Quartz.NET, PDFsharp/MigraDoc, QRCoder.
+.NET 11, Blazor Server (SSR + InteractiveServer) mit Radzen, EF Core + PostgreSQL 17 (Npgsql), Serilog, Quartz.NET, PDFsharp/MigraDoc, QRCoder.
 
 ```
 src/ProfOMat.Domain          Fachmodell: Konto, Katalog (Fakultät, Studiengang, Prüfung), Antrag + Signatur, Postausgang/Dokument/Protokoll
 src/ProfOMat.Application     Dienste (KontoDienst, SicherheitDienst, KatalogDienst, DrittpruefungDienst), Anmelderegeln, Ports, Rechte, Signaturtext und -prüfung
-src/ProfOMat.Infrastructure  EF Core (EnsureCreated + Schemaversion), Identity-Speicher über Konto, Systemsiegel, PDF, SMTP, Quartz-Jobs
+src/ProfOMat.Infrastructure  EF Core + PostgreSQL (EF-Migrationen, Datenbankstand fürs Ausrollen, einmalige SQLite-Übernahme), Identity-Speicher über Konto, Systemsiegel, PDF, SMTP, Quartz-Jobs
 src/ProfOMat.Adapters.Mocks  Mock-Hochschulsystem (Katalog), Demodaten
 src/ProfOMat.Web             Seiten, Anmeldung (Identity-Cookies, SAML, OIDC, Passkeys), signatur.js (WebCrypto), passkey.js
-tests/…                      Domain, Application (SQLite in-memory, echtes Siegel/PDF), Signatur (Node), Browser (Headless-Edge über CDP)
+tests/…                      Domain, Application (PostgreSQL-Wegwerfdatenbank je Test aus migrierter Vorlage, echtes Siegel/PDF), Signatur (Node), Browser (Headless-Edge über CDP)
 ```
 
 Interaktive Seiten arbeiten nur über `Vorgang` (eigener DbContext je Aktion). Ids sind UUIDv7, Zeitpunkte werden als UTC-Millisekunden gespeichert.

@@ -2,6 +2,7 @@ using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Time.Testing;
@@ -24,35 +25,54 @@ internal sealed class TestBenutzer : IAktuellerBenutzer
     public ValueTask<Benutzer> ErmittelnAsync(CancellationToken abbruch = default) => ValueTask.FromResult(Aktuell);
 }
 
-/// <summary>Vollständige Anwendung mit SQLite in-memory (Schema wie im Betrieb), Demodaten, fester Uhr.</summary>
+/// <summary>
+/// Vollständige Anwendung mit eigener PostgreSQL-Wegwerfdatenbank (Kopie der migrierten Vorlage, deploy/docker-compose.yml), Demodaten,
+/// fester Uhr. Mit <c>sqlite: true</c> stattdessen eine alte SQLite-Datei in-memory (für die Aufwertungskette der Übernahme).
+/// </summary>
 internal sealed class TestUmgebung : IAsyncDisposable
 {
-    private readonly SqliteConnection verbindung;
+    private readonly SqliteConnection? sqlite;
+    private readonly string? postgres;
     private readonly string ordner;
 
-    private TestUmgebung(ServiceProvider dienste, SqliteConnection verbindung, string ordner)
+    private TestUmgebung(ServiceProvider dienste, SqliteConnection? sqlite, string? postgres, string ordner)
     {
         Dienste = dienste;
-        this.verbindung = verbindung;
+        this.sqlite = sqlite;
+        this.postgres = postgres;
         this.ordner = ordner;
     }
 
     public ServiceProvider Dienste { get; }
 
+    /// <summary>Nur mit <c>sqlite: true</c>: die offene In-Memory-Datenbank (z. B. zum Sichern in eine Datei).</summary>
+    public SqliteConnection? Sqlite => sqlite;
+
     public FakeTimeProvider Uhr => (FakeTimeProvider)Dienste.GetRequiredService<TimeProvider>();
 
     public TestBenutzer Benutzer => (TestBenutzer)Dienste.GetRequiredService<IAktuellerBenutzer>();
 
-    public static async Task<TestUmgebung> StartenAsync(IDictionary<string, string?>? einstellungen = null, bool demodaten = true)
+    public static async Task<TestUmgebung> StartenAsync(IDictionary<string, string?>? einstellungen = null, bool demodaten = true, bool sqlite = false)
     {
         var ordner = Path.Combine(Path.GetTempPath(), "profomat-tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(ordner);
-        var verbindungstext = $"Data Source=file:profomat-{Guid.NewGuid():N}?mode=memory&cache=shared";
-        var verbindung = new SqliteConnection(verbindungstext);   // hält die In-Memory-Datenbank am Leben
-        await verbindung.OpenAsync();
+        SqliteConnection? sqliteVerbindung = null;
+        string? postgres = null;
+        string verbindungstext;
+        if (sqlite)
+        {
+            verbindungstext = $"Data Source=file:profomat-{Guid.NewGuid():N}?mode=memory&cache=shared";
+            sqliteVerbindung = new SqliteConnection(verbindungstext);   // hält die In-Memory-Datenbank am Leben
+            await sqliteVerbindung.OpenAsync();
+        }
+        else
+        {
+            verbindungstext = postgres = await Wegwerfdatenbanken.NeuAsync();
+        }
+
         var werte = new Dictionary<string, string?>
         {
-            ["ConnectionStrings:ProfOMat"] = verbindungstext,
+            ["ConnectionStrings:ProfOMat"] = sqlite ? Wegwerfdatenbanken.Mit("unbenutzt") : verbindungstext,
             ["Speicher:Schluessel"] = Path.Combine(ordner, "schluessel"),
             ["ProfOMat:OeffentlicheAdresse"] = "https://profomat.test/",
             ["ProfOMat:SekretariatEmail"] = "sekretariat@hs.test",
@@ -70,15 +90,36 @@ internal sealed class TestUmgebung : IAsyncDisposable
         dienste.AddSingleton<TimeProvider>(new FakeTimeProvider(new DateTimeOffset(2026, 11, 20, 9, 0, 0, TimeSpan.Zero)));
         dienste.AddSingleton<TestBenutzer>();
         dienste.AddSingleton<IAktuellerBenutzer>(d => d.GetRequiredService<TestBenutzer>());
+        if (sqlite)
+        {
+            // PostgreSQL-Registrierung durch SQLite ersetzen (alle Bausteine des Kontexts, sonst sammeln sich die Konfigurationen)
+            foreach (var d in dienste.Where(d => d.ServiceType == typeof(ProfOMatDbContext)
+                                                 || (d.ServiceType.IsGenericType && d.ServiceType.GetGenericArguments().Contains(typeof(ProfOMatDbContext)))).ToList())
+            {
+                dienste.Remove(d);
+            }
+
+            dienste.AddDbContext<ProfOMatDbContext>(o => o.UseSqlite(verbindungstext)
+                .ReplaceService<Microsoft.EntityFrameworkCore.Infrastructure.IModelCacheKeyFactory, ModellJeAnbieter>());
+        }
+
         var anbieter = dienste.BuildServiceProvider();
-        await DatenbankInitialisierung.InitialisierenAsync(anbieter);
+        if (sqlite)
+        {
+            await SqliteAltbestand.InitialisierenAsync(anbieter);
+        }
+        else
+        {
+            await DatenbankInitialisierung.InitialisierenAsync(anbieter);
+        }
+
         if (demodaten)
         {
             await using var b = anbieter.CreateAsyncScope();
             await b.ServiceProvider.GetRequiredService<Demodaten>().AnlegenAsync();
         }
 
-        return new TestUmgebung(anbieter, verbindung, ordner);
+        return new TestUmgebung(anbieter, sqliteVerbindung, postgres, ordner);
     }
 
     /// <summary>Führt Arbeit in einem frischen Bereich (eigener DbContext) aus – wie eine Anfrage.</summary>
@@ -105,7 +146,16 @@ internal sealed class TestUmgebung : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         await Dienste.DisposeAsync();
-        await verbindung.DisposeAsync();
+        if (sqlite is not null)
+        {
+            await sqlite.DisposeAsync();
+        }
+
+        if (postgres is not null)
+        {
+            await Wegwerfdatenbanken.LoeschenAsync(postgres);
+        }
+
         try
         {
             Directory.Delete(ordner, recursive: true);

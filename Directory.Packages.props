@@ -5,6 +5,9 @@
   <!-- Zentrale Paketversionen, gleiche Auswahl wie VibeVHS. Nicht verwenden: QuestPDF, MediatR, AutoMapper, FluentAssertions.
        Neue Pakete nur nach Rückfrage (ClosedXML freigegeben 11/2026; SAML und OIDC für die Anmeldung freigegeben 11/2026). -->
   <ItemGroup>
+    <!-- Datenbank: PostgreSQL 17 (Npgsql) seit 11/2026; SQLite nur noch für die einmalige Übernahme alter Datenbanken (Aufruf mit sqlite-uebernehmen) -->
+    <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="11.0.0" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="11.0.0" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="11.0.0" />
     <PackageVersion Include="Microsoft.Extensions.TimeProvider.Testing" Version="11.0.0" />
     <PackageVersion Include="Radzen.Blazor" Version="13.1.0" />

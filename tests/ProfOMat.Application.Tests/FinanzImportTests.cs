@@ -157,7 +157,7 @@ public sealed class FinanzImportTests
     [Fact]
     public async Task Datenbank_von_Version_16_bekommt_die_Antragsfelder_ohne_Datenverlust()
     {
-        await using var u = await TestUmgebung.StartenAsync();
+        await using var u = await TestUmgebung.StartenAsync(sqlite: true);
         await u.AlsAsync("liebler");
         var team = (await Mit(u, d => d.TeamAnlegenAsync("Labor"))).Id;
         var topf = await Mit(u, d => d.InvestitionAnlegenAsync(team, "AUT-07-26", "Vorher", 3200m));
@@ -170,7 +170,7 @@ public sealed class FinanzImportTests
             return true;
         });
 
-        await ProfOMat.Infrastructure.Datenbank.DatenbankInitialisierung.InitialisierenAsync(u.Dienste, TestContext.Current.CancellationToken);
+        await ProfOMat.Infrastructure.Datenbank.SqliteAltbestand.InitialisierenAsync(u.Dienste, TestContext.Current.CancellationToken);
 
         (await Mit(u, d => d.TopfAsync(team, topf.Id))).Bezeichnung.ShouldBe("Vorher");
         (await Mit(u, d => d.AntraegeUebernehmenAsync(team, Antraege, []))).ShouldBe(1);

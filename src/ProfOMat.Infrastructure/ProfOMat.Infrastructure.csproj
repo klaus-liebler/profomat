@@ -2,6 +2,9 @@
 
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" PrivateAssets="all" />
+    <!-- nur für die einmalige Übernahme alter SQLite-Datenbanken (Datenbank/SqliteUebernahme.cs) -->
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
     <PackageReference Include="Quartz.Extensions.Hosting" />
     <PackageReference Include="PDFsharp-MigraDoc" />
